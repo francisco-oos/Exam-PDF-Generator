@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+salidas/*
+!salidas/.gitkeep
+.env
+datos/**
+!datos/entradas/
+!datos/salidas/
+!datos/entradas/.gitkeep
+!datos/salidas/.gitkeep

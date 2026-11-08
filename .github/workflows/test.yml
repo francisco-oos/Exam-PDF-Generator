@@ -1,0 +1,61 @@
+name: Pruebas de Windows y Linux
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validar:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.11', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Instalar dependencias
+        run: python -m pip install -r requirements-dev.txt
+      - name: Ejecutar pruebas
+        run: python -m pytest -q
+      - name: Preparar plantilla de ejemplo
+        run: python crear_ejemplo.py
+      - name: Probar el generador de 20 preguntas
+        run: python generar.py --entrada ejemplos/Plantilla_20_preguntas.xlsx --salida salidas --titulo 'Evaluacion CI' --subtitulo 'Prueba automatizada'
+
+  probar-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Usar UID y GID de la carpeta compartida del runner
+        run: |
+          echo "HOST_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "HOST_GID=$(id -g)" >> "$GITHUB_ENV"
+      - name: Validar Compose y construir contenedor
+        run: |
+          docker compose config --quiet
+          docker compose build
+      - name: Probar interfaz local y salida CLI en contenedor
+        run: |
+          docker compose up -d
+          for i in $(seq 1 35); do
+            if curl --silent --fail http://localhost:8765/salud; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://localhost:8765/ | grep -q 'Preparar evaluación'
+          docker compose exec -T generador python generar.py \
+            --entrada /app/ejemplos/Plantilla_20_preguntas.xlsx \
+            --salida /datos/salidas \
+            --titulo 'Evaluación Docker' --empresa 'Empresa de ejemplo'
+          test -n "$(find datos/salidas -name Cuadernillo.pdf -print -quit)"
+      - name: Registros de diagnóstico
+        if: failure()
+        run: docker compose logs --tail=120
+      - name: Detener contenedor
+        if: always()
+        run: docker compose down

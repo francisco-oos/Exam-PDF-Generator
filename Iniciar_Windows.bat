@@ -1,0 +1,52 @@
+@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+cd /d "%~dp0"
+title Generador seguro de examenes
+if not exist ".venv\Scripts\python.exe" (
+    echo [1/3] Buscando Python 3.11 o 3.12...
+    py -3.11 --version >nul 2>&1
+    if not errorlevel 1 (
+        py -3.11 -m venv .venv
+    ) else (
+        py -3.12 --version >nul 2>&1
+        if not errorlevel 1 (
+            py -3.12 -m venv .venv
+        ) else (
+            echo Necesitas Python 3.11 o 3.12 de python.org
+            pause
+            exit /b 1
+        )
+    )
+    if errorlevel 1 (
+        echo No se pudo crear el entorno .venv
+        pause
+        exit /b 1
+    )
+)
+".venv\Scripts\python.exe" -c "import importlib.metadata as m; assert m.version('openpyxl') == '3.1.5'; assert m.version('reportlab') == '5.1.0'" >nul 2>&1
+if errorlevel 1 (
+    echo [2/3] Instalando las dependencias solo en este entorno...
+    ".venv\Scripts\python.exe" -m pip install -r requirements.txt
+    if errorlevel 1 (
+        echo No se pudieron instalar las dependencias.
+        pause
+        exit /b 1
+    )
+)
+if not exist "ejemplos\Plantilla_20_preguntas.xlsx" (
+    echo Creando plantilla de ejemplo...
+    ".venv\Scripts\python.exe" crear_ejemplo.py
+    if errorlevel 1 (
+        echo No se pudo crear la plantilla.
+        pause
+        exit /b 1
+    )
+)
+echo [3/3] Abriendo el generador...
+".venv\Scripts\python.exe" iniciar.py
+if errorlevel 1 (
+    echo Error. Consulta los mensajes anteriores.
+    pause
+    exit /b 1
+)
+endlocal
