@@ -17,14 +17,14 @@
 | SEC-05 | Media (integridad) | Orden de opciones aleatorio en cada ejecución, con clave no reproducible entre generaciones | `exam.py` / `shuffle(answers)` | Respuestas en posiciones A-D explícitas y fijas. Sin versiones aleatorias. |
 | SEC-06 | Media (corrección) | La imagen de respuesta se coloca con `get_y()+15` y la clave con `get_y()+25`; la superposición sobre acetato no está garantizada | `exam.py` / `output_exam_files()` | Hoja y acetato se generan llamando a la MISMA función de coordenadas; registro gráfico y prueba matemática de posiciones. |
 | SEC-07 | Baja/Media | Dependencia original de fuentes Arial de Windows y bibliotecas sin versiones fijadas | `exam.py` / `ImageFont.truetype('arial.ttf')`, `README.md` | Descubrimiento automático de fuentes Arial/DejaVu/Liberation, dependencias fijadas. No se distribuyen fuentes tipográficas. |
-| SEC-08 | Media | Ausencia de suites, CI y verificación de PDF | Árbol upstream sin carpeta de tests ni workflow | Suite `pytest` ampliada a 21 casos, prueba de generación con logotipo e imágenes y apertura GUI en escritorio Linux virtual. Workflow CI preparado para Windows/Linux (aún no ejecutado en GitHub). Aún faltan pruebas Windows y con `reportlab 5.1.0`. |
+| SEC-08 | Media | Ausencia de suites, CI y verificación de PDF | Árbol upstream sin carpeta de tests ni workflow | Suite `pytest` ampliada a 21 casos, prueba de generación con logotipo e imágenes y apertura GUI en escritorio Linux virtual. Workflow CI ejecutado y aprobado en Windows/Ubuntu con Python 3.11/3.12 (run 42531062717). Aún faltan pruebas Windows y con `reportlab 5.1.0`. |
 
 ## Dependencias y actualidad
 
 - `openpyxl==3.1.5`. Revisión pública al 08/11/2026: no se detectaron avisos conocidos que afecten directamente a esta versión en el registro consultado. No equivale a auditoría de todo su árbol transitorio.
 - `Pillow>=12,<13` agregado para normalizar y comprobar imágenes locales (no se permiten macros ni código embebido).
 - `reportlab==5.1.0` seleccionado para instalación: ReportLab publicó correcciones de ejecución de código en `rl_safe_eval` en octubre de 2026. Evitamos alimentar el parser con HTML no escapado y nunca invocamos funciones macro/`rl_safe_eval`. Documentación: https://docs.reportlab.com/releases/notes/whats-new-51/ ; https://pypi.org/project/reportlab/5.1.0/ . La versión 5.1.0 soporta Python 3.11 y 3.12 y distribuye wheel `py3-none-any`.
-- **Prueba disponible:** en la máquina Linux se probó con `reportlab 4.4.9` previamente instalado. **No se pudo instalar 5.1.0 dentro del entorno sin acceso a PyPI**, por lo que su combinación final con este código está aún SIN VERIFICAR. Esto debe probarse en Windows o Linux con Internet.
+- **Prueba disponible:** en la máquina Linux se probó con `reportlab 4.4.9` previamente instalado. **El entorno Linux local no tenía acceso a PyPI para instalar 5.1.0**, pero la CI de GitHub instaló dependencias y pasó en Windows y Ubuntu con Python 3.11/3.12. La interfaz en Windows físico y la impresión aún no se verifican.
 - No hay escaneo `pip-audit` ni verificación de vulnerabilidades de cada dependencia transitiva; son tareas pendientes antes de distribución a múltiples equipos.
 
 ## Ajuste funcional acordado
@@ -70,3 +70,7 @@ Usar la **adaptación** y mantener el original únicamente como referencia MIT. 
 - La GUI se abrió sin fallos en escritorio Linux virtual; NO equivale a comprobación de Windows real ni impresión en acetato.
 - **Evidencia local:** 21 pruebas `pytest` aprobadas con ReportLab 4.4.9 disponible; la versión exigida en el iniciador `5.1.0` sigue pendiente de ejecución y auditoría de dependencias transitivas en una máquina con acceso a PyPI.
 - Si se distribuye a terceros, realizar pruebas de seguridad adicionales con archivos hostiles, revisar CVE de dependencias, validar la configuración de seguridad del equipo y obtener autorización del área encargada de los datos.
+
+## CI y corrección multiplataforma (08/11/2026)
+
+La primera ejecución de CI detectó que el manifiesto SHA-256 usaba separadores de ruta de Windows (`\\`) en vez de `/`; se corrigió con `Path.relative_to(...).as_posix()`. La ejecución [42531062717](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42531062717) terminó **satisfactoriamente** en Windows y Ubuntu con Python 3.11 y 3.12. No equivale a prueba física del archivo `Iniciar_Windows.bat` ni de impresora/acetato.

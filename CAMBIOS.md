@@ -15,3 +15,6 @@
 
 - Reimplementación segura inspirada en el proyecto de UzielLopez (MIT): evita borrado de PNG, salidas sobreescritas, orden aleatorio de respuestas y Excel sin validación.
 - Iniciadores independientes para Windows/Linux, CLI y CI.
+
+- CI final: cuatro combinaciones Windows/Ubuntu, Python 3.11/3.12, 21 tests aprobados; corregidas rutas portables del manifiesto.
+- Capturas de diseño incorporadas en `docs/capturas/` para revisión antes de instalar.

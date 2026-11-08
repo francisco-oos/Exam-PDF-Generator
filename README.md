@@ -6,6 +6,11 @@ Aplicación local para preparar exámenes de opción múltiple: **cuadernillo pr
 
 Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-PDF-Generator), creado por **Uziel Humberto López Meneses** en 2020 bajo licencia **MIT**. Conservamos su atribución y el archivo [`LICENSE`](LICENSE). Esta adaptación es una reimplementación con medidas de seguridad, diseño propio y nuevas funciones, **no es una versión oficial del autor original**.
 
+## Vista previa verificada en Linux
+
+- [Interfaz de escritorio (captura real)](docs/capturas/interfaz.png)
+- [Cuadernillo con logotipo e imagen de pregunta (captura real)](docs/capturas/cuadernillo.png)
+
 ## Características
 
 - Formato A4 y diseño corporativo con **nombre de empresa, título, subtítulo, puesto/área, instrucciones y logotipo**.
@@ -99,4 +104,4 @@ python crear_ejemplo.py
 python generar.py --entrada ejemplos/Plantilla_20_preguntas.xlsx --salida salidas
 ```
 
-La CI está preparada para Windows/Linux y Python 3.11/3.12. **No declares compatibilidad Windows confirmada hasta ver la ejecución de los workflows y probar el iniciador físicamente.**
+La CI de GitHub **aprobó los 21 tests** en Windows y Ubuntu con Python 3.11 y 3.12 (ejecución 42531062717). **La interfaz gráfica del iniciador sigue pendiente de prueba manual en una computadora Windows real**, así como la impresión física del acetato.
