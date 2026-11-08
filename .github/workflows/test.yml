@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ['3.11', '3.12']
+        python: ['3.11', '3.12', '3.13']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +23,13 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
       - name: Ejecutar pruebas
         run: python -m pytest -q
+      - name: Verificar iniciador Windows sin interfaz (Python 3.13)
+        if: runner.os == 'Windows' && matrix.python == '3.13'
+        shell: cmd
+        run: |
+          call Iniciar_Windows.bat --verificar
+          .venv\Scripts\python.exe -c "import sys; assert sys.version_info[:2] == (3, 13), sys.version"
+
       - name: Preparar plantilla de ejemplo
         run: python crear_ejemplo.py
       - name: Probar el generador de 20 preguntas

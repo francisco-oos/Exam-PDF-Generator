@@ -3,18 +3,24 @@ setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 title Generador seguro de examenes
 if not exist ".venv\Scripts\python.exe" (
-    echo [1/3] Buscando Python 3.11 o 3.12...
-    py -3.11 --version >nul 2>&1
+    echo [1/3] Buscando Python 3.13, 3.12 o 3.11...
+    py -3.13 --version >nul 2>&1
     if not errorlevel 1 (
-        py -3.11 -m venv .venv
+        py -3.13 -m venv .venv
     ) else (
         py -3.12 --version >nul 2>&1
         if not errorlevel 1 (
             py -3.12 -m venv .venv
         ) else (
-            echo Necesitas Python 3.11 o 3.12 de python.org
-            pause
-            exit /b 1
+            py -3.11 --version >nul 2>&1
+            if not errorlevel 1 (
+                py -3.11 -m venv .venv
+            ) else (
+                echo Se necesita Python 3.13, 3.12 o 3.11.
+                echo Ejecuta py -0p para consultar las versiones disponibles.
+                pause
+                exit /b 1
+            )
         )
     )
     if errorlevel 1 (
@@ -41,6 +47,16 @@ if not exist "ejemplos\Plantilla_20_preguntas.xlsx" (
         pause
         exit /b 1
     )
+)
+if /I "%~1"=="--verificar" (
+    echo [3/3] Verificando generacion de PDF sin abrir la ventana...
+    ".venv\Scripts\python.exe" generar.py --entrada "ejemplos\Plantilla_20_preguntas.xlsx" --salida "salidas" --titulo "Prueba de arranque en Windows"
+    if errorlevel 1 (
+        echo No se pudo generar el examen de prueba.
+        exit /b 1
+    )
+    echo Verificacion correcta: Python y generacion de PDF listos.
+    exit /b 0
 )
 echo [3/3] Abriendo el generador...
 ".venv\Scripts\python.exe" iniciar.py

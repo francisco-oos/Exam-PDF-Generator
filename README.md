@@ -34,13 +34,13 @@ Para parar: `docker compose stop`. Para reiniciar: `docker compose start`. Para 
 
 ## Instalar en Windows 10/11 (sin Docker)
 
-1. Descarga el ZIP de la rama de trabajo de GitHub y selecciona **Extraer todo** (no abras el programa dentro del ZIP).
-2. Instala **Python 3.11 o 3.12**, asegurándote de incluir `py` (Python Launcher). No necesitas permisos de administrador para ejecutar el programa.
+1. Descarga el repositorio con Git (`git clone https://github.com/francisco-oos/Exam-PDF-Generator.git`) o usa la copia que ya tienes en `main` y actualízala con `git pull --ff-only`.
+2. Usa **Python 3.13 (preferido), 3.12 o 3.11** con `py` (Python Launcher). No hace falta instalar otro Python si ya tienes 3.13. No necesitas permisos de administrador para ejecutar el programa.
 3. Haz doble clic en **`Iniciar_Windows.bat`**. La primera vez crea `.venv`, instala las dependencias y genera una plantilla de ejemplo. La instalación inicial **sí necesita Internet**.
 4. En la interfaz selecciona el Excel, indica título, empresa y puesto, elige opcionalmente un logotipo y escribe instrucciones.
 5. Pulsa **Generar documentos** y luego **Abrir resultado**.
 
-Si falla la instalación, abre PowerShell en la carpeta del proyecto y ejecuta `py -3.11 -m venv .venv` y `.venv\Scripts\python.exe -m pip install -r requirements.txt`, o revisa los mensajes que muestra el iniciador. No hace falta activar PowerShell ni cambiar su política de ejecución.
+Si falla la instalación, abre PowerShell en la carpeta del proyecto y ejecuta `py -3.13 -m venv .venv` y `.venv\Scripts\python.exe -m pip install -r requirements.txt`, o revisa los mensajes que muestra el iniciador. No hace falta activar PowerShell ni cambiar su política de ejecución.
 
 ## Linux
 
@@ -115,4 +115,4 @@ python crear_ejemplo.py
 python generar.py --entrada ejemplos/Plantilla_20_preguntas.xlsx --salida salidas
 ```
 
-La CI está preparada para Windows/Linux y Python 3.11/3.12. **No declares compatibilidad Windows confirmada hasta ver la ejecución de los workflows y probar el iniciador físicamente.**
+La CI valida Windows/Linux con Python 3.11, 3.12 y 3.13. También prueba el iniciador `.bat` con Python 3.13 en modo sin ventana (`Iniciar_Windows.bat --verificar`). La interfaz con ventana y la impresión siguen requiriendo prueba manual en Windows físico.
