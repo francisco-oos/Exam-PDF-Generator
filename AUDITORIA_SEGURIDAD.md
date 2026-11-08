@@ -78,3 +78,7 @@ Usar la **adaptación** y mantener el original únicamente como referencia MIT. 
 - Contenedor como usuario sin privilegios, solo lectura salvo `datos` y `/tmp`, con capacidades retiradas y `no-new-privileges`. Docker Desktop sigue siendo un requisito instalado en el anfitrión y el daemon es un componente privilegiado.
 - Los datos empresariales permanecen en la carpeta local montada; **no se crea un usuario/autenticación multiusuario**. No exponer el puerto a LAN o Internet. Docker puede resolver/descargar paquetes durante la construcción y tiene conectividad predeterminada; la app no hace solicitudes externas.
 - **Pendiente:** ejecutar `docker compose build` y la prueba de inicio/healthcheck en GitHub Actions, porque el entorno local no tiene motor Docker; probar el archivo y la impresión del acetato físicamente.
+
+## Consolidación de ramas y alcance de pruebas (08/11/2026)
+
+La función de interfaz empresarial y la ejecución con Docker se desarrollaron inicialmente en ramas encadenadas; la segunda incluye la primera. Las 23 pruebas de Python aprobaron en el entorno de desarrollo y GitHub Actions confirmó las cuatro combinaciones Python 3.11/3.12 sobre Windows/Ubuntu, además del smoke test de Docker en Ubuntu (ejecuciones 42532803398 y 42532807871). No se ha probado aquí la impresión real ni Docker Desktop en un equipo Windows físico. La distribución recomendada será la rama principal una vez integrada la versión validada; las ramas de funciones anteriores quedan como historial temporal.
