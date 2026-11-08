@@ -276,7 +276,7 @@ def _answer_sheet(path: Path, questions: list[Question], title: str, subtitle: s
         if not acetate:
             _canvas_header(c,title,subtitle,'HOJA DE RESPUESTAS',normal,bold)
             c.setFont(normal,9.3);c.drawString(49,PAGE_H-142,'Nombre: ___________________________________________')
-            c.drawString(49,PAGE_H-162,'Fecha: _______________    Grupo/puesto: _______________')
+            c.drawString(49,PAGE_H-162,'Fecha: _______________    Grupo / área: _______________')
             c.setFont(normal,8);c.setFillColor(MUTED)
             c.drawString(50,PAGE_H-192,'Marca una sola respuesta (A, B, C o D) en cada pregunta.')
         for current, number, coords in slots:
@@ -321,7 +321,7 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
     if empresa:
         head.insert(0,Paragraph(escape(empresa).upper(),styles['eyebrow']))
     if puesto:
-        head.append(Paragraph('Puesto / área: '+escape(puesto),styles['small']))
+        head.append(Paragraph('Área / grupo: '+escape(puesto),styles['small']))
     if logo:
         logopic = _pdf_image(logo,65,65)
         header_table=Table([[logopic,head]],colWidths=[85,paper_width-85])
@@ -391,7 +391,7 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
     titulo=_text(titulo,label='Título',limit=90)
     subtitulo=_text(subtitulo,label='Subtítulo',limit=90)
     empresa=_text(empresa,label='Empresa',limit=100) if empresa.strip() else ''
-    puesto=_text(puesto,label='Puesto',limit=85) if puesto.strip() else ''
+    puesto=_text(puesto,label='Área / grupo',limit=85) if puesto.strip() else ''
     instrucciones=_text(instrucciones,label='Instrucciones',limit=650) if instrucciones.strip() else ''
     entrada=Path(entrada).expanduser()
     questions=read_questions(entrada)
@@ -425,7 +425,7 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
             shutil.copyfile(safe_logo,folder/'recursos'/('logo'+safe_logo.suffix.lower()))
         hashes={p.relative_to(folder).as_posix():sha256(p.read_bytes()).hexdigest()
                 for p in sorted(folder.rglob('*')) if p.is_file()}
-        manifest={'titulo':titulo,'subtitulo':subtitulo,'empresa':empresa,'puesto':puesto,
+        manifest={'titulo':titulo,'subtitulo':subtitulo,'empresa':empresa,'puesto':puesto,'grupo':puesto,
                   'instrucciones':instrucciones,'preguntas':len(questions),
                   'fecha_generacion':datetime.now().astimezone().isoformat(),
                   'formato':'A4; clave y hoja comparten coordenadas; impresión al 100%',
