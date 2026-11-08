@@ -35,7 +35,7 @@ Desde PowerShell en Windows:
 ```powershell
 New-Item -ItemType Directory -Force "$HOME\Documents\Herramientas"
 cd "$HOME\Documents\Herramientas"
-git clone --branch feature/docker-interfaz-web --single-branch https://github.com/francisco-oos/Exam-PDF-Generator.git
+git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 git status
 git branch --show-current
@@ -45,18 +45,18 @@ Explicación:
 
 - `mkdir`/`New-Item` crea una carpeta para proyectos.
 - `cd` cambia de carpeta.
-- `git clone` descarga el repositorio y su historial. `--branch` selecciona la rama de Docker; `--single-branch` descarga solo el historial relevante de esa rama.
+- `git clone` descarga el repositorio y su historial. por defecto descarga la rama estable `main`, que reúne la interfaz empresarial y Docker.
 - `git status` muestra si hay cambios locales; debe indicar *working tree clean*.
 - `git branch --show-current` confirma la rama activa.
 
 Si ya tienes `Exam-PDF-Generator` clonado, **no vuelvas a ejecutar `git clone` dentro de la misma carpeta**. Desde su carpeta usa:
 
 ```powershell
-git fetch origin
-git switch --track origin/feature/docker-interfaz-web
+git fetch origin main:refs/remotes/origin/main
+git switch -c main --track origin/main
 ```
 
-Si la rama local ya existe, utiliza `git switch feature/docker-interfaz-web`.
+Si tu rama local `main` ya existe, utiliza `git switch main`; si deseas conservar modificaciones locales, revisa antes `git status` y no las descartes.
 
 ## 3. Construir el contenedor y ejecutarlo
 
@@ -120,14 +120,14 @@ docker compose up --build -d
 - `git pull --ff-only`: descarga e integra actualizaciones **sin crear una fusión automática**. Si tienes cambios que chocan, se detiene para revisarlos.
 - `docker compose up --build -d`: reconstruye para incorporar el código nuevo.
 
-Para ver diferencias antes de actualizar: `git fetch origin` y `git log --oneline HEAD..origin/feature/docker-interfaz-web`.
+Para ver diferencias antes de actualizar: `git fetch origin` y `git log --oneline HEAD..origin/main`.
 
 ## 7. Linux: ruta equivalente
 
 ```bash
 mkdir -p ~/Herramientas
 cd ~/Herramientas
-git clone --branch feature/docker-interfaz-web --single-branch https://github.com/francisco-oos/Exam-PDF-Generator.git
+git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 # Si tu usuario no tiene UID/GID 1000, indica los suyos al contenedor:
 HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build -d
