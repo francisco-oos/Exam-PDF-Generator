@@ -423,7 +423,7 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
         if safe_logo:
             folder.joinpath('recursos').mkdir(exist_ok=True)
             shutil.copyfile(safe_logo,folder/'recursos'/('logo'+safe_logo.suffix.lower()))
-        hashes={str(p.relative_to(folder)):sha256(p.read_bytes()).hexdigest()
+        hashes={p.relative_to(folder).as_posix():sha256(p.read_bytes()).hexdigest()
                 for p in sorted(folder.rglob('*')) if p.is_file()}
         manifest={'titulo':titulo,'subtitulo':subtitulo,'empresa':empresa,'puesto':puesto,
                   'instrucciones':instrucciones,'preguntas':len(questions),
