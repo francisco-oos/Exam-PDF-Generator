@@ -6,11 +6,6 @@ Aplicación local para preparar exámenes de opción múltiple: **cuadernillo pr
 
 Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-PDF-Generator), creado por **Uziel Humberto López Meneses** en 2020 bajo licencia **MIT**. Conservamos su atribución y el archivo [`LICENSE`](LICENSE). Esta adaptación es una reimplementación con medidas de seguridad, diseño propio y nuevas funciones, **no es una versión oficial del autor original**.
 
-## Vista previa verificada en Linux
-
-- [Interfaz de escritorio (captura real)](docs/capturas/interfaz.png)
-- [Cuadernillo con logotipo e imagen de pregunta (captura real)](docs/capturas/cuadernillo.png)
-
 ## Características
 
 - Formato A4 y diseño corporativo con **nombre de empresa, título, subtítulo, puesto/área, instrucciones y logotipo**.
@@ -19,9 +14,25 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 - Hoja y acetato usan el **mismo modelo geométrico de coordenadas** para superposición manual.
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
-- CLI para procesos automatizados, GUI de escritorio y Docker opcional (solo CLI).
+- CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
 
-## Instalar en Windows 10/11
+## Iniciar con Docker — recomendado (Windows y Linux)
+
+**Solo necesitas Git y Docker Desktop/Engine; no se instala Python ni sus dependencias en tu equipo.** La interfaz se abre en **http://localhost:8765** y todos los archivos se conservan en `datos/`.
+
+```powershell
+git clone --branch feature/docker-interfaz-web --single-branch https://github.com/francisco-oos/Exam-PDF-Generator.git
+cd Exam-PDF-Generator
+docker compose up --build -d
+```
+
+Abre http://localhost:8765 y selecciona el Excel de ejemplo incluido. Para usar tus preguntas, guarda el `.xlsx` en `datos/entradas`; si tiene imágenes, colócalas en `datos/entradas/imagenes`. Los PDF se guardan en `datos/salidas`.
+
+Para parar: `docker compose stop`. Para reiniciar: `docker compose start`. Para actualizar después de recibir cambios: `git pull --ff-only` seguido de `docker compose up --build -d`.
+
+**Guía paso a paso para aprender Git y Docker:** [`DOCKER_Y_GIT.md`](DOCKER_Y_GIT.md). El modo con ventana Tkinter sigue disponible sin Docker para quien prefiera Python instalado.
+
+## Instalar en Windows 10/11 (sin Docker)
 
 1. Descarga el ZIP de la rama de trabajo de GitHub y selecciona **Extraer todo** (no abras el programa dentro del ZIP).
 2. Instala **Python 3.11 o 3.12**, asegurándote de incluir `py` (Python Launcher). No necesitas permisos de administrador para ejecutar el programa.
@@ -73,7 +84,7 @@ Imprime `Hoja_respuestas.pdf` en papel normal y `Acetato_clave.pdf` en transpare
 
 **Importante:** la compatibilidad con una impresora física y los inicios en Windows todavía requieren prueba de campo; la precisión de superposición fue validada en el código y los PDF de Linux. El diseño no promete compatibilidad con lectores OMR automáticos.
 
-## Docker opcional (sin interfaz)
+## Docker por comandos (opcional; la interfaz web es lo recomendado)
 
 ```bash
 docker build -t generador-examenes .
@@ -104,4 +115,4 @@ python crear_ejemplo.py
 python generar.py --entrada ejemplos/Plantilla_20_preguntas.xlsx --salida salidas
 ```
 
-La CI de GitHub **aprobó los 21 tests** en Windows y Ubuntu con Python 3.11 y 3.12 (ejecución 42531062717). **La interfaz gráfica del iniciador sigue pendiente de prueba manual en una computadora Windows real**, así como la impresión física del acetato.
+La CI está preparada para Windows/Linux y Python 3.11/3.12. **No declares compatibilidad Windows confirmada hasta ver la ejecución de los workflows y probar el iniciador físicamente.**

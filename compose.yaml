@@ -1,0 +1,26 @@
+services:
+  generador:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: exam-pdf-generator:local
+    container_name: generador-examenes-local
+    ports:
+      - "127.0.0.1:8765:8765"
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./datos:/datos
+    environment:
+      EXAM_DATA_DIR: /datos
+      EXAM_PORT: "8765"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 80
+    mem_limit: 768m
+    init: true
+    restart: unless-stopped

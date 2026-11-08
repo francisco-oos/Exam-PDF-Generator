@@ -27,3 +27,31 @@ jobs:
         run: python crear_ejemplo.py
       - name: Probar el generador de 20 preguntas
         run: python generar.py --entrada ejemplos/Plantilla_20_preguntas.xlsx --salida salidas --titulo 'Evaluacion CI' --subtitulo 'Prueba automatizada'
+
+  probar-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar Compose y construir contenedor
+        run: |
+          docker compose config --quiet
+          docker compose build
+      - name: Probar interfaz local y salida CLI en contenedor
+        run: |
+          docker compose up -d
+          for i in $(seq 1 35); do
+            if curl --silent --fail http://localhost:8765/salud; then break; fi
+            sleep 2
+          done
+          curl --fail --silent http://localhost:8765/ | grep -q 'Preparar evaluación'
+          docker compose exec -T generador python generar.py \
+            --entrada /app/ejemplos/Plantilla_20_preguntas.xlsx \
+            --salida /datos/salidas \
+            --titulo 'Evaluación Docker' --empresa 'Empresa de ejemplo'
+          test -n "$(find datos/salidas -name Cuadernillo.pdf -print -quit)"
+      - name: Registros de diagnóstico
+        if: failure()
+        run: docker compose logs --tail=120
+      - name: Detener contenedor
+        if: always()
+        run: docker compose down

@@ -4,3 +4,9 @@ __pycache__/
 *.pyc
 salidas/*
 !salidas/.gitkeep
+.env
+datos/**
+!datos/entradas/
+!datos/salidas/
+!datos/entradas/.gitkeep
+!datos/salidas/.gitkeep
