@@ -21,7 +21,7 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 **Solo necesitas Git y Docker Desktop/Engine; no se instala Python ni sus dependencias en tu equipo.** La interfaz se abre en **http://localhost:8765** y todos los archivos se conservan en `datos/`.
 
 ```powershell
-git clone --branch feature/docker-interfaz-web --single-branch https://github.com/francisco-oos/Exam-PDF-Generator.git
+git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 docker compose up --build -d
 ```
