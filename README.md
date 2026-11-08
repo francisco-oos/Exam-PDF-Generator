@@ -15,7 +15,7 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
 - CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
-- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final A4 es la referencia para impresión.
+- [Captura real de la vista previa genérica](docs/capturas/vista_previa_generica.png).\n- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final A4 es la referencia para impresión.
 
 ## Iniciar con Docker — recomendado (Windows y Linux)
 
