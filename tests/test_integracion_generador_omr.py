@@ -405,7 +405,10 @@ def test_alerta_previa_impide_calificar_sin_confirmacion(tmp_path,monkeypatch):
         monkeypatch.setattr(app,'_process_verified_groups',
             lambda *args:routed.append(args))
         app.scanning=True
-        app.scan_updates.put(('preflight',tmp_path/'scan.pdf',inspection))
+        app.scan_updates.put(('preflight',tmp_path/'scan.pdf',{
+            'inspection':inspection,'sha':'f'*64,
+            'original_path':str(tmp_path/'scan.pdf'),'repetido':False,
+        }))
         app._finish_scan()
         assert not app.scanning
         assert not routed
@@ -414,7 +417,10 @@ def test_alerta_previa_impide_calificar_sin_confirmacion(tmp_path,monkeypatch):
         assert 'No para cancelar' in dialogs[0][1]
         monkeypatch.setattr(messagebox,'askyesno',lambda *a,**k:True)
         app.scanning=True
-        app.scan_updates.put(('preflight',tmp_path/'scan.pdf',inspection))
+        app.scan_updates.put(('preflight',tmp_path/'scan.pdf',{
+            'inspection':inspection,'sha':'f'*64,
+            'original_path':str(tmp_path/'scan.pdf'),'repetido':False,
+        }))
         app._finish_scan()
         assert app.scanning
         assert routed and routed[0][1] is inspection
