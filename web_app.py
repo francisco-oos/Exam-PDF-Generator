@@ -109,8 +109,6 @@ def _options(items) -> str:
 def _form() -> bytes:
     files = available_exam_files()
     logos = available_logos()
-    if not files:
-        return _page('<h1>Falta la plantilla de ejemplo</h1><p>Revisa la construcción de la imagen Docker.</p>')
     body = f'''<h1>Preparar evaluación</h1>
     <p class="lead">Un examen fijo, diseñado en Excel. Generaremos cuatro PDF listos para imprimir.</p>
     <div class="notice">Coloca tus archivos <b>.xlsx</b> en <code>datos/entradas</code> de tu computadora.
