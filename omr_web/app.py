@@ -188,6 +188,54 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         from biblioteca import list_exams
         return list_exams(engine.library)
 
+    @web.post("/api/library/import")
+    async def import_questionnaire(file:UploadFile=File(...),name:str="",
+                                   title:str="",user=Depends(write_user)):
+        """Importa un Excel de preguntas existente sin alterar otros exámenes.
+
+        No confía en rutas enviadas desde el teléfono. Limita peso y
+        expansión XLSX antes de analizar la plantilla del generador.
+        """
+        engine.require(user,roles={"admin"})
+        if not file.filename or not file.filename.lower().endswith(".xlsx"):
+            raise WebError("Se requiere una plantilla de preguntas XLSX.")
+        from tempfile import TemporaryDirectory
+        from zipfile import ZipFile,BadZipFile
+        from src.evaluaciones.core import read_questions
+        from biblioteca import save_exam
+        with TemporaryDirectory(prefix="omr_import_") as temporary:
+            book=Path(temporary)/"Preguntas.xlsx"
+            total=0
+            with book.open("wb") as dst:
+                while True:
+                    part=await file.read(1024*1024)
+                    if not part:break
+                    total+=len(part)
+                    if total>8*1024*1024:
+                        raise WebError("La plantilla supera 8 MB.",413)
+                    dst.write(part)
+            try:
+                with ZipFile(book) as archive:
+                    members=archive.infolist()
+                    if (len(members)>180 or
+                        sum(item.file_size for item in members)>25*1024*1024 or
+                        any("externalLink" in item.filename for item in members)):
+                        raise WebError("Contenido XLSX no permitido.")
+            except BadZipFile as exc:
+                raise WebError("Excel no válido.") from exc
+            questions=read_questions(book)
+            if not questions:
+                raise WebError("No se encontraron preguntas.")
+            exam_id=save_exam(
+                engine.library,
+                nombre=name.strip() or Path(file.filename).stem[:100],
+                titulo=title.strip() or name.strip() or "Evaluación de conocimientos",
+                empresa="",grupo="",subtitulo="Evaluación de conocimientos",
+                instrucciones="Selecciona una sola respuesta por pregunta.",
+                questions=questions,tamano_papel="Carta")
+        await file.close()
+        return {"cuestionario_id":exam_id,"preguntas":len(questions)}
+
     @web.get("/api/applications")
     def applications(user=Depends(user_of)):
         return engine.visible_sessions(user)
