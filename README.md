@@ -42,6 +42,40 @@ La ventana **Diseñar e imprimir** es la entrada principal; usa **Cerrar aplicac
 **Verificación técnica:** en la rama de desarrollo `feature/modernizacion-integral`, la CI para Windows (Python 3.11/3.12/3.13), Ubuntu y Docker concluyó satisfactoriamente en la [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). La automatización no sustituye la prueba del editor con el equipo físico del usuario ni la superposición de hoja y acetato en impresora al 100 %.
 
 
+## Bandeja documental y expedientes OMR (rama de desarrollo)
+
+En **Calificar y entregar → Bandeja PDF**, el operador puede consultar
+escaneos conservados por **SHA-256**, ver sus páginas, pendientes y veces
+recibidos, crear derivados girados/reordenados y extraer una página **sin
+cambiar el original ni la calificación**. Los escaneos QR firmados se
+reparten por sesión, aunque el PDF mezcle Cabos y Checadores; las páginas
+sin QR permanecen en la bandeja, sin calificación automática.
+
+La bandeja conserva un original compartido por PDF y registra cada
+importación. **El mismo folio** no genera otra nota por reimportación,
+y una captura con marcas diferentes exige revisión. Las evaluaciones
+pueden recibir escaneos a lo largo de varias jornadas sin emitir folios nuevos.
+
+Las exportaciones nuevas son:
+- **Resultado individual PDF**: únicamente una persona y su calificación.
+- **ZIP oficial**: Excel de resultados de la aplicación (sin claves).
+- **ZIP interno**: Excel, bitácora PDF, páginas efectivas en PDF,
+  manifiesto con SHA-256 y originales solo cuando el archivo no contiene
+  hojas de otra evaluación. El original mixto permanece en el archivo
+  global, pero no se incluye íntegro en expedientes de una sola aplicación.
+
+Para organizar PDFs se utiliza `pypdf`. El fallback ZXing-C++ y la
+reparación de copias con pikepdf son opcionales mediante
+`requirements-pdf-extra.txt`; no se requiere otro servidor ni cambiar
+a Paperless-ngx.
+
+**Importante:** rama de desarrollo pendiente de validación física en
+Windows/Xerox. Antes de cambiar de rama, respaldar íntegramente
+`datos/omr/` y `datos/biblioteca.sqlite3`. No fusionar con `main`
+sin las pruebas de recuperación y privacidad.
+
+[Manual de arquitectura y relevo para pruebas físicas de Codex](docs/BANDEJA_DOCUMENTAL_Y_RELEVO_CODEX_2026-11-09.md).
+
 ## Dos modalidades de cuadernillo y una hoja universal
 
 El escritorio muestra **una sola ventana de diseño** y únicamente los modos
