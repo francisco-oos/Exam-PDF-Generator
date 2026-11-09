@@ -292,3 +292,54 @@ mismo archivo, sin crear múltiples documentos paralelos de relevo.
   navegación a Calificar y entregar y Bandeja PDF comprobadas en Windows.
 - Omisiones iniciales: dos tests de enlaces simbólicos sin permisos y
   un inicio Tk intermitente; el test Tk pasó en ambas tandas focalizadas.
+
+### Tanda 3: recuperación, duplicados, privacidad y carga sintética
+
+- F14: nuevas instancias de OMRStore/DocumentInbox recuperan las tres páginas
+  de un PDF mixto archivado antes de calificar; procesan solo las dos
+  identificadas y conservan la tercera pendiente y el SHA original.
+- F05/F06: otro PDF con mismas respuestas queda reimportado sin segunda
+  hoja efectiva. Respuestas diferentes quedan como conflicto sin modificar
+  la primera captura; el expediente no presenta evidencia definitiva del
+  folio conflictivo.
+- F10: se reemplazó una aserción incondicional (`or True`) por comparación
+  del texto de las tres páginas con el orden solicitado del original.
+- F11–F13: se inspecciona texto de todos los PDF/JSON y celdas de todas las
+  hojas XLSX de ZIP interno y oficial, rechazando ID/nombre/folio/sesión de
+  la otra evaluación. El QR del PDF evidencial vuelve a verificarse contra
+  la aplicación correcta. Regresiones focalizadas: **18 aprobadas**, 20.75 s.
+- Carga local: 100 hojas Carta, 4 respuestas sintéticas correctas por hoja,
+  rasterizadas a 200 DPI. **100 identificadas y 100 validadas**, 4/4 cada una.
+  Generación 10.59 s; prelectura 4.55 s; calificación 8.50 s; ZIP 0.84 s.
+  Pico del proceso Windows: 200.52 MiB; PDF 9,077,551 bytes;
+  ZIP 14,189,462 bytes. Verificados todos los hashes del manifiesto y 100
+  entradas de evidencia. Estos tiempos no representan un escáner físico.
+- Script reproducible y reporte de carga permanecen locales bajo `salidas/`
+  (validar_lote100.py, lote100.log y carpeta lote100_*), sin archivos privados.
+
+### Pendientes para continuar con el operador
+
+- El usuario preparará proyecto de encuesta y escaneo en `Examen/PRUEBA` y
+  avisará LISTO. No leer ni trasladar esos archivos antes del aviso.
+  Al recibirlo: inventariar, calcular SHA, crear copia aislada y conservar
+  originales; no publicar encuestas, escaneos, BD ni identidades en GitHub.
+- La suite automatizada recorre importación XLSX/listas, Biblioteca, diseño,
+  normal/ecológico, folios/QR, acetato, captura manual y entregables. La
+  comprobación visual de esta tanda se limita al inicio y navegación hasta
+  Bandeja PDF. Falta recorrido manual completo con el proyecto suministrado.
+- F01–F16 físicos siguen PENDIENTES: impresión al 100 %, escáner Xerox,
+  lápiz n.º 2/presiones/borraduras, QR parcial y contraste real. F15 cuenta
+  con prueba Tk de cancelación simulada, todavía no lote físico cancelado.
+- Restauración de respaldo histórico real y arranque sin conexión en
+  Windows/Linux pendientes. Las migraciones probadas usan fixtures;
+  no se ha certificado restauración de una BD del usuario.
+- ZXing-C++/pikepdf opcionales no instalados en este entorno. No atribuir
+  sus rutas alternativas a las pruebas actuales.
+- Docker local instalado sin motor disponible. Linux/Xvfb/Docker se
+  verifican mediante CI; consultar el SHA exacto antes de aprobar cambios.
+- PR debe seguir en borrador. No fusionar ni modificar main.
+
+Resultado final local de esta tanda (Python 3.13.4): **161 aprobadas,
+3 omitidas**, 73.45 s, ejecutando `pytest -q` con
+`PytestUnraisableExceptionWarning` tratado como error. Logs/XML en
+`salidas/pytest-final.log` y `salidas/pytest-final.xml`.

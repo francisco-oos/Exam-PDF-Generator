@@ -133,7 +133,9 @@ def test_organizar_extraer_girar_sin_tocar_el_pdf_original(tmp_path):
     assert len(reader.pages)==3
     assert int(reader.pages[0].get('/Rotate',0))%360==90
     assert int(reader.pages[2].get('/Rotate',0))%360==180
-    assert 'Checadores' not in (reader.pages[0].extract_text() or '') or True
+    source=PdfReader(str(archive))
+    assert [page.extract_text() for page in reader.pages]==[
+        source.pages[i].extract_text() for i in (1,0,2)]
     assert archive.read_bytes()==before
     assert sha_file(archive)==digest
     extracted=inbox.assemble([(digest,1,0)],tmp_path/'extraido.pdf')
@@ -344,3 +346,85 @@ def test_resultado_individual_no_sobrescribe_evidencia(tmp_path, location):
         participant_receipt(store,sid,person['id'],target)
     assert target.read_bytes()==before
     assert sha_file(archived)==digest
+
+
+def test_recuperar_archivado_antes_de_calificar_tras_reabrir(tmp_path):
+    store,inbox,cabos,chec,pdf=fixture_mixed(tmp_path)
+    checked=inspect_pdf_sessions(store,pdf)
+    digest,archive=inbox.archive(pdf,checked)
+    assert store.pages(cabos)==store.pages(chec)==[]
+    # Todas las conexiones son transaccionales; nuevas instancias leen solo
+    # el estado persistido, sin conservar la inspección en memoria.
+    reopened=OMRStore(tmp_path/'omr')
+    recovered=DocumentInbox(reopened)
+    assert recovered.documents()[0]['pendientes']==3
+    assert len(recovered.pages(digest))==3
+    inspected=inspect_pdf_sessions(reopened,recovered.original(digest))
+    for group in inspected['grupos']:
+        report=scan_document(reopened,group['sesion_id'],archive,
+                             page_indices=[p-1 for p in group['paginas']])
+        recovered.mark_processed(digest,group['sesion_id'],report)
+    assert recovered.documents()[0]['pendientes']==1
+    assert len(reopened.pages(cabos))==len(reopened.pages(chec))==1
+    assert sha_file(archive)==digest
+
+
+def test_duplicados_equivalentes_y_conflictivos_en_bandeja(tmp_path):
+    from test_motor_omr import fake_scanned_pdf
+    store=OMRStore(tmp_path/'omr')
+    inbox=DocumentInbox(store)
+    sid=store.create_session('Cabos',qs(),people('C',1),'Carta')
+    forms=create_forms_pdf(store,sid,tmp_path/'forms.pdf')
+    scan=tmp_path/'scan.pdf'
+    fake_scanned_pdf(forms,scan,'Carta',[list('ABCD')])
+    _ingest_and_grade(store,inbox,scan)
+    original=store.pages(sid)[0]
+    equivalent=combined(tmp_path/'equivalente.pdf',scan)
+    assert sha_file(equivalent)!=sha_file(scan)
+    _,digest,_=_ingest_and_grade(store,inbox,equivalent)
+    assert inbox.pages(digest)[0]['estado']=='reimportada'
+    assert len(store.pages(sid))==1
+    changed=tmp_path/'conflictivo.pdf'
+    fake_scanned_pdf(forms,changed,'Carta',[list('DBCD')])
+    _,digest,_=_ingest_and_grade(store,inbox,changed)
+    assert inbox.pages(digest)[0]['estado']=='conflicto_duplicado'
+    assert next(p for p in store.pages(sid) if p['id']==original['id'])[
+        'respuestas']==list('ABCD')
+    assert len(store.pages(sid))==2
+    with ZipFile(export_session_bundle(store,inbox,sid,tmp_path/'conflicto.zip')) as z:
+        assert 'Evidencias_Ordenadas.pdf' not in z.namelist()
+        assert json.loads(z.read('Manifiesto.json'))['folios_sin_evidencia_efectiva']
+
+
+def test_contenido_completo_de_entregables_aislado_por_evaluacion(tmp_path):
+    from io import BytesIO
+    from openpyxl import load_workbook
+    store,inbox,cabos,chec,pdf=fixture_mixed(tmp_path)
+    _ingest_and_grade(store,inbox,pdf)
+    other=store.session(chec)['personal'][0]
+    forbidden=[other['id'],other['nombre'],other['folio'],chec]
+    for internal in (True,False):
+        bundle=export_session_bundle(store,inbox,cabos,
+                                     tmp_path/f'{internal}.zip',internal=internal)
+        with ZipFile(bundle) as z:
+            for name in z.namelist():
+                data=z.read(name)
+                if name.endswith('.pdf'):
+                    text='\n'.join(p.extract_text() or ''
+                                   for p in PdfReader(BytesIO(data)).pages)
+                elif name.endswith('.xlsx'):
+                    book=load_workbook(BytesIO(data))
+                    text='\n'.join(str(c.value) for sheet in book
+                                   for row in sheet for c in row)
+                    book.close()
+                elif name.endswith('.json'):
+                    text=data.decode('utf-8')
+                else:
+                    pytest.fail('Entregable no inspeccionado: '+name)
+                assert not any(value in text for value in forbidden),name
+                if name=='Evidencias_Ordenadas.pdf':
+                    evidence=tmp_path/'evidencia.pdf'
+                    evidence.write_bytes(data)
+                    verified=inspect_pdf_sessions(store,evidence)
+                    assert [g['sesion_id'] for g in verified['grupos']]==[cabos]
+                    assert verified['total_paginas']==1
