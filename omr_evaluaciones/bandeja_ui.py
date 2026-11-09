@@ -10,7 +10,7 @@ from tkinter import ttk, filedialog, messagebox
 import pypdfium2 as pdfium
 from PIL import ImageTk
 
-from .expedientes import create_organized_pdf, combine_pdfs
+from .expedientes import create_organized_pdf, combine_pdfs, normalize_pdf_copy
 
 
 def show_bandeja(app):
@@ -234,6 +234,26 @@ def show_bandeja(app):
             "PDF listo","Se creó una copia; el PDF original no se modificó.",
             parent=app.window)
 
+    def normalize_copy():
+        doc=current_doc()
+        if doc is None:return
+        target=filedialog.asksaveasfilename(
+            parent=app.window,defaultextension=".pdf",
+            initialfile="PDF_normalizado.pdf",
+            filetypes=[("PDF","*.pdf")])
+        if not target:return
+        try:
+            normalize_pdf_copy(Path(doc["ruta"]),Path(target))
+        except (OSError,ValueError,ImportError) as exc:
+            messagebox.showerror("PDF no normalizado",str(exc),
+                                 parent=app.window)
+            return
+        messagebox.showinfo(
+            "Copia normalizada",
+            "Se generó una copia del PDF. Esta operación no modifica "
+            "el original ni asegura recuperar todas las páginas dañadas.",
+            parent=app.window)
+
     def split_evaluations():
         doc=current_doc()
         if doc is None:return
@@ -418,6 +438,7 @@ def show_bandeja(app):
         ("Identificar hoja",manual_link),
         ("Retomar escaneo",reprocess),
         ("Combinar PDF seleccionados",combine_selected),
+        ("Normalizar copia PDF",normalize_copy),
     ]:
         app._btn(actions_extra,label,handler)
 
