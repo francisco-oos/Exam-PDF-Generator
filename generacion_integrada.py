@@ -41,6 +41,17 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
     lista = Path(lista_personal).expanduser() if lista_personal else None
     personas = read_roster(lista) if lista else []
     opciones = dict(opciones)
+    if modo_examen == 'folio' and personas:
+        # Las burbujas no pueden ser casi blancas: en un escáner las marcas
+        # de registro negras seguirían visibles, pero las opciones no.
+        from biblioteca import hex_color
+        ink = hex_color(opciones.get('color_respuestas', '#213A4C'),
+                        'Color de la hoja de respuestas')
+        rgb = tuple(int(ink[pos:pos+2], 16) for pos in (1,3,5))
+        gray = sum(a*b for a,b in zip(rgb, (0.299,0.587,0.114)))
+        if gray > 160:
+            raise ExamError('Para folio/QR el color de burbujas debe ser oscuro '
+                            '(p. ej. #213A4C) para que el escáner las reconozca.')
     opciones['reutilizable'] = modo_examen != 'normal'
     # Generar verifica Excel, colores, papel, imagen y logotipo ANTES de imprimir.
     carpeta = generate(entrada, salida, titulo, subtitulo, **opciones)
