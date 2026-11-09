@@ -587,7 +587,7 @@ def build_ui(*, open_editor=False):
             # debe pedir una segunda importación ni perder la revisión actual.
             launch(root, questions=load_questions(),
                    title=title_var.get(), paper=paper_choice.get(),
-                   source=file_var.get())
+                   source=file_var.get(), on_return=open_large_preview)
         except (ImportError, OSError) as exc:
             messagebox.showerror('Faltan componentes del lector OMR',
                 'Instala los complementos con: ' +
