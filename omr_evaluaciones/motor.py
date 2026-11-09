@@ -1187,10 +1187,22 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path, *, page_indices=None):
     with path.open('rb') as stream:
         if stream.read(5)!=b'%PDF-':raise ValueError('Archivo PDF inválido.')
     s=store.session(sid)
-    fingerprint=hashlib.sha256(path.read_bytes()).hexdigest()
-    folder=store.root/'originales'/sid;folder.mkdir(parents=True,exist_ok=True)
-    archived=folder/(fingerprint+'.pdf')
-    if not archived.exists():shutil.copy2(path,archived)
+    digest=hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda:stream.read(1024*1024),b''):
+            digest.update(chunk)
+    fingerprint=digest.hexdigest()
+    canonical=store.root/'documentos'/(fingerprint+'.pdf')
+    # Si Bandeja PDF ya archivó el original por SHA, no crear otra copia
+    # idéntica por cada aplicación contenida en el lote mezclado.
+    if canonical.is_file() and path.resolve()==canonical.resolve():
+        archived=canonical
+    else:
+        folder=store.root/'originales'/sid
+        folder.mkdir(parents=True,exist_ok=True)
+        archived=folder/(fingerprint+'.pdf')
+        if not archived.exists():
+            shutil.copy2(path,archived)
     by_token={p['token']:p for p in s['personal']}
     report={'leidas':0,'validadas':0,'revisar':0,'sin_identificar':0,
             'duplicadas':0,'repetidas':0,'reprocesadas':0,'detalles':[]}
