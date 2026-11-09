@@ -218,6 +218,56 @@ class OMRStore:
             db.execute('UPDATE sesiones SET lote_path=? WHERE id=?',
                        (str(Path(path).resolve()),sid))
 
+    def link_legacy_library_by_exact_key(self,library_path):
+        """Vincula aplicaciones antiguas SOLO ante coincidencia única verificable.
+
+        Para sesiones impresas antes de guardar el UUID de biblioteca, se
+        compara hash de reactivos, opciones correctas y tamaño de papel.
+        Si hay 0 o múltiples cuestionarios equivalentes, no se supone nombre.
+        La calificación, HMAC y revisión histórica no cambian.
+        """
+        library=Path(library_path)
+        if not library.is_file():
+            return 0
+        from biblioteca import db_connect
+        by_fingerprint={}
+        with db_connect(library) as conn:
+            rows=conn.execute("""
+                SELECT id,nombre,preguntas_json,tamano_papel
+                FROM cuestionarios WHERE eliminado_en IS NULL
+            """).fetchall()
+        for row in rows:
+            try:
+                questions=json.loads(row['preguntas_json'])
+                reduced=[{
+                    'tema':q['tema'],'pregunta':q['pregunta'],
+                    'correcta':q['correcta'],
+                } for q in questions]
+                fingerprint=hashlib.sha256(
+                    compact_json(reduced).encode()).hexdigest()
+                key=(fingerprint,row['tamano_papel'])
+            except (KeyError,ValueError,TypeError):
+                continue
+            by_fingerprint.setdefault(key,[]).append(
+                (row['id'],row['nombre']))
+        linked=0
+        with self.connect() as db:
+            old=db.execute("""
+                SELECT id,version_sha,papel FROM sesiones
+                WHERE cuestionario_id IS NULL AND nombre_evaluacion IS NULL
+            """).fetchall()
+            for row in old:
+                matches=by_fingerprint.get((row['version_sha'],row['papel']),[])
+                if len(matches)!=1:
+                    continue
+                ident,name=matches[0]
+                db.execute("""
+                    UPDATE sesiones SET cuestionario_id=?,nombre_evaluacion=?
+                    WHERE id=? AND cuestionario_id IS NULL
+                """,(ident,name,row['id']))
+                linked+=1
+        return linked
+
     def rename_session(self,sid,name):
         """Permite recuperar nombres de sesiones anteriores sin cambiar folios."""
         name=str(name).strip()
