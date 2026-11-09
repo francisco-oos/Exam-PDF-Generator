@@ -75,14 +75,13 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             'color_respuestas': opciones.get('color_respuestas', '#213A4C'),
         }
         if personas:
-            # La calificación se asocia al folio, no al tipo de cuadernillo.
-            # 'personalizado' es el valor interno histórico del lector OMR;
-            # en el diseñador ya no existe como tercera modalidad.
+            # El examen mantiene el tipo elegido para el historial, pero
+            # su QR/HMAC depende exclusivamente de la presencia de lista.
             data_root = (Path(omr_root) if omr_root is not None else
                          Path(__file__).resolve().parent / 'datos' / 'omr')
             store = OMRStore(data_root)
             sesion = store.create_session(titulo, respuestas, personas, papel,
-                                          'personalizado')
+                                          modo_examen)
             create_forms_pdf(store, sesion, carpeta / 'Hoja_respuestas.pdf',
                              **config)
             create_acetato_omr(
