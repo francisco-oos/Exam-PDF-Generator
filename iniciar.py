@@ -74,6 +74,10 @@ def build_ui(*, open_editor=False):
     paper_choice = tk.StringVar(value='A4')
     body_font = tk.StringVar(value='9.0')
     reuse_booklet = tk.BooleanVar(value=True)
+    modo_examen = tk.StringVar(value='ecologico')
+    lista_personal = tk.StringVar(value='')
+    resumen_personal = tk.StringVar(value='Sin lista: documentos genéricos, sin folios ni QR.')
+    personal_actual: list[dict] = []
     instructions_var = tk.StringVar(value='Lee cada pregunta y elige una respuesta. Marca tus respuestas únicamente en la hoja separada.')
     dirty = tk.StringVar(value='Sin guardar en biblioteca')
     large_preview: list[dict | None] = [None]
@@ -309,6 +313,55 @@ def build_ui(*, open_editor=False):
                 cache['error']=str(exc)
         return cache['questions']
 
+    def seleccionar_personal():
+        """La lista se valida antes de aceptarla; no altera el XLSX del usuario."""
+        path=filedialog.askopenfilename(
+            parent=active_window(),title='Seleccionar lista de participantes',
+            filetypes=[('Excel y CSV','*.xlsx *.csv')])
+        if not path:
+            return
+        try:
+            from omr_evaluaciones.motor import read_roster
+            personas=read_roster(Path(path))
+        except (ValueError,OSError,ImportError) as exc:
+            messagebox.showerror('Lista de participantes no válida',
+                                 str(exc),parent=active_window())
+            return
+        personal_actual[:]=personas
+        lista_personal.set(path)
+        resumen_personal.set(
+            f'{len(personas)} participantes cargados. Se imprimirá el mismo examen '
+            'de acuerdo con la modalidad elegida.')
+        status.set(f'Lista cargada: {len(personas)} participantes.')
+
+    def quitar_personal():
+        personal_actual.clear()
+        lista_personal.set('')
+        resumen_personal.set('Sin lista: documentos genéricos, sin folios ni QR.')
+        status.set('Lista retirada. El examen puede generarse sin personal.')
+
+    def descargar_personal():
+        """Plantilla común para las tres modalidades; mantener IDs como texto."""
+        origen=BASE/'plantillas'/'Plantilla_Personal_OMR.xlsx'
+        if not origen.is_file():
+            messagebox.showerror('Plantilla no disponible',
+                                 'Falta la plantilla de participantes en el repositorio.',
+                                 parent=active_window())
+            return
+        destino=filedialog.asksaveasfilename(
+            parent=active_window(),title='Descargar plantilla de participantes',
+            initialfile='Plantilla_Participantes.xlsx',defaultextension='.xlsx',
+            filetypes=[('Libro Excel','*.xlsx')])
+        if not destino:
+            return
+        try:
+            from shutil import copyfile
+            copyfile(origen,destino)
+            status.set('Plantilla de participantes guardada en: '+destino)
+        except OSError as exc:
+            messagebox.showerror('No se pudo guardar la plantilla',
+                                 str(exc),parent=active_window())
+
     def preview_data():
         """Configuración única para ambas vistas; evita divergencias de colores."""
         questions=load_questions()
@@ -323,7 +376,10 @@ def build_ui(*, open_editor=False):
              color_respuestas=safe_color(color_answers,'#213A4C'),
              color_acetato=hex_color(color_acetate.get(), 'Color del acetato'),
              tamano_papel=paper_choice.get(),letra=float(body_font.get()),
-             reutilizable=bool(reuse_booklet.get()))
+             reutilizable=bool(reuse_booklet.get()),
+             modo_examen=modo_examen.get(), cantidad_personas=len(personal_actual),
+             participante_nombre=personal_actual[0]['nombre'] if personal_actual else '',
+             participante_id=personal_actual[0]['id'] if personal_actual else '')
 
     def open_large_preview():
         """Abre el editor dedicado, con controles junto al PDF real.
@@ -347,12 +403,16 @@ def build_ui(*, open_editor=False):
             'reutilizable': reuse_booklet, 'color_titulo': color_title,
             'color_subtitulo': color_subtitle, 'color_respuestas': color_answers,
             'color_acetato': color_acetate, 'instrucciones': instructions_var,
+            'modo_examen': modo_examen, 'lista_personal': lista_personal,
         }
         editor=open_design_studio(root,datos_fn=preview_data,variables=vars_studio,
             editar_preguntas=edit_current,guardar=save_in_library,generar=run,
             importar=choose_xlsx,biblioteca=open_library,plantilla=template_download,
             estado=dirty,calificar=abrir_omr,
-            preparar_folios=lambda: abrir_omr(preparar=True),
+            seleccionar_personal=seleccionar_personal,
+            descargar_personal=descargar_personal,
+            quitar_personal=quitar_personal,
+            resumen_personal=resumen_personal,
             on_close=close_application if open_editor else None)
         large_preview[0]={'win':editor}
         def clear_state(event):
@@ -613,12 +673,8 @@ def build_ui(*, open_editor=False):
             root.deiconify()
             root.lift()
 
-    def abrir_omr(*, preparar=False):
-        """Cambia al espacio OMR, ocultando el editor para revisar a pantalla completa.
-
-        Preparar abre la configuración de nuevas hojas con QR; calificar abre el
-        historial para recuperar una sesión y sus resultados sin duplicar vistas.
-        """
+    def abrir_omr():
+        """Abre exclusivamente la calificación; la impresión vive en el diseñador."""
         visible = active_window()
         visible.withdraw()
         try:
@@ -627,7 +683,7 @@ def build_ui(*, open_editor=False):
             launch(root, questions=load_questions(),
                    title=title_var.get(), paper=paper_choice.get(),
                    source=file_var.get(), on_return=volver_al_diseno,
-                   start_page='Inicio' if preparar else 'Historial')
+                   start_page='Historial', review_only=True)
         except (ImportError, OSError, tk.TclError) as exc:
             volver_al_diseno()
             messagebox.showerror('No se pudo abrir la calificación',
@@ -653,7 +709,9 @@ def build_ui(*, open_editor=False):
                 color_titulo=color_title.get(), color_subtitulo=color_subtitle.get(),
                 color_respuestas=color_answers.get(), color_acetato=color_acetate.get(),
                 tamano_papel=paper_choice.get(), letra=float(body_font.get()),
-                reutilizable=bool(reuse_booklet.get()))
+                reutilizable=bool(reuse_booklet.get()),
+                modo_examen=modo_examen.get(),
+                lista_personal=lista_personal.get() or None)
             source, title, subtitle = Path(file_var.get()), title_var.get(), subtitle_var.get()
         except (ValueError, OSError) as exc:
             messagebox.showerror('Revisa los ajustes', str(exc), parent=active_window())
@@ -689,9 +747,19 @@ def build_ui(*, open_editor=False):
                 return
             last_output[0] = folder
             status.set('Documentos generados: '+folder.name)
+            try:
+                import json
+                metadata=json.loads((folder/'manifest.json').read_text(encoding='utf-8'))
+                info=(f"Modalidad: {metadata.get('modo_examen','normal')} · "
+                      f"Participantes: {metadata.get('participantes',0)}.")
+                if metadata.get('sesion_omr'):
+                    info+=' Sesión de calificación: '+metadata['sesion_omr']+'.'
+            except (ValueError,OSError):
+                info='Consulta LEEME_IMPRESION.txt para imprimir el lote.'
             openbtn.configure(state='normal')
             messagebox.showinfo('Evaluación generada',
-                'Se generaron cuatro PDF, copia de preguntas, recursos y manifiesto SHA-256.' +
+                'Documentos generados desde el mismo cuestionario. '+info+
+                ' Incluyen los archivos correspondientes a la modalidad elegida.' +
                 (' La configuración se guardó en biblioteca.' if saved else ' La biblioteca no se pudo guardar; usa Guardar cuestionario.') +
                 '\n\n'+str(folder)+'\n\nImprime hoja y acetato a escala 100 %.', parent=active_window())
         root.after(80, receive_export)
