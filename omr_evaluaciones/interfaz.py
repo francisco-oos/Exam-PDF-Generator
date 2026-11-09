@@ -404,6 +404,8 @@ class OMRApp:
         def work():
             processed=[]
             try:
+                digest,archived=self.inbox.archive(
+                    source,inspection,operator='Operador OMR')
                 for step,group in enumerate(inspection['grupos'],1):
                     self.scan_updates.put((
                         'progress',source,
@@ -414,7 +416,8 @@ class OMRApp:
                     # Convertir páginas visibles (1-based) a índices PDF (0-based).
                     indices=[number-1 for number in group['paginas']]
                     report=scan_document(
-                        self.store,sid,Path(source),page_indices=indices)
+                        self.store,sid,archived,page_indices=indices)
+                    self.inbox.mark_processed(digest,sid,report)
                     processed.append({'sid':sid,'evaluacion':group['evaluacion'],
                                       'paginas':group['paginas'],'report':report})
                 self.scan_updates.put(('ok',source,{
@@ -454,12 +457,22 @@ class OMRApp:
             summary=describe_scan_inspection(inspection,self.session_id)
             if not groups:
                 self.scanning=False
-                self.feedback.set('Sin evaluaciones verificadas. Ninguna hoja fue calificada.')
-                messagebox.showwarning(
-                    'No se pudo identificar la evaluación',
-                    summary+'\n\nRevisa los QR o selecciona y verifica la evaluación '
-                    'de cada hoja antes de una captura manual.',
+                yes=messagebox.askyesno(
+                    'Hojas pendientes de identificación',
+                    summary+'\n\nNo hay QR verificables. ¿Archivar el PDF completo '
+                    'en Bandeja PDF, SIN calificar, para revisarlo después?',
                     parent=self.window)
+                if yes:
+                    try:
+                        self.inbox.archive(source,inspection,operator='Operador OMR')
+                    except Exception as exc:
+                        messagebox.showerror('Error de archivo documental',
+                                             str(exc),parent=self.window)
+                        return
+                    self.feedback.set('PDF conservado, pendiente de identificar.')
+                    self.navigate('Bandeja PDF')
+                else:
+                    self.feedback.set('Carga cancelada. Sin cambios de notas.')
                 return
             foreign=bool(self.session_id and any(
                 group['sesion_id']!=self.session_id for group in groups))
@@ -468,16 +481,17 @@ class OMRApp:
             if mixed:
                 approved=messagebox.askyesno(
                     'Atención: hojas de distintas evaluaciones',
-                    summary+'\n\n¿Procesar ÚNICAMENTE las hojas con QR '
+                    summary+'\n\n¿ARCHIVAR TODO EL PDF y procesar solo las hojas con QR '
                     'verificable, cada una con la clave de su propia evaluación?'
-                    '\n\nLas demás no se calificarán. Pulsa No para cancelar '
+                    '\n\nLas demás se conservarán en Bandeja PDF sin calificación. '
+                    'Pulsa No para cancelar '
                     'sin modificar resultados.',
                     parent=self.window)
                 if not approved:
                     self.scanning=False
                     self.feedback.set('Lectura cancelada: no se calificó ninguna hoja.')
                     return
-            self.feedback.set('Procesando hojas por evaluación y clave verificada…')
+            self.feedback.set('Conservando el PDF y procesando cada sesión…')
             self._process_verified_groups(source,inspection,self.session_id)
             return
 
@@ -520,8 +534,8 @@ class OMRApp:
                 'Resultado: lote con evaluaciones mezcladas',
                 detail+'\n\nCada evaluación se calificó por separado, con su '
                 'propia clave. Abre las demás desde Historial para revisar '
-                'sus notas y entregables. Las hojas no verificadas siguen '
-                'sin calificación automática.',
+                'sus notas y entregables. Las hojas sin QR quedaron '
+                'conservadas en Bandeja PDF, sin calificación.',
                 parent=self.window)
 
     def _table(self,columns,rows,on_select=None):
