@@ -8,7 +8,7 @@ permite diseñar las opciones de composición soportadas por el generador.
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, colorchooser
+from tkinter import ttk, colorchooser, filedialog
 from PIL import ImageTk
 
 from biblioteca import hex_color
@@ -101,9 +101,31 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     field('Empresa / institución', variables['empresa'])
     field('Área o público', variables['grupo'])
     if 'instrucciones' in variables:
-        field('Instrucciones del participante', variables['instrucciones'])
+        tk.Label(settings_inner, text='Instrucciones del participante', bg=WHITE, fg=NAVY).grid(sticky='w', columnspan=2)
+        instructions = tk.Text(settings_inner, height=4, wrap='word', font=('Segoe UI', 9))
+        instructions.grid(sticky='ew', columnspan=2, pady=(3, 8))
+        instructions.insert('1.0', variables['instrucciones'].get())
+        def sync_instructions(*_):
+            value = variables['instrucciones'].get()
+            if instructions.get('1.0', 'end-1c') != value:
+                instructions.delete('1.0', 'end')
+                instructions.insert('1.0', value)
+        def change_instructions(event=None):
+            if instructions.edit_modified():
+                value = instructions.get('1.0', 'end-1c')
+                if variables['instrucciones'].get() != value:
+                    variables['instrucciones'].set(value)
+                instructions.edit_modified(False)
+        instructions.bind('<<Modified>>', change_instructions)
+        traces.append((variables['instrucciones'], variables['instrucciones'].trace_add('write', sync_instructions)))
     if 'logotipo' in variables:
         field('Ruta del logotipo (PNG/JPG)', variables['logotipo'])
+        def choose_logo():
+            path = filedialog.askopenfilename(parent=window, title='Elegir logotipo',
+                                             filetypes=[('Imagen PNG/JPEG', '*.png *.jpg *.jpeg')])
+            if path:
+                variables['logotipo'].set(path)
+        ttk.Button(settings_inner, text='Elegir logotipo…', command=choose_logo).grid(sticky='ew', columnspan=2)
 
     section('02 · Página y tipografía', 'Ajusta la composición; no modifica las preguntas originales.')
     tk.Label(settings_inner, text='Formato de papel', bg=WHITE, fg=NAVY).grid(sticky='w', columnspan=2)
@@ -158,16 +180,17 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
 
     actions = tk.Frame(result, bg=WHITE, padx=10, pady=8)
     actions.pack(fill='x', pady=(0, 6))
-    tk.Label(actions, text='Documento', bg=WHITE, fg=NAVY).pack(side='left', padx=(0, 4))
-    ttk.Combobox(actions, textvariable=selected, state='readonly', width=14,
-                 values=('Cuadernillo', 'Respuestas', 'Acetato')).pack(side='left', padx=(0,8))
-    tk.Button(actions, text='◀', width=4, command=lambda:turn_page(-1)).pack(side='left', padx=3)
-    tk.Button(actions, text='▶', width=4, command=lambda:turn_page(1)).pack(side='left', padx=3)
-    tk.Label(actions, textvariable=progress, bg=WHITE, fg=LABEL,
-             font=('Segoe UI', 9)).pack(side='left', padx=8)
+    actions.columnconfigure(1, weight=1)
+    ttk.Combobox(actions, textvariable=selected, state='readonly', width=13,
+                 values=('Cuadernillo', 'Respuestas', 'Acetato')).grid(row=0, column=0, padx=(0,8))
+    navigation = tk.Frame(actions, bg=WHITE)
+    navigation.grid(row=0, column=1, sticky='w')
+    tk.Button(navigation, text='◀', width=3, command=lambda:turn_page(-1)).pack(side='left', padx=2)
+    tk.Button(navigation, text='▶', width=3, command=lambda:turn_page(1)).pack(side='left', padx=2)
     ttk.Combobox(actions, textvariable=zoom, state='readonly', width=9,
-                 values=('Ajustar', '70%', '85%', '100%', '125%', '150%', '175%', '200%')).pack(side='right')
-    tk.Label(actions, text='Zoom', bg=WHITE, fg=NAVY).pack(side='right', padx=(0, 5))
+                 values=('Ajustar', '70%', '85%', '100%', '125%', '150%', '175%', '200%')).grid(row=0, column=2)
+    tk.Label(actions, textvariable=progress, bg=WHITE, fg=LABEL,
+             font=('Segoe UI', 9), anchor='w', wraplength=380).grid(row=1, column=0, columnspan=3, sticky='ew', pady=(5,0))
 
     frame=tk.Frame(result, bg='#dbe5ea')
     frame.pack(fill='both', expand=True)
@@ -289,6 +312,14 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     window.protocol('WM_DELETE_WINDOW', close)
     window.bind('<Escape>', lambda event: close())
     window.bind('<Destroy>', cleanup, add='+')
+    def scroll_panel(event):
+        target = settings_canvas if event.x_root < result.winfo_rootx() else canvas
+        steps = (-1 if event.num == 4 else 1) if event.num in (4, 5) else -int(event.delta/120)
+        target.yview_scroll(steps, 'units')
+    window.bind('<MouseWheel>', scroll_panel)
+    window.bind('<Button-4>', scroll_panel)
+    window.bind('<Button-5>', scroll_panel)
+    window.lift()
     queue_render()
     polling[0] = window.after(50, receive)
     return window

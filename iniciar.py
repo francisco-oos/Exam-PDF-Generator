@@ -167,6 +167,8 @@ def build_ui(*, open_editor=False):
     ttk.Entry(row_xlsx,textvariable=file_var,style='Modern.TEntry').grid(row=0,column=0,sticky='ew')
 
     def choose_xlsx():
+        if not confirm_replace():
+            return
         chosen=filedialog.askopenfilename(title='Seleccionar Excel de preguntas',
                     filetypes=[('Libro de Excel','*.xlsx')],parent=root)
         if chosen:
@@ -206,7 +208,9 @@ def build_ui(*, open_editor=False):
     instructions_var.trace_add('write', sync_instruction)
     def text_changed(event=None):
         if instruction.edit_modified():
-            instructions_var.set(instruction.get('1.0', 'end-1c'))
+            value = instruction.get('1.0', 'end-1c')
+            if instructions_var.get() != value:
+                instructions_var.set(value)
             instruction.edit_modified(False)
     instruction.bind('<<Modified>>', text_changed)
     label('Colores del documento (RGB)',14)
@@ -420,6 +424,17 @@ def build_ui(*, open_editor=False):
             if not silent:messagebox.showerror('No se guardó',str(exc),parent=root)
             return None
 
+    def confirm_replace():
+        """Protege las ediciones en memoria antes de cambiar de fuente o salir."""
+        if dirty.get() != 'Cambios pendientes de guardar':
+            return True
+        answer = messagebox.askyesnocancel('Cambios pendientes',
+            '¿Guardar el cuestionario antes de continuar?\n'
+            'Sí: guardar en biblioteca. No: continuar sin guardar. Cancelar: seguir editando.', parent=root)
+        if answer is None:
+            return False
+        return not answer or save_in_library(silent=True) is not None
+
     def edit_current():
         questions=load_questions()
         edited=edit_questions(root,questions)
@@ -483,6 +498,7 @@ def build_ui(*, open_editor=False):
             if trashed.get():return
             item=pick()
             if not item:return
+            if not confirm_replace():return
             try:
                 exam=load_exam(db_path,item,BASE/'datos'/'biblioteca_cache')
                 workbook=export_workbook(exam.questions,BASE/'datos'/'biblioteca_cache'/exam.id/'Preguntas.xlsx')
@@ -562,35 +578,63 @@ def build_ui(*, open_editor=False):
     tk.Button(toolbar,text='Guardar cuestionario',command=save_in_library,
         bg=TEAL,fg=WHITE,bd=0,padx=9,pady=9,cursor='hand2').pack(side='left')
 
+    exporting = [False]
+
     def run():
-        btn.config(state='disabled',text='Generando…')
-        root.update_idletasks()
+        """Toma una instantánea en Tk y exporta fuera del ciclo de eventos."""
+        if exporting[0]:
+            return
+        from multiprocessing import get_context
+        from export_worker import export_documents
         try:
-            folder=generate(Path(file_var.get()),BASE/'salidas',title_var.get(),subtitle_var.get(),
-                empresa=company_var.get(),puesto=group_var.get(),
-                instrucciones=instruction.get('1.0','end-1c'),
+            options = dict(empresa=company_var.get(), puesto=group_var.get(),
+                instrucciones=instructions_var.get(),
                 logo=Path(logo_var.get()) if logo_var.get().strip() else None,
-                color_titulo=color_title.get(),color_subtitulo=color_subtitle.get(),
-                color_respuestas=color_answers.get(),color_acetato=color_acetate.get(),tamano_papel=paper_choice.get(),
-                letra=float(body_font.get()),reutilizable=bool(reuse_booklet.get()))
-        except (ExamError,OSError,ValueError) as exc:
-            status.set('Revisa los datos · no se crearon los documentos.')
-            messagebox.showerror('No se pudo generar la evaluación',str(exc),parent=root)
-        except Exception as exc:
-            status.set('Error al generar los documentos.')
-            messagebox.showerror('Error inesperado',str(exc),parent=root)
-        else:
-            last_output[0]=folder
-            # Las evaluaciones generadas también se conservan para reabrirlas.
-            saved=save_in_library(silent=True)
+                color_titulo=color_title.get(), color_subtitulo=color_subtitle.get(),
+                color_respuestas=color_answers.get(), color_acetato=color_acetate.get(),
+                tamano_papel=paper_choice.get(), letra=float(body_font.get()),
+                reutilizable=bool(reuse_booklet.get()))
+            source, title, subtitle = Path(file_var.get()), title_var.get(), subtitle_var.get()
+        except (ValueError, OSError) as exc:
+            messagebox.showerror('Revisa los ajustes', str(exc), parent=root)
+            return
+        # Guardar ahora evita asociar los cambios posteriores con esta exportación.
+        saved = save_in_library(silent=True)
+        exporting[0] = True
+        btn.config(state='disabled', text='Generando…')
+        status.set('Generando documentos; puedes seguir consultando la vista previa.')
+        context = get_context('spawn')
+        results, child_results = context.Pipe(duplex=False)
+        process = context.Process(target=export_documents,
+            args=(child_results, source, BASE/'salidas', title, subtitle, options), daemon=True)
+        process.start()
+        child_results.close()
+        def receive_export():
+            try:
+                if not results.poll():
+                    raise BlockingIOError()
+                folder, error = results.recv()
+            except (BlockingIOError, EOFError):
+                if process.is_alive():
+                    root.after(80, receive_export)
+                    return
+                folder, error = None, 'El proceso de exportación terminó inesperadamente.'
+            process.join(timeout=.2)
+            results.close()
+            exporting[0] = False
+            btn.config(state='normal', text='Generar documentos')
+            if error:
+                status.set('No se completó la exportación. Revisa los datos e inténtalo de nuevo.')
+                messagebox.showerror('No se pudo generar la evaluación', error, parent=root)
+                return
+            last_output[0] = folder
             status.set('Documentos generados: '+folder.name)
             openbtn.configure(state='normal')
             messagebox.showinfo('Evaluación generada',
-               'Se generaron los cuatro PDF, una copia de las preguntas y se guardó en la biblioteca' +
-               (' local.' if saved else ' (revisa la biblioteca para guardarlo).') + '\n\n'+str(folder)+
-               '\n\nImprime la hoja y el acetato a escala 100 %.',parent=root)
-        finally:
-            btn.config(state='normal',text='Generar documentos')
+                'Se generaron cuatro PDF, copia de preguntas, recursos y manifiesto SHA-256.' +
+                (' La configuración se guardó en biblioteca.' if saved else ' La biblioteca no se pudo guardar; usa Guardar cuestionario.') +
+                '\n\n'+str(folder)+'\n\nImprime hoja y acetato a escala 100 %.', parent=root)
+        root.after(80, receive_export)
 
     btn=tk.Button(bottom,text='Generar documentos',command=run,fg=WHITE,bg=TEAL,
         activebackground='#096272',activeforeground=WHITE,
@@ -610,6 +654,13 @@ def build_ui(*, open_editor=False):
     root.after(50,render)
     if open_editor:
         root.after(100,open_large_preview)
+    def close_application():
+        if exporting[0]:
+            messagebox.showinfo('Exportación en curso', 'Espera a que termine la exportación antes de cerrar.', parent=root)
+            return
+        if confirm_replace():
+            root.destroy()
+    root.protocol('WM_DELETE_WINDOW', close_application)
     return root
 
 

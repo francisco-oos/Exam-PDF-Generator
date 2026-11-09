@@ -26,10 +26,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
       - name: Ejecutar pruebas en Linux con pantalla virtual
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -m pytest -q
+        run: xvfb-run -a python -m pytest -q -W error::pytest.PytestUnraisableExceptionWarning
       - name: Ejecutar pruebas en Windows
         if: runner.os == 'Windows'
-        run: python -m pytest -q
+        run: python -m pytest -q -W error::pytest.PytestUnraisableExceptionWarning
       - name: Verificar iniciador Windows sin interfaz (Python 3.13)
         if: runner.os == 'Windows' && matrix.python == '3.13'
         shell: cmd

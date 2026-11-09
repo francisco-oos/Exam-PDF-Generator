@@ -10,6 +10,12 @@ from biblioteca import (save_exam, load_exam, list_exams, export_workbook,
                         DEFAULT_COLOR_TITLE, DEFAULT_COLOR_SUBTITLE, hex_color)
 
 
+def test_exporta_texto_sin_convertirlo_en_formula(tmp_path):
+    q = [Question('Tema', '=1+1', ('=2+2', 'Dos', 'Tres', 'Cuatro'), 0)]
+    path = export_workbook(q, tmp_path/'texto.xlsx')
+    assert read_questions(path)[0].prompt == '=1+1'
+
+
 def questions(tmp_path):
     (tmp_path/'imagenes').mkdir(exist_ok=True)
     img=tmp_path/'imagenes'/'un_equipo.png'

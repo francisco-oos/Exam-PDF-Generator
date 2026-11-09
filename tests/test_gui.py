@@ -107,3 +107,34 @@ def test_pdf_real_y_error_recuperable(root):
     editor.event_generate('<Escape>')
     parent.update()
     assert not editor.winfo_exists()
+
+
+def test_exportacion_no_bloquea_tk(tmp_path, monkeypatch):
+    import iniciar
+    from biblioteca import export_workbook
+    export_workbook([Question('Tema', 'Pregunta', ('a', 'b', 'c', 'd'), 0)],
+                    tmp_path/'ejemplos'/'Plantilla_20_preguntas.xlsx')
+    monkeypatch.setattr(iniciar, 'BASE', tmp_path)
+    messages = []
+    monkeypatch.setattr(iniciar.messagebox, 'showinfo', lambda *a, **k: messages.append(a))
+    monkeypatch.setattr(iniciar.messagebox, 'showerror', lambda *a, **k: pytest.fail(str(a)))
+    parent = iniciar.build_ui()
+    try:
+        errors = []
+        parent.report_callback_exception = lambda *args: errors.append(args)
+        button = next(w for w in descendants(parent)
+                      if isinstance(w, tk.Button) and w.cget('text') == 'Generar documentos')
+        start = time.monotonic()
+        button.invoke()
+        assert time.monotonic()-start < 2
+        heartbeats = []
+        parent.after(30, lambda: heartbeats.append(True))
+        pump(parent, .15)
+        assert heartbeats
+        deadline = time.monotonic()+15
+        while not messages and time.monotonic() < deadline:
+            pump(parent, .1)
+        assert messages and not errors
+        assert len(list((tmp_path/'salidas').glob('*/*.pdf'))) == 4
+    finally:
+        parent.destroy()
