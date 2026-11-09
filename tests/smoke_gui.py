@@ -19,7 +19,9 @@ with tempfile.TemporaryDirectory() as temp:
     ImageGrab.grab().save(str(out/'Vista_Real_Hoja_QR.png'))
     _,scan=create_synthetic_scan(app.store,app.session_id,Path(temp)/'demo')
     app.navigate('Escanear PDF');app._run_scan(scan)
-    deadline=time.monotonic()+25
+    # El flujo seguro revisa TODOS los QR antes de calificar; en CI sin GPU
+    # la inspección y la lectura son dos etapas, más lentas que el flujo previo.
+    deadline=time.monotonic()+100
     while app.scanning and time.monotonic()<deadline:
         app.window.update();time.sleep(.04)
     assert not app.scanning
