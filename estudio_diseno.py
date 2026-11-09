@@ -25,7 +25,9 @@ LABEL = '#607487'
 def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
                        editar_preguntas=None, guardar=None, generar=None,
                        importar=None, biblioteca=None, plantilla=None, estado=None,
-                       calificar=None, preparar_folios=None, on_close=None):
+                       calificar=None, preparar_folios=None, on_close=None,
+                       seleccionar_personal=None, descargar_personal=None,
+                       quitar_personal=None, resumen_personal=None):
     """Crea el diseñador de dos paneles y devuelve la ventana (útil para pruebas).
 
     ``variables`` contiene StringVar/BooleanVar ya utilizadas por la ventana
@@ -59,6 +61,9 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     work_menu.add_command(label='Diseñar examen (vista actual)', command=window.lift)
     if calificar is not None:
         work_menu.add_command(label='Calificar y entregar resultados', command=calificar)
+    if descargar_personal is not None:
+        work_menu.add_command(label='Descargar plantilla de participantes',
+                              command=descargar_personal)
     if biblioteca is not None:
         work_menu.add_command(label='Biblioteca de cuestionarios', command=biblioteca)
     if plantilla is not None:
@@ -76,6 +81,10 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     nav.pack(anchor='w', pady=(8, 0))
     tk.Button(nav, text='Diseñar e imprimir', state='disabled', bg=ACCENT, fg=WHITE,
               disabledforeground=WHITE, bd=0, padx=13, pady=7).pack(side='left', padx=(0, 7))
+    if generar is not None:
+        tk.Button(nav, text='Generar PDF de examen', command=generar,
+                  bg=ACCENT, fg=WHITE, bd=0, padx=13, pady=7
+                  ).pack(side='left', padx=(0, 7))
     if calificar is not None:
         tk.Button(nav, text='Calificar y entregar', command=calificar,
                   bg='#e0edf1', fg=NAVY, bd=0, padx=13, pady=7).pack(side='left')
@@ -150,63 +159,75 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
                 variables['logotipo'].set(path)
         ttk.Button(settings_inner, text='Elegir logotipo…', command=choose_logo).grid(sticky='ew', columnspan=2)
 
-    section('02 · Tipo de examen', 'Elige qué vas a imprimir; el diseño y la clave del examen son los mismos.')
-    exam_type = tk.StringVar(master=window,
+    section('02 · Participantes (opcional)',
+            'Carga una sola lista para identificar los documentos. Sin lista se genera examen genérico.')
+    if 'lista_personal' in variables:
+        tk.Label(settings_inner, text='Lista de participantes (CSV o XLSX)',
+                 bg=WHITE, fg=NAVY).grid(sticky='w', columnspan=2)
+        ttk.Entry(settings_inner, textvariable=variables['lista_personal'],
+                  state='readonly').grid(sticky='ew', columnspan=2, pady=(3, 5))
+        controls_people=tk.Frame(settings_inner, bg=WHITE)
+        controls_people.grid(sticky='ew', columnspan=2, pady=(0,4))
+        if seleccionar_personal is not None:
+            ttk.Button(controls_people,text='Cargar lista',
+                       command=seleccionar_personal).pack(side='left',padx=(0,5))
+        if quitar_personal is not None:
+            ttk.Button(controls_people,text='Quitar lista',
+                       command=quitar_personal).pack(side='left')
+        if descargar_personal is not None:
+            ttk.Button(settings_inner, text='Descargar plantilla de participantes',
+                       command=descargar_personal).grid(
+                           sticky='ew', columnspan=2, pady=(0,5))
+        if resumen_personal is not None:
+            tk.Label(settings_inner,textvariable=resumen_personal,bg=WHITE,
+                     fg=LABEL,wraplength=300,justify='left').grid(
+                         sticky='w',columnspan=2,pady=(1,6))
+
+    section('03 · Modalidad de impresión',
+            'Un único cuestionario; solo cambia cuántos cuadernillos y hojas imprimir.')
+    exam_type = variables.get('modo_examen') or tk.StringVar(master=window,
         value='ecologico' if variables['reutilizable'].get() else 'normal')
     type_help = tk.StringVar(master=window)
     type_options = (
-        ('normal', 'Normal · cuadernillo y hoja de respuestas'),
-        ('ecologico', 'Ecológico · cuadernillo reutilizable'),
-        ('folio', 'Con folio y QR · hojas individuales para escáner'),
+        ('normal', 'Tradicional · cuadernillo y hoja de respuestas'),
+        ('ecologico', 'Ecológico · un cuadernillo reutilizable'),
+        ('folio', 'Con folio y QR · hojas para calificar con escáner'),
     )
-    for code, label in type_options:
-        ttk.Radiobutton(settings_inner, text=label, variable=exam_type,
-                        value=code).grid(sticky='w', columnspan=2, pady=(1, 5))
-    tk.Label(settings_inner, textvariable=type_help, bg=WHITE, fg=LABEL,
-             wraplength=300, justify='left').grid(
-                 sticky='w', columnspan=2, pady=(2, 6))
-    folio_button = None
-    if preparar_folios is not None:
-        folio_button = tk.Button(settings_inner,
-            text='Preparar hojas con folio y QR', command=preparar_folios,
-            bg=ACCENT, fg=WHITE, bd=0, pady=10,
-            font=('Segoe UI', 10, 'bold'))
-        folio_button.grid(sticky='ew', columnspan=2, pady=(4, 10))
+    for code,label in type_options:
+        ttk.Radiobutton(settings_inner,text=label,variable=exam_type,
+                        value=code).grid(sticky='w',columnspan=2,pady=(1,5))
+    tk.Label(settings_inner,textvariable=type_help,bg=WHITE,fg=LABEL,
+             wraplength=300,justify='left').grid(
+                 sticky='w',columnspan=2,pady=(3,9))
+
     def update_type(*_):
-        mode = exam_type.get()
-        # Con QR se conserva el cuadernillo reutilizable; la identificación
-        # del participante vive exclusivamente en su hoja personalizada.
-        reusable = mode != 'normal'
-        if variables['reutilizable'].get() != reusable:
+        mode=exam_type.get()
+        reusable=mode!='normal'
+        if variables['reutilizable'].get()!=reusable:
             variables['reutilizable'].set(reusable)
-        descriptions = {
-            'normal': 'Genera cuadernillo, hoja de respuestas, clave y acetato normales.',
-            'ecologico': 'Genera cuadernillo sin datos personales y con aviso NO RAYAR NI MANCHAR.',
-            'folio': 'Primero genera el cuadernillo; después prepara las hojas individuales '
-                     'con folio y QR desde el botón de esta sección.',
+        descriptions={
+            'normal': 'Con lista: cuadernillo y hoja para cada persona. '
+                      'Sin lista: documentos sin identificación.',
+            'ecologico': 'Un cuadernillo reutilizable. Con lista: una hoja '
+                         'de respuestas identificada por participante.',
+            'folio': 'Con lista: folio, QR y marcas de registro en la misma '
+                     'hoja del examen, lista para escanear. Sin lista: PDF genérico sin QR.',
         }
-        type_help.set(descriptions.get(mode, ''))
-        if folio_button is not None:
-            if mode == 'folio':
-                folio_button.grid()
-            else:
-                folio_button.grid_remove()
+        type_help.set(descriptions.get(mode,''))
 
     def sync_type_from_booklet(*_):
-        # Al abrir una evaluación de la biblioteca, se respeta su modalidad.
-        # La modalidad con QR permanece seleccionada durante el cambio de vistas.
-        if exam_type.get() == 'folio':
+        if exam_type.get()=='folio':
             return
-        expected = 'ecologico' if variables['reutilizable'].get() else 'normal'
-        if exam_type.get() != expected:
+        expected='ecologico' if variables['reutilizable'].get() else 'normal'
+        if exam_type.get()!=expected:
             exam_type.set(expected)
 
-    traces.append((exam_type, exam_type.trace_add('write', update_type)))
+    traces.append((exam_type,exam_type.trace_add('write',update_type)))
     traces.append((variables['reutilizable'],
-                   variables['reutilizable'].trace_add('write', sync_type_from_booklet)))
+                   variables['reutilizable'].trace_add('write',sync_type_from_booklet)))
     update_type()
 
-    section('03 · Página y tipografía', 'Ajusta la composición; no modifica las preguntas originales.')
+    section('04 · Página y tipografía', 'Ajusta la composición; no modifica las preguntas originales.')
     tk.Label(settings_inner, text='Formato de papel', bg=WHITE, fg=NAVY).grid(sticky='w', columnspan=2)
     ttk.Combobox(settings_inner, textvariable=variables['papel'],
                  values=('Carta', 'A4', 'Oficio'), state='readonly').grid(
@@ -216,7 +237,7 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     ttk.Combobox(settings_inner, textvariable=variables['letra'],
                  values=[f'{n/2:.1f}' for n in range(16, 25)], state='readonly').grid(
                      sticky='ew', columnspan=2, pady=(3, 8))
-    section('04 · Paletas de color', 'Elige colores RGB. La hoja de respuestas conserva fondo blanco.')
+    section('05 · Paletas de color', 'Elige colores RGB. La hoja de respuestas conserva fondo blanco.')
     swatches = {}
     def color_input(label: str, key: str):
         row = tk.Frame(settings_inner, bg=WHITE)
@@ -240,12 +261,12 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     color_input('Hoja de respuestas', 'color_respuestas')
     color_input('Acetato', 'color_acetato')
 
-    section('05 · Preguntas y biblioteca', 'Se edita la fuente del examen; el PDF se regenera al cambiarla.')
+    section('06 · Preguntas y biblioteca', 'Se edita la fuente del examen; el PDF se regenera al cambiarla.')
     tk.Button(settings_inner, text='Editar preguntas y opciones', command=editar_preguntas,
               bg='#e5eef2', fg=NAVY, bd=0, pady=10).grid(sticky='ew', columnspan=2, pady=(0,7))
     tk.Button(settings_inner, text='Guardar cuestionario en biblioteca', command=guardar,
               bg=ACCENT, fg=WHITE, bd=0, pady=11).grid(sticky='ew', columnspan=2, pady=(0,7))
-    tk.Button(settings_inner, text='Generar cuadernillo, respuestas y acetato PDF', command=generar,
+    tk.Button(settings_inner, text='Generar PDFs de la modalidad elegida', command=generar,
               bg=NAVY, fg=WHITE, bd=0, pady=11).grid(sticky='ew', columnspan=2, pady=(0,8))
     tk.Label(settings_inner, text='La vista es exacta respecto al generador. No permite mover '
              'objetos con el ratón ni editar archivos PDF externos.', bg=WHITE, fg=LABEL,
