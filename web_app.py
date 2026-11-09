@@ -121,7 +121,12 @@ def _form() -> bytes:
     <div><label>Área, público o grupo (libre)</label><input name="puesto" maxlength="85" placeholder="Ej. Alumnos, personal técnico, proveedores"></div></div>
     <label>Título de la evaluación</label><input name="titulo" maxlength="90" required value="Evaluación de conocimientos">
     <label>Subtítulo</label><input name="subtitulo" maxlength="90" required value="Aplicación práctica de conocimientos">
+    <div class="grid">
+      <div><label>Color del título (RGB)</label><input type="color" name="color_titulo" value="#213A4C"></div>
+      <div><label>Color del subtítulo (RGB)</label><input type="color" name="color_subtitulo" value="#5E7180"></div>
+    </div>
     <label>Excel de preguntas</label><select name="archivo">{_options(files)}</select>
+    <p class="hint"><a href="/plantilla">Descargar plantilla XLSX con guía y ejemplos</a></p>
     <label>Logotipo (opcional)</label><select name="logo">{_options(logos)}</select>
     <label>Instrucciones al participante</label>
     <textarea name="instrucciones" maxlength="650">Lee cada pregunta y elige una sola opción. Marca las respuestas únicamente en la hoja separada.</textarea>
@@ -174,6 +179,13 @@ class Handler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path == '/':
             self._respond(HTTPStatus.OK, _form())
+        elif path == '/plantilla':
+            template=ROOT/'plantillas'/'Plantilla_Cuestionario.xlsx'
+            if not template.is_file() or template.is_symlink() or template.stat().st_size > 1024*1024:
+                self._respond(HTTPStatus.NOT_FOUND,b'Plantilla no disponible',kind='text/plain')
+            else:
+                self._respond(HTTPStatus.OK,template.read_bytes(),kind='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    extra={'Content-Disposition':'attachment; filename="Plantilla_Cuestionario.xlsx"'})
         elif path == '/salud':
             self._respond(HTTPStatus.OK, b'OK', kind='text/plain; charset=utf-8')
         elif path.startswith('/descargar/'):
@@ -217,7 +229,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             fields = parse_qs(self.rfile.read(length).decode('utf-8'), keep_blank_values=True,
-                              strict_parsing=True, max_num_fields=12)
+                              strict_parsing=True, max_num_fields=14)
             def field(name):
                 vals = fields.get(name, [''])
                 if len(vals) != 1:
@@ -239,11 +251,13 @@ class Handler(BaseHTTPRequestHandler):
             logo = choose('logo', logos)
             titulo, subtitulo = field('titulo'), field('subtitulo')
             empresa, puesto, instrucciones = field('empresa'), field('puesto'), field('instrucciones')
+            color_titulo, color_subtitulo = field('color_titulo') or '#213A4C',field('color_subtitulo') or '#5E7180'
             if max(map(len, (titulo, subtitulo, empresa, puesto, instrucciones))) > 650:
                 raise ValueError('Texto demasiado largo.')
             OUTPUTS.mkdir(parents=True, exist_ok=True)
             folder = generate(exam, OUTPUTS, titulo, subtitulo, empresa=empresa,
-                              puesto=puesto, instrucciones=instrucciones, logo=logo)
+                              puesto=puesto, instrucciones=instrucciones, logo=logo,
+                              color_titulo=color_titulo,color_subtitulo=color_subtitulo)
             self._respond(HTTPStatus.OK, _result(folder))
         except (ExamError, OSError, ValueError, UnicodeError) as exc:
             msg = escape(str(exc))

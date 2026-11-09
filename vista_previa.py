@@ -32,6 +32,8 @@ class PreviewData:
     instrucciones: str = ''
     questions: tuple[Question, ...] = ()
     logo: Path | None = None
+    color_titulo: str = '#213A4C'
+    color_subtitulo: str = '#5E7180'
 
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -116,8 +118,8 @@ def _cover_page(d: PreviewData) -> Image.Image:
     dr.text((startx,49), (d.empresa or 'ORGANIZACIÓN / EMPRESA').upper()[:63],
             font=_font(12,bold=True),fill=TEAL)
     y=_write(dr,(startx,70),'EVALUACIÓN DE CONOCIMIENTOS',_font(12,bold=True),INK,MAX_WIDTH:=SIZE[0]-startx-50,2)
-    y=_write(dr,(startx,y+5), d.titulo or 'Título de la evaluación', _font(22,bold=True),DARK,MAX_WIDTH,3,4)
-    y=_write(dr,(startx,y+4), d.subtitulo or 'Subtítulo opcional', _font(13),MUTED,MAX_WIDTH,2)
+    y=_write(dr,(startx,y+5), d.titulo or 'Título de la evaluación', _font(22,bold=True),d.color_titulo,MAX_WIDTH,3,4)
+    y=_write(dr,(startx,y+4), d.subtitulo or 'Subtítulo opcional', _font(13),d.color_subtitulo,MAX_WIDTH,2)
     if d.grupo:
         y=_write(dr,(startx,y+7),'Área / grupo: '+d.grupo,_font(12),MUTED,MAX_WIDTH,2)
     header_bottom=max(y+15,176)
@@ -169,8 +171,8 @@ def _sheet_page(d: PreviewData, *, acetate: bool) -> Image.Image:
     dr=ImageDraw.Draw(im)
     if not acetate:
         dr.text((210,61),'HOJA DE RESPUESTAS',font=_font(14,bold=True),fill=INK)
-        _write(dr,(145,85),d.titulo,_font(11),INK,340,1)
-        _write(dr,(145,101),d.subtitulo,_font(10),INK,340,1)
+        _write(dr,(145,85),d.titulo,_font(11),d.color_titulo,340,1)
+        _write(dr,(145,101),d.subtitulo,_font(10),d.color_subtitulo,340,1)
         dr.text((49,141),'Nombre: ___________________________________________',font=_font(10),fill=INK)
         dr.text((49,161),'Fecha: _______________   Grupo / área: _______________',font=_font(10),fill=INK)
         dr.text((50,192),'Marca una sola respuesta (A, B, C o D) por pregunta.',font=_font(9),fill=MUTED)
@@ -186,7 +188,8 @@ def _sheet_page(d: PreviewData, *, acetate: bool) -> Image.Image:
             correct=d.questions[no-1].correct
             x,y=pts[correct]
             ry=PAGE_H-y
-            dr.ellipse((int(x-RADIUS-4),int(ry-RADIUS-4),int(x+RADIUS+4),int(ry+RADIUS+4)),outline=GREEN,width=3)
+            dr.ellipse((int(x-RADIUS-4),int(ry-RADIUS-4),int(x+RADIUS+4),int(ry+RADIUS+4)),
+                       outline=GREEN,fill='#C1E9D2',width=3)
     # _bubbles usa coordenadas de PDF con origen abajo; la imagen tiene origen arriba.
     for x,y in ((37,38),(558,38),(37,805),(558,805)):
         dr.line((x-6,y,x+6,y),fill=INK,width=1)

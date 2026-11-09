@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-co
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY src ./src
-COPY generar.py crear_ejemplo.py web_app.py ./
+COPY generar.py crear_ejemplo.py web_app.py biblioteca.py ./
+COPY plantillas ./plantillas
 # Genera una plantilla ficticia dentro de la imagen; nunca usa datos personales.
 RUN python crear_ejemplo.py \
     && mkdir -p /datos/entradas /datos/salidas \
