@@ -319,53 +319,169 @@ class OMRStore:
                                                 WHERE h.sesion_id=? ORDER BY r.id''',(sid,))]
 
 
-def create_forms_pdf(store:OMRStore,sid:str,target:Path):
-    """Una página con QR verificable y folio legible por participante, sin PII en QR."""
+def _draw_formulario_omr(cnv, session: dict, persona: dict, *,
+                        empresa='', grupo='', subtitulo='',
+                        color_titulo='#213A4C', color_respuestas='#213A4C',
+                        preview=False):
+    """Hoja institucional: una sola geometría para PDF, QR y lectura de escáner.
+
+    Usa bubble_positions y corner_centers sin alteraciones. El aspecto adopta
+    el encabezado/colores de la hoja convencional y mantiene espacio libre
+    alrededor del QR. La vista previa usa un token no perteneciente a sesiones.
+    """
+    from reportlab.lib import colors
+    from reportlab.pdfbase import pdfmetrics
+    from src.evaluaciones.core import _font
+    normal, bold = _font()
+    paper = session['papel']
+    w, h = PAPERS[paper]
+    tint = colors.HexColor(color_respuestas)
+    title_ink = colors.HexColor(color_titulo)
+    pts = bubble_positions(paper, len(session['preguntas']))
+    cnv.setFillColorRGB(1, 1, 1)
+    cnv.rect(0, 0, w, h, fill=1, stroke=0)
+    # Cuatro cuadrados sólidos: el lector debe rectificar en las mismas
+    # posiciones, con independencia del color o texto institucional.
+    for x, y in corner_centers(paper):
+        cnv.setFillColorRGB(0, 0, 0)
+        cnv.rect(x-6, y-6, 12, 12, stroke=0, fill=1)
+
+    def clip_text(text, font, size, maximum):
+        txt = ' '.join(str(text or '').split())
+        while txt and pdfmetrics.stringWidth(txt, font, size) > maximum:
+            txt = txt[:-1]
+        return txt
+
+    cnv.setFillColor(tint)
+    cnv.setFont(bold, 13)
+    cnv.drawString(44, h-68, 'HOJA DE RESPUESTAS')
+    cnv.setFont(bold, 9)
+    cnv.setFillColor(title_ink)
+    cnv.drawString(44, h-87, clip_text(session['titulo'], bold, 9, w-205))
+    if subtitulo:
+        cnv.setFont(normal, 8)
+        cnv.drawString(44, h-101, clip_text(subtitulo, normal, 8, w-205))
+    if empresa:
+        cnv.setFillColor(tint)
+        cnv.setFont(normal, 8)
+        cnv.drawString(44, h-114, clip_text(empresa, normal, 8, w-205))
+    cnv.setFillColor(tint)
+    cnv.setFont(normal, 9)
+    cnv.drawString(44, h-129, 'Folio: '+persona['folio'])
+    cnv.drawString(44, h-145, 'ID: '+clip_text(persona['id'],normal,9,w-205))
+    cnv.drawString(44, h-161, 'Nombre: '+clip_text(persona['nombre'],normal,9,w-205))
+    cnv.setFont(normal, 7.5)
+    label = grupo or persona.get('grupo','')
+    if label:
+        cnv.drawString(44, h-179, clip_text('Grupo: '+label,normal,7.5,w-205))
+    qr_data = _qr_data(session['id'], persona['token'], 1, session['clave_hmac'])
+    cnv.drawImage(ImageReader(_make_qr(qr_data)), w-158,h-178,
+                  width=113,height=113,mask='auto')
+    cnv.setStrokeColor(tint)
+    cnv.setLineWidth(.9)
+    cnv.line(44,h-190,w-44,h-190)
+    n = len(pts)
+    cols = 1 if n<=25 else 2 if n<=50 else 4
+    cw = (w-56)/cols
+    for col in range(cols):
+        x=28+col*cw
+        cnv.setFillColor(tint)
+        cnv.setFont(bold, 7.2)
+        for j,letter in enumerate(ANSWER_CHOICES):
+            cnv.drawCentredString(x+45+23*j,h-215,letter)
+    for i,bubbles in enumerate(pts):
+        col,row=divmod(i,25)
+        base=28+cw*col
+        cnv.setFont(normal,8)
+        cnv.setFillColor(tint)
+        cnv.drawString(base,bubbles[0][1]-3,f'{i+1:02d}')
+        for x,y in bubbles:
+            cnv.setLineWidth(.85)
+            cnv.setStrokeColor(tint)
+            cnv.circle(x,y,RADIUS,fill=0,stroke=1)
+    cnv.setFont(normal,7)
+    cnv.drawString(44,56,clip_text(
+        'Rellena completamente un círculo. Imprimir al 100 % y escanear la hoja completa.',
+        normal,7,w-90))
+    if preview:
+        cnv.setFont(bold,7)
+        cnv.drawRightString(w-43,46,'VISTA PREVIA · QR SIN SESIÓN VÁLIDA')
+    cnv.showPage()
+
+
+def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
+                     empresa='',grupo='',subtitulo='',
+                     color_titulo='#213A4C',color_respuestas='#213A4C'):
+    """Imprime las hojas QR desde el diseño único; no genera otro examen.
+
+    Cada código tiene HMAC de la misma sesión persistida que utilizará el lector.
+    Los marcadores cuadrados y las burbujas proceden del motor OMR existente.
+    """
     s=store.session(sid)
-    if not s['personal']:raise ValueError('Carga participantes antes de generar hojas OMR.')
-    path=Path(target);path.parent.mkdir(parents=True,exist_ok=True)
-    paper=s['papel'];w,h=PAPERS[paper];points=bubble_positions(paper,len(s['preguntas']))
-    cnv=Canvas(str(path),pagesize=(w,h),pageCompression=1)
-    n=len(points)
+    if not s['personal']:
+        raise ValueError('Carga participantes antes de generar hojas con folio y QR.')
+    path=Path(target)
+    path.parent.mkdir(parents=True,exist_ok=True)
+    cnv=Canvas(str(path),pagesize=PAPERS[s['papel']],pageCompression=1)
     for p in s['personal']:
-        cnv.setFillColorRGB(1,1,1);cnv.rect(0,0,w,h,fill=1,stroke=0)
-        for x,y in corner_centers(paper):
-            cnv.setFillColorRGB(0,0,0);cnv.rect(x-6,y-6,12,12,fill=1,stroke=0)
-        cnv.setFont('Helvetica-Bold',14);cnv.setFillColorRGB(.10,.23,.3)
-        cnv.drawString(44,h-68,'HOJA DE RESPUESTAS')
-        cnv.setFont('Helvetica',9);cnv.drawString(44,h-87,s['titulo'][:70])
-        cnv.drawString(44,h-105,'Folio: '+p['folio'])
-        cnv.drawString(44,h-123,'ID: '+p['id'][:35])
-        # ReportLab Helvetica puede no representar todos los acentos, pero la identidad
-        # se resuelve por token QR local, no por OCR del nombre.
-        printable=p['nombre'].encode('latin1','replace').decode('latin1')[:60]
-        cnv.drawString(44,h-141,'Nombre: '+printable)
-        cnv.setFont('Helvetica',8)
-        cnv.drawString(44,h-164,'Rellena COMPLETAMENTE un circulo por pregunta. No hagas tachones.')
-        cnv.drawString(44,h-177,f'Preguntas: {n}   |   Hoja: 1/1   |   Formato: {paper}')
-        qr=_make_qr(_qr_data(sid,p['token'],1,s['clave_hmac']))
-        cnv.drawImage(ImageReader(qr),w-158,h-178,width=113,height=113,mask='auto')
-        cnv.setStrokeColorRGB(.11,.34,.42);cnv.setLineWidth(.8)
-        cnv.line(44,h-190,w-44,h-190)
-        cols=1 if n<=25 else 2 if n<=50 else 4
-        cw=(w-56)/cols
-        for col in range(cols):
-            x=28+col*cw
-            cnv.setFillColorRGB(.25,.37,.4)
-            cnv.setFont('Helvetica-Bold',7.2)
-            for j,letter in enumerate(ANSWER_CHOICES):cnv.drawCentredString(x+45+23*j,h-215,letter)
-        for i,bubbles in enumerate(points):
-            col,row=divmod(i,25);base=28+cw*col
-            cnv.setFont('Helvetica',8);cnv.setFillColorRGB(.21,.28,.34)
-            cnv.drawString(base,bubbles[0][1]-3,f'{i+1:02d}')
-            for x,y in bubbles:
-                cnv.setLineWidth(.85);cnv.setStrokeColorRGB(.12,.2,.25)
-                cnv.circle(x,y,RADIUS,fill=0,stroke=1)
-        cnv.setFont('Helvetica',7);cnv.setFillColorRGB(.32,.43,.48)
-        cnv.drawString(44,56,'Folio e identificador QR asociados a una sola sesion; conservar esta hoja completa para escaneo.')
-        cnv.showPage()
+        _draw_formulario_omr(cnv,s,p,empresa=empresa,grupo=grupo,subtitulo=subtitulo,
+                            color_titulo=color_titulo,color_respuestas=color_respuestas)
     cnv.save()
     return path
+
+
+def create_acetato_omr(store:OMRStore,sid:str,target:Path, *, color='#167341'):
+    """Acetato opcional compatible con la hoja QR, nunca con geometría convencional."""
+    from reportlab.lib import colors
+    from src.evaluaciones.core import _font
+    s=store.session(sid)
+    w,h=PAPERS[s['papel']]
+    normal,bold=_font()
+    cnv=Canvas(str(target),pagesize=(w,h),pageCompression=1)
+    cnv.setFont(bold,12)
+    cnv.setFillColor(colors.HexColor('#213A4C'))
+    cnv.drawString(44,h-68,'ACETATO · HOJA CON FOLIO Y QR')
+    cnv.setFont(normal,8)
+    cnv.drawString(44,h-88,'Superponer únicamente a la hoja OMR de esta evaluación, escala 100 %.')
+    for x,y in corner_centers(s['papel']):
+        cnv.setStrokeColorRGB(0,0,0)
+        cnv.setLineWidth(.7)
+        cnv.rect(x-6,y-6,12,12,fill=0,stroke=1)
+    for idx,points in enumerate(bubble_positions(s['papel'],len(s['preguntas']))):
+        x,y=points[ANSWER_CHOICES.index(s['preguntas'][idx]['correcta'])]
+        cnv.saveState()
+        cnv.setStrokeColor(colors.HexColor(color))
+        cnv.setFillColor(colors.HexColor(color))
+        cnv.setFillAlpha(.26)
+        cnv.setLineWidth(2.2)
+        cnv.circle(x,y,RADIUS+3.5,stroke=1,fill=1)
+        cnv.restoreState()
+    cnv.setFont(normal,7)
+    cnv.setFillColor(colors.HexColor('#213A4C'))
+    cnv.drawCentredString(w/2,22,'ACETATO QR · IMPRIMIR AL 100 %')
+    cnv.showPage()
+    cnv.save()
+    return Path(target)
+
+
+def preview_formulario_omr(questions, title, paper, *,
+                          empresa='',grupo='',subtitulo='',
+                          color_titulo='#213A4C',color_respuestas='#213A4C',
+                          nombre='Ejemplo de participante',identifier='000001'):
+    """Muestra el aspecto exacto sin crear folios utilizables ni escribir disco."""
+    from io import BytesIO
+    validate_questions(questions)
+    sample={'id':identifier,'nombre':nombre,'folio':'EX-VISTA-PREVIA',
+            'token':'0'*24,'grupo':grupo}
+    session={'id':'0'*12,'titulo':title,'papel':paper,'preguntas':questions,
+             'clave_hmac':'0'*64}
+    data=BytesIO()
+    cnv=Canvas(data,pagesize=PAPERS[paper],pageCompression=1)
+    _draw_formulario_omr(cnv,session,sample,empresa=empresa,grupo=grupo,
+                        subtitulo=subtitulo,color_titulo=color_titulo,
+                        color_respuestas=color_respuestas,preview=True)
+    cnv.save()
+    return data.getvalue()
 
 
 def _find_four_markers(gray, paper, factor):
