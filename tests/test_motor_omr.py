@@ -236,3 +236,111 @@ def test_very_light_mark_flagged_instead_of_assumed_blank(grey,tmp_path):
     dst.showPage();dst.save()
     reading=scan_document(store,sid,tmp_path/'scan.pdf')
     if grey<=190:assert reading['revisar']==1,reading
+
+
+def _fade_scan_to_xerox_grayscale(src, target, paper):
+    """Simula impresión y escaneo de marcas negras convertidas a gris ~105.
+
+    Datos ficticios; nunca cargar las hojas reales con nombres al repositorio.
+    """
+    doc=pdfium.PdfDocument(str(src))
+    out=Canvas(str(target),pagesize=PAPERS[paper],pageCompression=1)
+    for i in range(len(doc)):
+        pg=doc[i]
+        try:
+            image=np.asarray(pg.render(scale=RENDER_DPI/72).to_pil().convert('RGB'))
+        finally:
+            pg.close()
+        # Negro => 105, papel blanco => 242. El umbral histórico 85 no puede
+        # encontrar los cuatro cuadrados, como sucedió con el escáner físico.
+        faded=np.clip(image.astype(np.float32)*.54+105,0,255).astype(np.uint8)
+        out.drawImage(ImageReader(Image.fromarray(faded)),0,0,
+                      width=PAPERS[paper][0],height=PAPERS[paper][1])
+        out.showPage()
+    doc.close()
+    out.save()
+
+
+def test_registro_xerox_gris_y_reconocimiento_de_errores(tmp_path):
+    from omr_evaluaciones.motor import render_review_with_acetato
+    store=OMRStore(tmp_path/'data')
+    sid=store.create_session('Evaluación de prueba',questions(20),people(2),'Carta',
+        'ecologico',nombre_evaluacion='Evaluación ADQUISICIÓN',
+        cuestionario_id='a'*32,revision_biblioteca=2)
+    forms=create_forms_pdf(store,sid,tmp_path/'forms.pdf')
+    correct=['ABCD'[i%4] for i in range(20)]
+    one=correct.copy()
+    one[2]='A' # respuesta incorrecta deliberada
+    scanned=tmp_path/'marcadas.pdf'
+    fake_scanned_pdf(forms,scanned,'Carta',[one,correct],
+                     double=(1,8))
+    faint_scan=tmp_path/'escaneo_gris_xerox_simulado.pdf'
+    _fade_scan_to_xerox_grayscale(scanned,faint_scan,'Carta')
+    scanned_result=scan_document(store,sid,faint_scan)
+    assert scanned_result['leidas']==2
+    assert scanned_result['sin_identificar']==0,scanned_result
+    assert scanned_result['validadas']==1,scanned_result
+    assert scanned_result['revisar']==1,scanned_result
+    assert store.sessions()[0]['nombre_evaluacion']=='Evaluación ADQUISICIÓN'
+    assert store.sessions()[0]['cuestionario_id']=='a'*32
+    assert store.sessions()[0]['revision_biblioteca']==2
+    page=store.pages(sid)[1]
+    aligned=render_review_with_acetato(
+        cv2.imread(page['imagen']),'Carta',questions(20),
+        show_acetato=True,issue_numbers=[9])
+    assert aligned.size==(round(PAPERS['Carta'][0]*RENDER_DPI/72),
+                          round(PAPERS['Carta'][1]*RENDER_DPI/72))
+    assert store.results(sid)['definitivo'] is False
+
+
+def test_reprocesamiento_original_sin_duplicar_ni_borrar_evidencia(tmp_path):
+    import hashlib
+    store=OMRStore(tmp_path/'data')
+    sid=store.create_session('Prueba',questions(20),people(1),'Carta')
+    pdf=create_forms_pdf(store,sid,tmp_path/'impresas.pdf')
+    sample=tmp_path/'escaneo.pdf'
+    fake_scanned_pdf(pdf,sample,'Carta',[
+        ['ABCD'[i%4] for i in range(20)]])
+    fingerprint=hashlib.sha256(sample.read_bytes()).hexdigest()
+    page_data=np.full((2200,1700,3),255,dtype=np.uint8)
+    old_id,status=store.register_page(
+        sid,fingerprint,0,page_data,None,[None]*20,
+        [{'pregunta':None,'razon':'Antes no se reconocía QR'}],
+        'sin_identificar')
+    assert status=='sin_identificar'
+    old_image=store.pages(sid)[0]['imagen']
+    result=scan_document(store,sid,sample)
+    assert result['reprocesadas']==1,result
+    assert result['validadas']==1,result
+    assert len(store.pages(sid))==1
+    assert store.pages(sid)[0]['id']==old_id
+    assert Path(old_image).is_file() # evidencia antigua no se destruye
+    assert store.results(sid)['validados']==1
+    assert scan_document(store,sid,sample)['repetidas']==1
+
+
+def test_captura_manual_auditada_y_sin_calificar_desconocidos(tmp_path):
+    store=OMRStore(tmp_path/'data')
+    sid=store.create_session('Prueba',questions(20),people(1),'Carta')
+    page=np.full((2200,1700,3),255,dtype=np.uint8)
+    pid,_=store.register_page(
+        sid,'a'*64,0,page,None,[None]*20,
+        [{'pregunta':None,'razon':'QR ilegible'}],'sin_identificar')
+    decisions=['ABCD'[i%4] for i in range(20)]
+    with pytest.raises(ValueError,match='identifica'):
+        store.capture_manual_sheet(pid,decisions,'Revisado','Inspector')
+    person=store.session(sid)['personal'][0]
+    store.identify_page(pid,person['id'],person['folio'],
+                        'Verifiqué nombre, ID y folio','Inspector')
+    with pytest.raises(ValueError,match='Revisa todos'):
+        store.capture_manual_sheet(pid,['SIN REVISAR']*20,
+                                   'Revisión completa','Inspector')
+    decisions[1]='B'
+    decisions[2]='BLANCO'
+    assert store.capture_manual_sheet(pid,decisions,
+        'Captura íntegra cotejada con acetato','Inspector')==20
+    assert store.pages(sid)[0]['estado']=='validada'
+    result=store.results(sid)
+    assert result['validados']==1
+    assert result['participantes'][0]['blancos']==1
+    assert len(store.revisions(sid))==21 # enlace ID y 20 reactivos
