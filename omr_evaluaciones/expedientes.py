@@ -233,8 +233,10 @@ class EvidenceStore:
                     SELECT * FROM documento_paginas WHERE sha=? AND pagina=?
                 """,(sha,page_num)).fetchone()
                 new_sid=item.get("sesion_id")
-                if current["hoja_id"] or current["estado"]=="identificada_manual":
-                    # No asignar a otra evaluación por un cambio de algoritmo.
+                if (current["hoja_id"] or current["estado"]=="identificada_manual"
+                        or (current["sesion_id"] and new_sid is None)):
+                    # Un fallo transitorio del lector no quita una identidad
+                    # verificada anteriormente ni una revisión humana.
                     continue
                 if (current["sesion_id"] and new_sid and
                         current["sesion_id"]!=new_sid):
@@ -257,6 +259,67 @@ class EvidenceStore:
                                 "QR_VALIDADO" if new_sid else "SIN_IDENTIFICAR",
                                 diagnosis or item.get("folio",""),
                                 new_sid)
+
+    def migrate_legacy(self):
+        """Integra los PDF previos de originales/<sesión>/ sin recalificarlos.
+
+        La procedencia histórica se conserva por hoja cuando hay token
+        registrado y perteneciente a la sesión. Las hojas antiguas sin QR
+        quedan sin identificar en la bandeja. No altera notas/revisiones.
+        """
+        with self.store.connect() as db:
+            history=[dict(r) for r in db.execute("""
+                SELECT DISTINCT sesion_id,archivo_sha FROM hojas
+                ORDER BY sesion_id,archivo_sha
+            """)]
+        migrated=0
+        for entry in history:
+            sid=entry["sesion_id"]
+            source=self.store.root/"originales"/sid/(entry["archivo_sha"]+".pdf")
+            if not source.is_file():
+                continue
+            doc,repeated=self.ingest(source)
+            if doc["sha"]!=entry["archivo_sha"]:
+                # El original guardado se ha cambiado; no asociarlo a la
+                # lectura previa por coincidencia de nombre.
+                continue
+            with self.store.connect() as db:
+                scans=[dict(row) for row in db.execute("""
+                    SELECT h.id,h.token,h.pagina,h.estado,
+                           p.folio,p.nombre
+                    FROM hojas h
+                    LEFT JOIN participantes p ON p.sesion_id=h.sesion_id
+                       AND p.token=h.token
+                    WHERE h.sesion_id=? AND h.archivo_sha=?
+                """,(sid,entry["archivo_sha"]))]
+            with self._db() as db:
+                for scan in scans:
+                    page_num=scan["pagina"]+1
+                    if not scan["token"] or not scan["folio"]:
+                        # El origen se conoce, pero NO la persona.
+                        continue
+                    previous=db.execute("""
+                        SELECT * FROM documento_paginas
+                        WHERE sha=? AND pagina=?
+                    """,(doc["sha"],page_num)).fetchone()
+                    if previous is None or previous["hoja_id"]:
+                        continue
+                    if previous["sesion_id"] and previous["sesion_id"]!=sid:
+                        continue
+                    db.execute("""
+                        UPDATE documento_paginas SET sesion_id=?,folio=?,
+                            nombre=?,hoja_id=?,estado=?,
+                            diagnostico='Migrado del historial OMR'
+                        WHERE sha=? AND pagina=?
+                    """,(sid,scan["folio"],scan["nombre"],scan["id"],
+                         scan["estado"],doc["sha"],page_num))
+                    self._event(db,doc["sha"],page_num,
+                                "MIGRADO_HISTORICO",
+                                "Se conservó la calificación existente",
+                                sid)
+                    migrated+=1
+        return {"fuentes_revisadas":len(history),
+                "hojas_vinculadas":migrated}
 
     def record_report(self,sha,sid,report):
         """Asocia el ID de la hoja OMR al documento archivado."""
