@@ -319,7 +319,7 @@ class OMRStore:
                                                 WHERE h.sesion_id=? ORDER BY r.id''',(sid,))]
 
 
-def _draw_formulario_omr(cnv, session: dict, persona: dict, *,
+def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
                         empresa='', grupo='', subtitulo='',
                         color_titulo='#213A4C', color_respuestas='#213A4C',
                         preview=False):
@@ -367,16 +367,25 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict, *,
         cnv.drawString(44, h-114, clip_text(empresa, normal, 8, w-205))
     cnv.setFillColor(tint)
     cnv.setFont(normal, 9)
-    cnv.drawString(44, h-129, 'Folio: '+persona['folio'])
-    cnv.drawString(44, h-145, 'ID: '+clip_text(persona['id'],normal,9,w-205))
-    cnv.drawString(44, h-161, 'Nombre: '+clip_text(persona['nombre'],normal,9,w-205))
-    cnv.setFont(normal, 7.5)
-    label = grupo or persona.get('grupo','')
-    if label:
-        cnv.drawString(44, h-179, clip_text('Grupo: '+label,normal,7.5,w-205))
-    qr_data = _qr_data(session['id'], persona['token'], 1, session['clave_hmac'])
-    cnv.drawImage(ImageReader(_make_qr(qr_data)), w-158,h-178,
-                  width=113,height=113,mask='auto')
+    if persona is None:
+        # Misma hoja, mismas posiciones y mismas marcas: solamente faltan
+        # datos/QR. La persona rellena su nombre y se corrige con acetato.
+        cnv.drawString(44,h-129,'Folio: ________________________')
+        cnv.drawString(44,h-145,'ID: __________________________')
+        cnv.drawString(44,h-161,'Nombre: _________________________________')
+        cnv.setFont(normal,7.5)
+        cnv.drawString(44,h-179,'Grupo / fecha: ___________________________')
+    else:
+        cnv.drawString(44,h-129,'Folio: '+persona['folio'])
+        cnv.drawString(44,h-145,'ID: '+clip_text(persona['id'],normal,9,w-205))
+        cnv.drawString(44,h-161,'Nombre: '+clip_text(persona['nombre'],normal,9,w-205))
+        cnv.setFont(normal,7.5)
+        label = grupo or persona.get('grupo','')
+        if label:
+            cnv.drawString(44,h-179,clip_text('Grupo: '+label,normal,7.5,w-205))
+        qr_data = _qr_data(session['id'], persona['token'], 1, session['clave_hmac'])
+        cnv.drawImage(ImageReader(_make_qr(qr_data)),w-158,h-178,
+                      width=113,height=113,mask='auto')
     cnv.setStrokeColor(tint)
     cnv.setLineWidth(.9)
     cnv.line(44,h-190,w-44,h-190)
@@ -405,13 +414,16 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict, *,
         normal,7,w-90))
     if preview:
         cnv.setFont(bold,7)
-        cnv.drawRightString(w-43,46,'VISTA PREVIA · QR SIN SESIÓN VÁLIDA')
+        cnv.drawRightString(w-43,46,
+            'VISTA PREVIA · QR SIN SESIÓN VÁLIDA' if persona else
+            'VISTA PREVIA · SIN QR')
     cnv.showPage()
 
 
 def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
                      empresa='',grupo='',subtitulo='',
-                     color_titulo='#213A4C',color_respuestas='#213A4C'):
+                     color_titulo='#213A4C',color_respuestas='#213A4C',
+                     person_ids=None):
     """Imprime las hojas QR desde el diseño único; no genera otro examen.
 
     Cada código tiene HMAC de la misma sesión persistida que utilizará el lector.
@@ -423,7 +435,14 @@ def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
     path=Path(target)
     path.parent.mkdir(parents=True,exist_ok=True)
     cnv=Canvas(str(path),pagesize=PAPERS[s['papel']],pageCompression=1)
+    selected=set(person_ids) if person_ids is not None else None
+    if selected is not None:
+        actual={p['id'] for p in s['personal']}
+        if not selected or not selected.issubset(actual):
+            raise ValueError('Participantes solicitados fuera de la sesión OMR.')
     for p in s['personal']:
+        if selected is not None and p['id'] not in selected:
+            continue
         _draw_formulario_omr(cnv,s,p,empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                             color_titulo=color_titulo,color_respuestas=color_respuestas)
     cnv.save()
@@ -438,9 +457,9 @@ def _draw_acetato_omr(cnv, session: dict, *, color='#167341'):
     normal,bold=_font()
     cnv.setFont(bold,12)
     cnv.setFillColor(colors.HexColor('#213A4C'))
-    cnv.drawString(44,h-68,'ACETATO · HOJA CON FOLIO Y QR')
+    cnv.drawString(44,h-68,'ACETATO · HOJA DE RESPUESTAS')
     cnv.setFont(normal,8)
-    cnv.drawString(44,h-88,'Superponer únicamente a la hoja OMR de esta evaluación, escala 100 %.')
+    cnv.drawString(44,h-88,'Misma posición de círculos con o sin QR. Imprimir al 100 %.')
     for x,y in corner_centers(s['papel']):
         cnv.setStrokeColorRGB(0,0,0)
         cnv.setLineWidth(.7)
@@ -456,7 +475,7 @@ def _draw_acetato_omr(cnv, session: dict, *, color='#167341'):
         cnv.restoreState()
     cnv.setFont(normal,7)
     cnv.setFillColor(colors.HexColor('#213A4C'))
-    cnv.drawCentredString(w/2,22,'ACETATO QR · IMPRIMIR AL 100 %')
+    cnv.drawCentredString(w/2,22,'ACETATO DE EVALUACIÓN · IMPRIMIR AL 100 %')
     cnv.showPage()
 
 
@@ -483,7 +502,8 @@ def preview_acetato_omr(questions, paper, *, color='#167341'):
 def preview_formulario_omr(questions, title, paper, *,
                           empresa='',grupo='',subtitulo='',
                           color_titulo='#213A4C',color_respuestas='#213A4C',
-                          nombre='Ejemplo de participante',identifier='000001'):
+                          nombre='Ejemplo de participante',identifier='000001',
+                          con_personal=True):
     """Muestra el aspecto exacto sin crear folios utilizables ni escribir disco."""
     from io import BytesIO
     validate_questions(questions)
@@ -493,11 +513,44 @@ def preview_formulario_omr(questions, title, paper, *,
              'clave_hmac':'0'*64}
     data=BytesIO()
     cnv=Canvas(data,pagesize=PAPERS[paper],pageCompression=1)
-    _draw_formulario_omr(cnv,session,sample,empresa=empresa,grupo=grupo,
-                        subtitulo=subtitulo,color_titulo=color_titulo,
+    _draw_formulario_omr(cnv,session,sample if con_personal else None,
+                        empresa=empresa,grupo=grupo,subtitulo=subtitulo,
+                        color_titulo=color_titulo,
                         color_respuestas=color_respuestas,preview=True)
     cnv.save()
     return data.getvalue()
+
+
+
+def create_generic_forms_pdf(questions, title, paper, target, *,
+                             empresa='',grupo='',subtitulo='',
+                             color_titulo='#213A4C',color_respuestas='#213A4C'):
+    """Hoja anónima con EXACTA geometría OMR y espacios manuscritos, sin QR.
+
+    El diseño no cambia al cargar personal: solo se rellenan datos y QR.
+    El motor de calificación automática exige una sesión y un QR válido.
+    """
+    validate_questions(questions)
+    path=Path(target)
+    path.parent.mkdir(parents=True,exist_ok=True)
+    cnv=Canvas(str(path),pagesize=PAPERS[paper],pageCompression=1)
+    session={'titulo':title,'papel':paper,'preguntas':questions}
+    _draw_formulario_omr(cnv,session,None,empresa=empresa,grupo=grupo,
+                         subtitulo=subtitulo,color_titulo=color_titulo,
+                         color_respuestas=color_respuestas)
+    cnv.save()
+    return path
+
+
+def create_generic_acetato_pdf(questions, paper, target, *, color='#167341'):
+    """Acetato universal, tanto de la hoja genérica como de las hojas QR."""
+    validate_questions(questions)
+    path=Path(target)
+    path.parent.mkdir(parents=True,exist_ok=True)
+    cnv=Canvas(str(path),pagesize=PAPERS[paper],pageCompression=1)
+    _draw_acetato_omr(cnv,{'papel':paper,'preguntas':questions},color=color)
+    cnv.save()
+    return path
 
 
 def _find_four_markers(gray, paper, factor):
