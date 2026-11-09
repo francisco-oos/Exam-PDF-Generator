@@ -225,7 +225,8 @@ def test_reconocimiento_integral_9_formatos(n,paper,tmp_path):
 def test_very_light_mark_flagged_instead_of_assumed_blank(grey,tmp_path):
     store=OMRStore(tmp_path/'st');sid=store.create_session('Marca tenue',questions(1),people(1),'Carta')
     paper=create_forms_pdf(store,sid,tmp_path/'page.pdf')
-    # A 180/190 es más clara que la tinta normal; debe ser dudosa, no blanco falso.
+    # Lápiz 160: trazo único con contraste suficiente. Lápiz 190:
+    # debe requerir revisión; 220 NO debe interpretarse como blanco seguro.
     doc=pdfium.PdfDocument(str(paper));p=doc[0]
     frame=np.asarray(p.render(scale=RENDER_DPI/72).to_pil().convert('RGB')).copy()
     p.close();doc.close()
@@ -235,7 +236,13 @@ def test_very_light_mark_flagged_instead_of_assumed_blank(grey,tmp_path):
     dst.drawImage(ImageReader(Image.fromarray(frame)),0,0,width=PAPERS['Carta'][0],height=PAPERS['Carta'][1])
     dst.showPage();dst.save()
     reading=scan_document(store,sid,tmp_path/'scan.pdf')
-    if grey<=190:assert reading['revisar']==1,reading
+    if grey==160:
+        assert reading['validadas']==1,reading
+    elif grey==190:
+        assert reading['revisar']==1,reading
+    else:
+        # 220 es demasiado tenue: jamás inventar una respuesta válida.
+        assert reading['validadas']==0,reading
 
 
 def _fade_scan_to_xerox_grayscale(src, target, paper):
@@ -446,3 +453,130 @@ def test_validar_indices_de_paginas_de_lote(tmp_path):
         scan_document(store,sid,form,page_indices=[99])
     with pytest.raises(ValueError,match='fuera del PDF'):
         scan_document(store,sid,form,page_indices=[])
+
+
+
+@pytest.mark.parametrize('shade,expected',[
+    (150,'validada'),(165,'validada'),(175,'validada'),
+    (190,'revisar'),(220,'revisar'),
+])
+def test_grafito_hb_diferentes_intensidades_sin_falsas_notas(
+        tmp_path,shade,expected):
+    """Sobre los círculos impresos, escala de grises de lápiz #2.
+
+    150-175 = un relleno suficiente y único. 190/220 = leve, pide revisión.
+    """
+    store=OMRStore(tmp_path/'data')
+    sid=store.create_session('Lápiz de prueba',questions(8),people(1),'Carta')
+    sheet=create_forms_pdf(store,sid,tmp_path/'sheet.pdf')
+    pdf=pdfium.PdfDocument(str(sheet))
+    page=pdf[0]
+    pixels=np.asarray(page.render(scale=RENDER_DPI/72)
+        .to_pil().convert('RGB')).copy()
+    page.close()
+    pdf.close()
+    for i,pts in enumerate(bubble_positions('Carta',8)):
+        x,y=pts[i%4]
+        cv2.circle(pixels,(round(x*RENDER_DPI/72),
+                            round((PAPERS['Carta'][1]-y)*RENDER_DPI/72)),
+                   round(5.5*RENDER_DPI/72),(shade,shade,shade),
+                   thickness=-1,lineType=cv2.LINE_AA)
+    scan=tmp_path/'scan.pdf'
+    c=Canvas(str(scan),pagesize=PAPERS['Carta'])
+    c.drawImage(ImageReader(Image.fromarray(pixels)),0,0,
+                width=PAPERS['Carta'][0],height=PAPERS['Carta'][1])
+    c.showPage();c.save()
+    report=scan_document(store,sid,scan)
+    if expected=='validada':
+        assert report['validadas']==1,report
+        assert store.results(sid)['participantes'][0]['aciertos']==8
+    else:
+        assert report['revisar']==1,report
+        assert store.results(sid)['validados']==0
+
+
+def test_grafito_doble_oscuro_sigue_pendiente(tmp_path):
+    store=OMRStore(tmp_path/'data')
+    sid=store.create_session('Dos marcas',questions(2),people(1),'Carta')
+    pdf=create_forms_pdf(store,sid,tmp_path/'blank.pdf')
+    pages=pdfium.PdfDocument(str(pdf));page=pages[0]
+    pixels=np.asarray(page.render(scale=RENDER_DPI/72)
+                      .to_pil().convert('RGB')).copy()
+    page.close();pages.close()
+    for k in (0,1):
+        x,y=bubble_positions('Carta',2)[0][k]
+        cv2.circle(pixels,(round(x*RENDER_DPI/72),
+                           round((PAPERS['Carta'][1]-y)*RENDER_DPI/72)),
+                   round(5.5*RENDER_DPI/72),(155,155,155),
+                   thickness=-1,lineType=cv2.LINE_AA)
+    scan=tmp_path/'scan.pdf'
+    output=Canvas(str(scan),pagesize=PAPERS['Carta'])
+    output.drawImage(ImageReader(Image.fromarray(pixels)),0,0,
+                     width=PAPERS['Carta'][0],height=PAPERS['Carta'][1])
+    output.showPage();output.save()
+    result=scan_document(store,sid,scan)
+    assert result['revisar']==1,result
+    assert 1 in [r['pregunta'] for r in store.pages(sid)[0]['dudas']]
+
+
+def test_lotes_parciales_dias_distintos_y_reimportaciones_sin_duplicar(tmp_path):
+    """Una aplicación recibe lotes en varios días, sin segundas calificaciones."""
+    import fitz
+    store=OMRStore(tmp_path/'omr')
+    sid=store.create_session('Evaluación de cabos',questions(8),people(3),
+                             'Carta','normal')
+    forms=create_forms_pdf(store,sid,tmp_path/'forms.pdf')
+    scan=tmp_path/'todos_marcados.pdf'
+    known=[['ABCD'[i%4] for i in range(8)] for person in range(3)]
+    fake_scanned_pdf(forms,scan,'Carta',known)
+    part1=tmp_path/'jornada_1.pdf'
+    part2=tmp_path/'jornada_2.pdf'
+    with fitz.open(scan) as pages:
+        with fitz.open() as a:
+            a.insert_pdf(pages,from_page=0,to_page=1)
+            a.save(part1)
+        with fitz.open() as b:
+            b.insert_pdf(pages,from_page=2,to_page=2)
+            b.save(part2)
+    first=scan_document(store,sid,part1)
+    assert first['validadas']==2
+    second=scan_document(store,sid,part2)
+    assert second['validadas']==1
+    assert len(store.pages(sid))==3
+    assert store.results(sid)['validados']==3
+    assert len(store.sessions())==1
+    assert scan_document(store,sid,part1)['repetidas']==2
+    # Nuevo PDF con el mismo contenido y folios; no recapturar todo.
+    copy=tmp_path/'jornada_1_reexportada.pdf'
+    with fitz.open(part1) as doc:
+        metadata=dict(doc.metadata)
+        metadata['subject']='Lote recibido en un segundo día'
+        doc.set_metadata(metadata)
+        doc.save(copy)
+    assert copy.read_bytes()!=part1.read_bytes()
+    assert scan_document(store,sid,copy)['repetidas']==2
+    assert len(store.pages(sid))==3
+    assert store.results(sid)['validados']==3
+
+
+def test_reproceso_mejora_pendientes_sin_borrar_revision_humana(tmp_path):
+    store=OMRStore(tmp_path/'data')
+    sid=store.create_session('Examen',questions(3),people(1),'Carta')
+    token=store.session(sid)['personal'][0]['token']
+    bitmap=np.full((2200,1700,3),255,dtype=np.uint8)
+    old,_=store.register_page(
+        sid,'0'*64,0,bitmap,token,[None,None,None],
+        [{'pregunta':1,'razon':'lápiz tenue'},
+         {'pregunta':2,'razon':'lápiz tenue'}],'revisar')
+    recovered,status=store.register_page(
+        sid,'0'*64,0,bitmap,token,['A','B',None],
+        [{'pregunta':3,'razon':'lápiz tenue'}],'revisar')
+    assert recovered==old and status=='reprocesada_revisar'
+    assert len(store.pages(sid))==1
+    assert store.pages(sid)[0]['respuestas'][:2]==['A','B']
+    store.review(old,3,'C','Cotejado en escaneo original','Evaluador')
+    again,status=store.register_page(
+        sid,'0'*64,0,bitmap,token,['D','D','D'],[],
+        'validada')
+    assert status=='repetida'
+    assert store.pages(sid)[0]['respuestas']==['A','B','C']
