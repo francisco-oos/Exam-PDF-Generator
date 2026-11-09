@@ -341,13 +341,7 @@ def build_ui(*, open_editor=False):
         status.set('Lista retirada. El examen puede generarse sin personal.')
 
     def descargar_personal():
-        """Plantilla común para las tres modalidades; mantener IDs como texto."""
-        origen=BASE/'plantillas'/'Plantilla_Personal_OMR.xlsx'
-        if not origen.is_file():
-            messagebox.showerror('Plantilla no disponible',
-                                 'Falta la plantilla de participantes en el repositorio.',
-                                 parent=active_window())
-            return
+        """Plantilla vacía común, con ejemplo aparte y los IDs forzados a texto."""
         destino=filedialog.asksaveasfilename(
             parent=active_window(),title='Descargar plantilla de participantes',
             initialfile='Plantilla_Participantes.xlsx',defaultextension='.xlsx',
@@ -355,10 +349,43 @@ def build_ui(*, open_editor=False):
         if not destino:
             return
         try:
-            from shutil import copyfile
-            copyfile(origen,destino)
-            status.set('Plantilla de participantes guardada en: '+destino)
-        except OSError as exc:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font,PatternFill
+            from openpyxl.utils import get_column_letter
+            libro=Workbook()
+            hoja=libro.active
+            hoja.title='Participantes'
+            campos=['ID_personal','Nombre','Area_adscripcion','Grupo','Turno']
+            hoja.append(campos)
+            for i,width in enumerate([20,36,29,20,17],1):
+                columna=get_column_letter(i)
+                hoja.column_dimensions[columna].width=width
+                celda=hoja.cell(1,i)
+                celda.font=Font(bold=True,color='FFFFFF')
+                celda.fill=PatternFill('solid',fgColor='17374A')
+            hoja.freeze_panes='A2'
+            hoja.auto_filter.ref='A1:E1'
+            for fila in range(2,503):
+                hoja.cell(fila,1).number_format='@'
+            ejemplo=libro.create_sheet('Ejemplo')
+            ejemplo.append(campos)
+            ejemplo.append(['000001','Persona ficticia Uno','Área de prueba','A','Día'])
+            ejemplo.append(['000002','Persona ficticia Dos','Área de prueba','A','Noche'])
+            guia=libro.create_sheet('Guia')
+            notas=[
+                'Rellena ÚNICAMENTE la hoja Participantes; Ejemplo no se importa.',
+                'ID_personal: único, obligatorio y con formato de texto (conserva 000001).',
+                'Nombre: obligatorio. Área, Grupo y Turno son opcionales.',
+                'Una fila por participante. No dupliques IDs. Máximo 500 personas.',
+                'Una misma lista sirve para tradicional, ecológico y folio/QR.',
+                'Sin cargar la lista, el programa genera documentos genéricos.',
+            ]
+            for n,linea in enumerate(notas,1):
+                guia.cell(n,1,linea)
+            guia.column_dimensions['A'].width=105
+            libro.save(destino)
+            status.set('Plantilla vacía de participantes guardada en: '+destino)
+        except (OSError,ValueError) as exc:
             messagebox.showerror('No se pudo guardar la plantilla',
                                  str(exc),parent=active_window())
 
