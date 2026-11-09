@@ -18,8 +18,10 @@ NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
 
 class OMRApp:
     def __init__(self,parent=None,db_root=None, *,
-                 questions=None, title=None, paper=None, source=None):
+                 questions=None, title=None, paper=None, source=None,
+                 on_return=None):
         self.parent = parent
+        self.on_return = on_return
         self.window=tk.Toplevel(parent) if parent is not None else tk.Tk()
         self.window.title('Evaluaciones · Folios, escaneo y calificación OMR')
         w=min(1390,self.window.winfo_screenwidth()-50)
@@ -91,6 +93,10 @@ class OMRApp:
         self.parent.deiconify()
         self.parent.lift()
         self.parent.focus_force()
+        if self.on_return is not None:
+            # Si el usuario venía del editor PDF completo, devolverlo allí;
+            # no obligarlo a buscar otra vez el botón de diseño.
+            self.on_return()
 
     def _refresh_navigation(self):
         all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']
@@ -495,8 +501,10 @@ class OMRApp:
             self.navigate('Resultados' if self.mode.get()=='personalizado' else 'Inicio')
         self._btn(self.stage,'Abrir sesión seleccionada',reopen,True)
 
-def launch(parent=None, *, questions=None, title=None, paper=None, source=None):
+def launch(parent=None, *, questions=None, title=None, paper=None, source=None,
+           on_return=None):
     """Abre la calificación dentro del generador y hereda preguntas si existen."""
-    app=OMRApp(parent=parent,questions=questions,title=title,paper=paper,source=source)
+    app=OMRApp(parent=parent,questions=questions,title=title,paper=paper,
+               source=source,on_return=on_return)
     if parent is None:app.window.mainloop()
     return app
