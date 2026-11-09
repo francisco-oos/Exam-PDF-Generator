@@ -365,6 +365,15 @@ class DocumentInbox:
                         reason.strip()[:600])
         return person['nombre']
 
+    def validate_output(self, output):
+        """Impide escribir derivados en carpetas de evidencias archivadas."""
+        target=Path(output).resolve()
+        protected=(self.originals,self.store.root/'originales',
+                   self.store.root/'escaneos')
+        if any(target.is_relative_to(p.resolve()) for p in protected):
+            raise ValueError('No sobrescribas evidencia original o escaneo archivado.')
+        return Path(output)
+
     def assemble(self, selections, target):
         """Compone PDF nuevo: [(sha, índice 0-based, rotación °)].
 
@@ -374,11 +383,9 @@ class DocumentInbox:
         entries=list(selections)
         if not entries or len(entries)>1500:
             raise ValueError('Selecciona entre 1 y 1500 páginas.')
-        output=Path(target)
+        output=self.validate_output(target)
         if output.suffix.lower()!='.pdf':
             raise ValueError('La salida debe ser un PDF.')
-        if output.resolve().is_relative_to(self.originals.resolve()):
-            raise ValueError('No sobrescribas el archivo de originales.')
         output.parent.mkdir(parents=True,exist_ok=True)
         writer=PdfWriter()
         with ExitStack() as stack:
@@ -426,11 +433,9 @@ class DocumentInbox:
                 'Instala las funciones opcionales: '
                 'pip install -r requirements-pdf-extra.txt') from exc
         original=self.original(digest)
-        target=Path(target)
+        target=self.validate_output(target)
         if target.suffix.lower()!='.pdf':
             raise ValueError('La copia reparada debe ser un PDF.')
-        if target.resolve().is_relative_to(self.originals.resolve()):
-            raise ValueError('No se puede sobrescribir un original archivado.')
         target.parent.mkdir(parents=True,exist_ok=True)
         with NamedTemporaryFile(dir=target.parent,suffix='.part',
                                 delete=False) as f:
