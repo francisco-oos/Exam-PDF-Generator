@@ -531,8 +531,14 @@ class OMRApp:
             questions=session['preguntas']
             dlg=tk.Toplevel(self.window)
             dlg.title('Captura manual · hoja '+str(sheet['pagina']+1))
-            dlg.geometry('650x730')
-            dlg.minsize(480,430)
+            # Abrir el formulario a la IZQUIERDA para conservar visible
+            # la hoja y el acetato digital a la derecha durante la captura.
+            dw=460
+            dh=max(430,min(760,self.window.winfo_screenheight()-135))
+            dx=self.window.winfo_rootx()+210
+            dy=self.window.winfo_rooty()+85
+            dlg.geometry(f'{dw}x{dh}+{dx}+{dy}')
+            dlg.minsize(410,400)
             dlg.transient(self.window)
             dlg.grab_set()
             tk.Label(dlg,
@@ -558,8 +564,8 @@ class OMRApp:
                 row=tk.Frame(inner,pady=4)
                 row.pack(fill='x')
                 txt=str(item['pregunta']).replace('\n',' ')
-                tk.Label(row,text=f'{number:02d}  {txt[:65]}',
-                         anchor='w',width=67).pack(side='left',fill='x',expand=True)
+                tk.Label(row,text=f'{number:02d}  {txt[:43]}',
+                         anchor='w',width=42).pack(side='left',fill='x',expand=True)
                 old=(sheet['respuestas'][number-1]
                      if number<=len(sheet['respuestas']) else None)
                 current=tk.StringVar(value=old if old else 'SIN REVISAR')
