@@ -521,6 +521,14 @@ class WebService:
                             (str(exc)[:550],utcnow(),row["id"]))
         finally:
             self._wake_lock.release()
+            # Si llegó un trabajo justo después de comprobar la cola vacía,
+            # su add_job no pudo adquirir el candado. Volver a despertarla.
+            if self._executor:
+                with self.store.connect() as db:
+                    pending=db.execute("SELECT 1 FROM web_trabajos "
+                                       "WHERE estado='pendiente' LIMIT 1").fetchone()
+                if pending:
+                    self.wake()
 
     def _process_file(self,row):
         source=Path(row["ruta"])
