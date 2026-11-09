@@ -429,3 +429,43 @@ def test_alerta_previa_impide_calificar_sin_confirmacion(tmp_path,monkeypatch):
     finally:
         try:parent.destroy()
         except tk.TclError:pass
+
+
+
+def test_bandeja_pdf_y_exportacion_en_mismo_calificador(tmp_path):
+    """La bandeja es una vista del menú; no abre otro programa."""
+    try:
+        root=tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip("Entorno Tk no disponible: "+str(exc))
+    try:
+        from omr_evaluaciones.motor import OMRStore,create_forms_pdf
+        from omr_evaluaciones.interfaz import OMRApp
+        store=OMRStore(tmp_path/"omr")
+        sid=store.create_session(
+            "Evaluación documental",
+            [{"tema":"Seguridad","pregunta":"Pregunta uno","correcta":"A"}],
+            [{"id":"00001","nombre":"Persona ficticia"}],"Carta")
+        sheet=create_forms_pdf(store,sid,tmp_path/"hoja.pdf")
+        root.withdraw()
+        app=OMRApp(parent=root,db_root=tmp_path/"omr",
+                   review_only=True,on_return=lambda:None)
+        app.evidence.ingest(sheet)
+        app.navigate("Bandeja PDF")
+        texts=[w.cget("text") for w in _descendants(app.stage)
+               if isinstance(w,tk.Button)]
+        assert "Exportar copia organizada" in texts
+        assert "Extraer seleccionadas" in texts
+        assert "Combinar PDF seleccionados" in texts
+        assert "Retomar escaneo" in texts
+        assert app.buttons["Bandeja PDF"].winfo_manager()=="pack"
+        app.session_id=sid
+        app.navigate("Excel de entrega")
+        export_actions=[w.cget("text") for w in _descendants(app.stage)
+                        if isinstance(w,tk.Button)]
+        assert "Expediente de entrega (ZIP)" in export_actions
+        assert "Expediente interno + evidencias (ZIP)" in export_actions
+        app.return_to_generator()
+    finally:
+        try:root.destroy()
+        except tk.TclError:pass
