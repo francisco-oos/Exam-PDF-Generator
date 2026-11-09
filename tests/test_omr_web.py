@@ -253,3 +253,79 @@ def test_no_se_duplica_calificacion_en_pdf_con_identidad_distinta(tmp_path):
     assert len(svc.store.pages(s1))==1
     assert len(svc.store.pages(s2))==1
     svc.close()
+
+
+
+def test_importacion_excel_y_emision_ecologica_de_folios_desde_web(server):
+    from io import BytesIO
+    from openpyxl import Workbook
+    app,c,headers=server
+    w=Workbook();s=w.active;s.title="Preguntas"
+    s.append(["Tema","Pregunta","A","B","C","D","Correcta","Imagen"])
+    s.append(["Material","¿Qué hacer con el material?",
+              "Verificar","Descartar","Ignorar","Perder","A",""])
+    b=BytesIO();w.save(b)
+    response=c.post("/api/library/import?name=Prueba+web&title=Cabos",
+        headers=headers,
+        files={"file":("preguntas.xlsx",b.getvalue(),
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert response.status_code==200,response.text
+    exam_id=response.json()["cuestionario_id"]
+    assert response.json()["preguntas"]==1
+    assert len(c.get("/api/library").json())==1
+    application=c.post("/api/applications",headers=headers,json={
+        "cuestionario_id":exam_id,"nombre":"Cabos · turno C",
+        "modalidad":"ecologico","papel":"Carta",
+        "participantes":[{"id":"C001","nombre":"Participante de prueba"},
+                         {"id":"C002","nombre":"Otra persona"}]})
+    assert application.status_code==200,application.text
+    sid=application.json()["sid"]
+    assert len(app.state.engine.store.session(sid)["personal"])==2
+    download=c.get("/api/applications/"+sid+"/files/Hoja_respuestas.pdf")
+    assert download.status_code==200
+    assert download.content.startswith(b"%PDF-")
+    assert app.state.engine.store.session(sid)["cuestionario_id"]==exam_id
+    assert len(c.get("/api/applications").json())==1
+
+
+def test_revisor_solo_ve_respuestas_no_clave_ni_folios_ajenos(server):
+    app,c,headers=server
+    svc=app.state.engine
+    sid1,sheet1=make_pending(svc)
+    sid2,sheet2=make_pending(svc)
+    uid=svc.add_user(svc.authenticate(c.cookies.get("omr_sid")),
+                     "capturista3","Revisor 3","TemporalRevisor12345!",
+                     "capturista")
+    svc.assign(svc.authenticate(c.cookies.get("omr_sid")),uid,sid1)
+    reviewer=TestClient(app)
+    reviewer.post("/api/login",json={
+        "usuario":"capturista3","password":"TemporalRevisor12345!"})
+    reviewer.post("/api/change-password",
+       headers={"X-CSRF-Token":reviewer.cookies.get("omr_csrf")},
+       json={"anterior":"TemporalRevisor12345!",
+             "nueva":"PermanenteRevisor12345!"})
+    reviewer.post("/api/login",json={
+        "usuario":"capturista3","password":"PermanenteRevisor12345!"})
+    assert reviewer.get("/api/sheets/"+sheet1).status_code==200
+    assert reviewer.get("/api/sheets/"+sheet2).status_code==403
+    assert reviewer.get("/api/sheets/"+sheet2+"/image").status_code==403
+    assert reviewer.get("/api/sheets/"+sheet2+"/overlay?pregunta=1").status_code==403
+    assert reviewer.get("/api/sheets/"+sheet1+"/overlay?pregunta=1&acetato=true").status_code==403
+    assert reviewer.get("/api/documents/"+"a"*64+"/pages").status_code==403
+    assert reviewer.get("/api/applications/"+sid2+"/results").status_code==403
+    reviewer.close()
+
+
+def test_certificado_tls_local_no_exponer_clave(tmp_path,monkeypatch):
+    from omr_web.certificate import main
+    monkeypatch.setenv("OMR_WEB_DATA",str(tmp_path))
+    main(["192.168.0.14"])
+    private=tmp_path/"omr"/"certs"/"server.key"
+    cert=tmp_path/"omr"/"certs"/"server.pem"
+    assert private.exists() and cert.exists()
+    assert b"PRIVATE KEY" in private.read_bytes()
+    assert b"CERTIFICATE" in cert.read_bytes()
+    with pytest.raises(SystemExit,match="No se sobrescribe"):
+        main(["192.168.0.14"])
+    with pytest.raises(SystemExit,match="privadas"):
+        main(["8.8.8.8"])
