@@ -118,9 +118,9 @@ def _form() -> bytes:
     <form action="/generar" method="post" accept-charset="utf-8">
     <input type="hidden" name="token" value="{TOKEN}">
     <div class="grid"><div><label>Empresa / encabezado</label><input name="empresa" maxlength="100" placeholder="Nombre de empresa"></div>
-    <div><label>Puesto / tipo de personal</label><input name="puesto" maxlength="85" placeholder="Cabos"></div></div>
-    <label>Título de la evaluación</label><input name="titulo" maxlength="90" required value="Evaluación de manejo de material en campo">
-    <label>Subtítulo</label><input name="subtitulo" maxlength="90" required value="Conocimientos y criterios de registro">
+    <div><label>Área, público o grupo (libre)</label><input name="puesto" maxlength="85" placeholder="Ej. Alumnos, personal técnico, proveedores"></div></div>
+    <label>Título de la evaluación</label><input name="titulo" maxlength="90" required value="Evaluación de conocimientos">
+    <label>Subtítulo</label><input name="subtitulo" maxlength="90" required value="Aplicación práctica de conocimientos">
     <label>Excel de preguntas</label><select name="archivo">{_options(files)}</select>
     <label>Logotipo (opcional)</label><select name="logo">{_options(logos)}</select>
     <label>Instrucciones al participante</label>

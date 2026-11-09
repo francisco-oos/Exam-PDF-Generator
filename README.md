@@ -15,13 +15,14 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
 - CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
+- [Captura real de la vista previa genérica](docs/capturas/vista_previa_generica.png).\n- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final A4 es la referencia para impresión.
 
 ## Iniciar con Docker — recomendado (Windows y Linux)
 
 **Solo necesitas Git y Docker Desktop/Engine; no se instala Python ni sus dependencias en tu equipo.** La interfaz se abre en **http://localhost:8765** y todos los archivos se conservan en `datos/`.
 
 ```powershell
-git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
+git clone --branch feature/docker-interfaz-web --single-branch https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 docker compose up --build -d
 ```
@@ -34,13 +35,13 @@ Para parar: `docker compose stop`. Para reiniciar: `docker compose start`. Para 
 
 ## Instalar en Windows 10/11 (sin Docker)
 
-1. Descarga el repositorio con Git (`git clone https://github.com/francisco-oos/Exam-PDF-Generator.git`) o usa la copia que ya tienes en `main` y actualízala con `git pull --ff-only`.
-2. Usa **Python 3.13 (preferido), 3.12 o 3.11** con `py` (Python Launcher). No hace falta instalar otro Python si ya tienes 3.13. No necesitas permisos de administrador para ejecutar el programa.
+1. Descarga el ZIP de la rama de trabajo de GitHub y selecciona **Extraer todo** (no abras el programa dentro del ZIP).
+2. Instala **Python 3.11 o 3.12**, asegurándote de incluir `py` (Python Launcher). No necesitas permisos de administrador para ejecutar el programa.
 3. Haz doble clic en **`Iniciar_Windows.bat`**. La primera vez crea `.venv`, instala las dependencias y genera una plantilla de ejemplo. La instalación inicial **sí necesita Internet**.
-4. En la interfaz selecciona el Excel, indica título, empresa y puesto, elige opcionalmente un logotipo y escribe instrucciones.
+4. En la interfaz selecciona el Excel, indica el título, empresa y área/grupo libre, elige opcionalmente un logotipo y escribe instrucciones. Consulta a la derecha las pestañas Cuadernillo, Respuestas y Acetato antes de generar.
 5. Pulsa **Generar documentos** y luego **Abrir resultado**.
 
-Si falla la instalación, abre PowerShell en la carpeta del proyecto y ejecuta `py -3.13 -m venv .venv` y `.venv\Scripts\python.exe -m pip install -r requirements.txt`, o revisa los mensajes que muestra el iniciador. No hace falta activar PowerShell ni cambiar su política de ejecución.
+Si falla la instalación, abre PowerShell en la carpeta del proyecto y ejecuta `py -3.11 -m venv .venv` y `.venv\Scripts\python.exe -m pip install -r requirements.txt`, o revisa los mensajes que muestra el iniciador. No hace falta activar PowerShell ni cambiar su política de ejecución.
 
 ## Linux
 
@@ -115,4 +116,10 @@ python crear_ejemplo.py
 python generar.py --entrada ejemplos/Plantilla_20_preguntas.xlsx --salida salidas
 ```
 
-La CI valida Windows/Linux con Python 3.11, 3.12 y 3.13. También prueba el iniciador `.bat` con Python 3.13 en modo sin ventana (`Iniciar_Windows.bat --verificar`). La interfaz con ventana y la impresión siguen requiriendo prueba manual en Windows físico.
+La CI está preparada para Windows/Linux y Python 3.11/3.12. **No declares compatibilidad Windows confirmada hasta ver la ejecución de los workflows y probar el iniciador físicamente.**
+
+## Evaluaciones del usuario (archivos privados)
+
+Los bancos de preguntas de Cabos, Checadores, Sobrestantes y Captura y verificación se conservan **en las carpetas privadas de Drive del evaluador**, nunca en el repositorio público: contienen las respuestas correctas. Cada archivo XLSX respeta las columnas `Tema, Pregunta, A, B, C, D, Correcta, Imagen`, con 20 preguntas y sin medios externos. Para utilizarlos, descárgalos a tu computadora y selecciónalos desde la ventana.
+
+El documento `Acetato_clave.pdf` sigue generado mediante la misma geometría fija que `Hoja_respuestas.pdf`. La previsualización muestra posiciones orientativas y no sustituye la prueba de superposición física al 100 %.

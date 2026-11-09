@@ -23,3 +23,12 @@
 - `web_app.py`: interfaz desde navegador, sin subida HTTP, con token CSRF y descargas acotadas.
 - Manual `DOCKER_Y_GIT.md` con instalación y comandos Git paso a paso.
 - Pruebas de selección y generación web incorporadas a pytest; la CI incluye construcción y smoke test Docker en Ubuntu.
+
+## 2026-11-08 · Generador reutilizable y vista previa
+
+- Eliminada la lista fija de puestos en la ventana de Windows/Linux: ahora se escribe libremente el área, grupo o público.
+- Añadido panel lateral con miniaturas de cuadernillo, hoja y acetato; actualiza título, empresa, grupo, instrucciones y primera pregunta sin modificar archivos.
+- Reutilizado `core._bubbles` para que las marcas de hoja y acetato de la vista previa coincidan con la geometría del motor de impresión.
+- La vista del cuadernillo es orientativa, no una rasterización del PDF final; para imprimir se usa el archivo generado.
+- Etiquetas de documento actualizadas a «Área / grupo»; preservado el argumento `puesto` en API por compatibilidad.
+- Los bancos de 4 funciones (80 preguntas) se preparan fuera de GitHub; contienen claves y no se publican en código.
