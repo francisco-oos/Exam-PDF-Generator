@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from zipfile import ZipFile, BadZipFile
 
 import cv2
 import numpy as np
@@ -66,6 +67,16 @@ def read_roster(path:Path):
         with path.open('r',encoding='utf-8-sig',newline='') as h:
             content=list(csv.DictReader(h))
     elif path.suffix.lower()=='.xlsx':
+        # El XLSX es un ZIP: limitar cantidad y expansión antes de abrirlo.
+        try:
+            with ZipFile(path) as archive:
+                members=archive.infolist()
+                if len(members)>180 or sum(v.file_size for v in members)>20*1024*1024:
+                    raise ValueError('La lista XLSX contiene demasiados elementos.')
+                if any('externalLink' in v.filename for v in members):
+                    raise ValueError('No se admiten vínculos externos en el Excel de personal.')
+        except BadZipFile as exc:
+            raise ValueError('La lista XLSX no es válida.') from exc
         from openpyxl import load_workbook
         book=load_workbook(path,read_only=True,data_only=True)
         try:
@@ -468,7 +479,8 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path):
     path=Path(pdf_path)
     if not path.is_file() or path.suffix.lower()!='.pdf' or path.stat().st_size>MAX_PDF_SIZE:
         raise ValueError('Selecciona un PDF válido de hasta 100 MB.')
-    if path.open('rb').read(5)!=b'%PDF-':raise ValueError('Archivo PDF inválido.')
+    with path.open('rb') as stream:
+        if stream.read(5)!=b'%PDF-':raise ValueError('Archivo PDF inválido.')
     s=store.session(sid)
     fingerprint=hashlib.sha256(path.read_bytes()).hexdigest()
     folder=store.root/'originales'/sid;folder.mkdir(parents=True,exist_ok=True)
@@ -482,6 +494,11 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path):
         for idx in range(len(doc)):
             page=doc[idx]
             try:
+                # Un PDF pequeño puede declarar páginas gigantes que saturan RAM
+                # al renderizarse. Las medidas de Xerox quedan muy por debajo.
+                page_w,page_h=page.get_size()
+                if not 100<=page_w<=1500 or not 100<=page_h<=2000:
+                    raise ValueError(f'Página {idx+1}: dimensiones anormales de PDF escaneado.')
                 image=page.render(scale=RENDER_DPI/72).to_pil().convert('RGB')
             finally:page.close()
             original=cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)
