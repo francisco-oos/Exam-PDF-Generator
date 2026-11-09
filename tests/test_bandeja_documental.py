@@ -298,3 +298,30 @@ def test_no_incluir_datos_de_otra_evaluacion_en_historial_pdf(tmp_path):
         text='\n'.join(page.extract_text() or '' for page in reader.pages)
         # Los eventos de página de Checadores no deben salir en Cabos.
         assert store.session(chec)['personal'][0]['folio'] not in text
+
+
+
+def test_combinar_paginas_de_dos_documentos_sin_editar_fuentes(tmp_path):
+    store=OMRStore(tmp_path/'omr')
+    inbox=DocumentInbox(store)
+    sessions=[]
+    archived=[]
+    for code in ('A','B'):
+        sid=store.create_session(
+            'Cuestionario '+code,qs(),people(code,1),'Carta')
+        paper=create_forms_pdf(store,sid,tmp_path/(code+'.pdf'))
+        preflight=inspect_pdf_sessions(store,paper)
+        digest,path=inbox.archive(paper,preflight)
+        sessions.append(sid)
+        archived.append((digest,path,sha_file(path)))
+    output=inbox.assemble([
+        (archived[1][0],0,270),
+        (archived[0][0],0,0),
+    ],tmp_path/'combinado.pdf')
+    pages=PdfReader(str(output)).pages
+    assert len(pages)==2
+    assert int(pages[0].get('/Rotate',0))%360==270
+    assert all(sha_file(source)==old_hash
+               for _,source,old_hash in archived)
+    assert len([e for e in inbox.events()
+                if e['accion']=='pdf_organizado'])==2
