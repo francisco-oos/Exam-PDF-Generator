@@ -109,6 +109,39 @@ contienen nombres y claves locales sin cifrado. No subas datos reales a Git.
 Antes de usar resultados oficiales hay que validar con escaneos físicos y
 calibrar el reconocimiento en la Xerox; las pruebas digitales son sintéticas.
 
+## Bandeja documental y expedientes de evaluación (rama experimental)
+
+En **Calificar y entregar → Escanear PDF**, cada archivo se **archiva primero**
+y sus páginas se registran individualmente antes de intentar leer QR.
+Si se escanea una hoja de Checadores dentro de Cabos, el sistema conserva
+el PDF completo, propone la evaluación según QR firmado y avisa si hay
+documentos mezclados. Las páginas sin QR legible siguen disponibles en
+**Bandeja PDF** y no se califican automáticamente.
+
+**Bandeja PDF** permite consultar originales SHA-256, identificar páginas
+pendientes con revisión por ID+folio, retomar escaneos antiguos, ver miniaturas,
+girar, reordenar, extraer, separar o combinar **copias derivadas**. Nunca
+modifica el original ni la clave de aplicación. El historial OMR permite
+escanear por jornadas sin duplicar la nota de un folio ya procesado.
+
+Desde **Excel de entrega** se pueden exportar dos ZIP:
+**Expediente de entrega**, con Resultados.xlsx y evidencias de esa aplicación;
+y **Expediente interno**, que añade bitácora y originales cuando solo contienen
+esa evaluación. Si el PDF fuente está mezclado, incluye únicamente una copia
+filtrada, no las páginas de otras evaluaciones. Ambos contienen un manifiesto
+de origen y hashes SHA-256, sin la clave HMAC privada.
+
+Se usa **pypdf** para operaciones de páginas. **ZXing-C++ y pikepdf** son
+complementos opcionales para QR difíciles y normalización PDF; no son
+necesarios para el uso normal. El módulo web Docker todavía no ofrece la
+bandeja del escritorio Tk.
+
+Documentación: [manual OMR](docs/OMR_ESCANEO_CALIFICACION.md) y
+[relevo a Codex para pruebas físicas](docs/RELEVO_CODEX_BANDEJA_OMR_2026-11-09.md).
+
+**Estado:** requiere aceptación física con escáner Xerox y hojas con lápiz
+número 2 antes de usar entregables como definitivos. Mantener PR en borrador.
+
 ## Características
 
 - Formatos A4, Carta y Oficio, con diseño corporativo con **nombre de empresa, título, subtítulo, puesto/área, instrucciones y logotipo**.

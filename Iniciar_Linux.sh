@@ -9,7 +9,7 @@ if ! .venv/bin/python -c "import importlib.metadata as m; assert m.version('open
   .venv/bin/python -m pip install -r requirements.txt
 fi
 # El lector OMR se integra en el mismo entorno y menu que el generador.
-if ! .venv/bin/python -c "import cv2,numpy,qrcode; import omr_evaluaciones.motor" >/dev/null 2>&1; then
+if ! .venv/bin/python -c "import cv2,numpy,qrcode,pypdf; import omr_evaluaciones.motor" >/dev/null 2>&1; then
   .venv/bin/python -m pip install -r requirements-omr.txt
 fi
 if [[ ! -f ejemplos/Plantilla_20_preguntas.xlsx ]]; then

@@ -1,0 +1,4 @@
+# Complementos opcionales para escaneos difíciles y normalización avanzada.
+# El sistema funciona sin estos paquetes; no instalar como requisito inicial.
+zxing-cpp>=3.0,<4
+pikepdf>=10.0,<11
