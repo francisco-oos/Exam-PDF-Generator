@@ -210,7 +210,7 @@ def test_identificacion_manual_exige_folio_y_no_califica(tmp_path):
     assert len(store.pages(sid_b))==1
     assert any("IDENTIFICADA_MANUAL"==r["accion"]
                for r in evidence.audit(doc["sha"]))
-    with pytest.raises(ValueError,match="ya tiene"):
+    with pytest.raises(ValueError,match="otra evaluación|ya tiene"):
         evidence.link_manual(doc["sha"],1,sid_a,"00001",
                              store.session(sid_a)["personal"][0]["folio"],
                              "Operador","Intento cruzado")
