@@ -16,6 +16,8 @@ from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
                     export_report,PAPERS,bubble_positions,RENDER_DPI,
                     render_review_with_acetato,inspect_pdf_sessions)
 from .demo import create_synthetic_scan
+from .documentos import DocumentInbox
+from .expedientes import export_session_bundle,participant_receipt
 
 NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
 def review_question_options(questions):
@@ -101,6 +103,7 @@ class OMRApp:
                 self.window.geometry(
                     f'{self.window.winfo_screenwidth()}x{self.window.winfo_screenheight()}+0+0')
         self.store=OMRStore(db_root or Path(__file__).resolve().parents[1]/'datos'/'omr')
+        self.inbox=DocumentInbox(self.store)
         self.session_id=None
         self.mode=tk.StringVar(value='personalizado')
         self.paper=tk.StringVar(value=paper if paper in PAPERS else 'Carta')
@@ -134,7 +137,7 @@ class OMRApp:
         tk.Label(sidebar,text='Escanea · Revisa · Entrega' if self.review_only else
                  'Diseña · Aplica · Califica',bg=NAVY,fg=WHITE,
                  font=('Segoe UI',11,'bold')).pack(anchor='w',padx=21,pady=(0,17))
-        for item in ['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']:
+        for item in ['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial','Bandeja PDF']:
             b=tk.Button(sidebar,text=item,anchor='w',bd=0,highlightthickness=0,bg=NAVY,fg='#dae6ea',
                 activebackground='#1e5360',activeforeground=WHITE,font=('Segoe UI',10),padx=21,pady=12,
                 command=lambda v=item:self.navigate(v))
@@ -171,8 +174,8 @@ class OMRApp:
             self.parent.focus_force()
 
     def _refresh_navigation(self):
-        all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']
-        active=(['Historial','Escanear PDF','Revisión','Resultados','Excel de entrega']
+        all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial','Bandeja PDF']
+        active=(['Historial','Escanear PDF','Bandeja PDF','Revisión','Resultados','Excel de entrega']
                 if self.review_only else
                 (['Inicio','Historial'] if self.mode.get() in ('tradicional','ecologico')
                  else all_items))
@@ -211,7 +214,8 @@ class OMRApp:
         for item,b in self.buttons.items():b.configure(bg='#1c5163' if item==page else NAVY)
         pages={'Inicio':self._home,'Participantes':self._roster,'Hojas con QR':self._paper,
             'Escanear PDF':self._scanner,'Revisión':self._review,'Resultados':self._results,
-            'Excel de entrega':self._export,'Historial':self._history}
+            'Excel de entrega':self._export,'Historial':self._history,
+            'Bandeja PDF':self._documents}
         pages[page]()
 
     def _home(self):
@@ -353,6 +357,8 @@ class OMRApp:
                        'selecciona la sesión manualmente desde Historial.')
         c=self._card()
         self._btn(c,'Cargar PDF escaneado',self.load_scanned,True)
+        self._btn(c,'Abrir bandeja documental',
+                  lambda:self.navigate('Bandeja PDF'))
         self._note('Antes de calificar, se verifican los QR de TODAS las páginas. '
                    'Si hay hojas de diferentes evaluaciones, se mostrarán '
                    'las páginas de cada una y podrás confirmar su separación. '
@@ -384,8 +390,11 @@ class OMRApp:
             try:
                 result=inspect_pdf_sessions(
                     self.store,Path(source),
-                    progress=lambda i,n:self.scan_updates.put(
-                        ('progress',source,f'Identificando QR: hoja {i} de {n}…')),
+                    progress=lambda i,n:(
+                        self.scan_updates.put(
+                            ('progress',source,
+                             f'Identificando QR: hoja {i} de {n}…'))
+                        if i==1 or i==n or i%10==0 else None),
                 )
                 self.scan_updates.put(('preflight',source,result))
             except Exception as exc:
@@ -398,6 +407,8 @@ class OMRApp:
         def work():
             processed=[]
             try:
+                digest,archived=self.inbox.archive(
+                    source,inspection,operator='Operador OMR')
                 for step,group in enumerate(inspection['grupos'],1):
                     self.scan_updates.put((
                         'progress',source,
@@ -408,7 +419,8 @@ class OMRApp:
                     # Convertir páginas visibles (1-based) a índices PDF (0-based).
                     indices=[number-1 for number in group['paginas']]
                     report=scan_document(
-                        self.store,sid,Path(source),page_indices=indices)
+                        self.store,sid,archived,page_indices=indices)
+                    self.inbox.mark_processed(digest,sid,report)
                     processed.append({'sid':sid,'evaluacion':group['evaluacion'],
                                       'paginas':group['paginas'],'report':report})
                 self.scan_updates.put(('ok',source,{
@@ -448,12 +460,22 @@ class OMRApp:
             summary=describe_scan_inspection(inspection,self.session_id)
             if not groups:
                 self.scanning=False
-                self.feedback.set('Sin evaluaciones verificadas. Ninguna hoja fue calificada.')
-                messagebox.showwarning(
-                    'No se pudo identificar la evaluación',
-                    summary+'\n\nRevisa los QR o selecciona y verifica la evaluación '
-                    'de cada hoja antes de una captura manual.',
+                yes=messagebox.askyesno(
+                    'Hojas pendientes de identificación',
+                    summary+'\n\nNo hay QR verificables. ¿Archivar el PDF completo '
+                    'en Bandeja PDF, SIN calificar, para revisarlo después?',
                     parent=self.window)
+                if yes:
+                    try:
+                        self.inbox.archive(source,inspection,operator='Operador OMR')
+                    except Exception as exc:
+                        messagebox.showerror('Error de archivo documental',
+                                             str(exc),parent=self.window)
+                        return
+                    self.feedback.set('PDF conservado, pendiente de identificar.')
+                    self.navigate('Bandeja PDF')
+                else:
+                    self.feedback.set('Carga cancelada. Sin cambios de notas.')
                 return
             foreign=bool(self.session_id and any(
                 group['sesion_id']!=self.session_id for group in groups))
@@ -462,16 +484,17 @@ class OMRApp:
             if mixed:
                 approved=messagebox.askyesno(
                     'Atención: hojas de distintas evaluaciones',
-                    summary+'\n\n¿Procesar ÚNICAMENTE las hojas con QR '
+                    summary+'\n\n¿ARCHIVAR TODO EL PDF y procesar solo las hojas con QR '
                     'verificable, cada una con la clave de su propia evaluación?'
-                    '\n\nLas demás no se calificarán. Pulsa No para cancelar '
+                    '\n\nLas demás se conservarán en Bandeja PDF sin calificación. '
+                    'Pulsa No para cancelar '
                     'sin modificar resultados.',
                     parent=self.window)
                 if not approved:
                     self.scanning=False
                     self.feedback.set('Lectura cancelada: no se calificó ninguna hoja.')
                     return
-            self.feedback.set('Procesando hojas por evaluación y clave verificada…')
+            self.feedback.set('Conservando el PDF y procesando cada sesión…')
             self._process_verified_groups(source,inspection,self.session_id)
             return
 
@@ -514,8 +537,8 @@ class OMRApp:
                 'Resultado: lote con evaluaciones mezcladas',
                 detail+'\n\nCada evaluación se calificó por separado, con su '
                 'propia clave. Abre las demás desde Historial para revisar '
-                'sus notas y entregables. Las hojas no verificadas siguen '
-                'sin calificación automática.',
+                'sus notas y entregables. Las hojas sin QR quedaron '
+                'conservadas en Bandeja PDF, sin calificación.',
                 parent=self.window)
 
     def _table(self,columns,rows,on_select=None):
@@ -849,6 +872,32 @@ class OMRApp:
                       f'{p["aciertos"]}/{p["preguntas"]}' if p['aciertos'] is not None else '—',
                       str(p['porcentaje'])+'%' if p['porcentaje'] is not None else '—',
                       p['estado']) for p in report['participantes']])
+        def individual_pdf():
+            selected=listing.selection()
+            if not selected:
+                messagebox.showwarning('Elige participante',
+                    'Selecciona una fila para entregar solamente su resultado.',
+                    parent=self.window)
+                return
+            person_id=listing.item(selected[0],'values')[0]
+            destination=filedialog.asksaveasfilename(
+                parent=self.window,defaultextension='.pdf',
+                initialfile='Resultado_'+str(person_id)+'.pdf',
+                filetypes=[('PDF','*.pdf')])
+            if not destination:return
+            try:
+                participant_receipt(self.store,self.session_id,
+                                    str(person_id),Path(destination))
+                self.feedback.set('PDF individual generado sin datos de otros participantes.')
+                messagebox.showinfo('Resultado individual',
+                    'Resultado guardado en:\n'+destination,parent=self.window)
+            except Exception as exc:
+                messagebox.showerror('No se pudo exportar',
+                                     str(exc),parent=self.window)
+        individual_actions=tk.Frame(self.stage,bg=LIGHT)
+        individual_actions.pack(fill='x',pady=2)
+        self._btn(individual_actions,'Exportar resultado del participante (PDF)',
+                  individual_pdf,True)
         breakdown=tk.StringVar(value='Selecciona una persona para ver sus temas.')
         tk.Label(self.stage,textvariable=breakdown,bg=LIGHT,fg=INK,font=('Segoe UI',10),wraplength=860,justify='left').pack(anchor='w',pady=7)
         def show_detail(_event):
@@ -881,6 +930,14 @@ class OMRApp:
                  font=('Segoe UI',12,'bold')).pack(anchor='w')
         self._btn(c,'Generar Excel oficial',lambda:self.save_excel(False),True)
         self._btn(c,'Generar Excel interno',lambda:self.save_excel(True))
+        another=self._card()
+        self._btn(another,'Expediente interno con evidencias (ZIP)',
+                  lambda:self.save_bundle(True),True)
+        self._btn(another,'Paquete oficial de resultados (ZIP)',
+                  lambda:self.save_bundle(False))
+        self._note('El expediente interno contiene las hojas efectivas, '
+                   'bitácora y hashes. Un PDF original mezclado no se incluye '
+                   'íntegro para no exponer otra evaluación.')
         self._note('El reporte oficial no revela las respuestas correctas. Si hay pendientes, se etiqueta PROVISIONAL. La sesión se guarda y permite reexportar sin escanear de nuevo.')
 
     def save_excel(self,internal=False):
@@ -892,6 +949,324 @@ class OMRApp:
             self.feedback.set('Excel exportado: '+str(target))
             messagebox.showinfo('Archivo generado','Excel disponible en:\n'+str(target),parent=self.window)
         except Exception as exc:messagebox.showerror('No se pudo exportar',str(exc),parent=self.window)
+
+    def _documents(self):
+        """Organizador PDF integrado: orden virtual, giro y extracción no destructiva."""
+        self._heading('Bandeja documental de escaneos',
+                      'Un PDF original por huella SHA-256. Hojas mezcladas y '
+                      'sin QR permanecen archivadas; organizar NO cambia notas.')
+        documents=self.inbox.documents()
+        if not documents:
+            self._note('Bandeja vacía. En Escanear PDF puedes archivar '
+                       'también hojas sin QR, aunque todavía no se puedan calificar.')
+            self._btn(self.stage,'Ir a Escanear PDF',
+                      lambda:self.navigate('Escanear PDF'),True)
+            return
+        selected={'sha':None,'page':None,'order':[],'rotations':{},
+                  'montaje':[]}
+        top=tk.Frame(self.stage,bg=LIGHT)
+        top.pack(fill='both',expand=True)
+        docframe=tk.Frame(top,bg=LIGHT)
+        docframe.pack(fill='x')
+        tk.Label(docframe,text='Archivos recibidos (copias originales intactas)',
+                 bg=LIGHT,fg=NAVY,font=('Segoe UI',11,'bold')).pack(anchor='w')
+        doc_cols=('Páginas','Pendientes','Ingresos','Fecha')
+        doctree=ttk.Treeview(docframe,columns=doc_cols,show='tree headings',
+                             height=5,selectmode='browse')
+        doctree.heading('#0',text='Archivo / SHA-256')
+        doctree.column('#0',width=400,minwidth=200,stretch=True)
+        for col,width in [('Páginas',75),('Pendientes',80),
+                          ('Ingresos',70),('Fecha',150)]:
+            doctree.heading(col,text=col)
+            doctree.column(col,width=width,stretch=False)
+        doctree.pack(fill='x',pady=5)
+        for doc in documents:
+            doctree.insert('', 'end',iid=doc['sha'],
+                text=f'{doc["nombre"]} · {doc["sha"][:12]}',
+                values=(doc['paginas'],doc['pendientes'],
+                        doc['veces_recibido'],doc['recibido'][:16]))
+        region=tk.Frame(top,bg=LIGHT)
+        region.pack(fill='both',expand=True,pady=(5,1))
+        left=tk.Frame(region,bg=LIGHT)
+        left.pack(side='left',fill='both',expand=True,padx=(0,8))
+        right=tk.Frame(region,bg=WHITE)
+        right.pack(side='left',fill='both',expand=True)
+        page_columns=('Estado','Evaluación','Folio')
+        tree=ttk.Treeview(left,columns=page_columns,show='tree headings',
+                          selectmode='browse',height=11)
+        tree.heading('#0',text='Página física')
+        tree.column('#0',width=92,stretch=False)
+        for col,width in [('Estado',148),('Evaluación',150),('Folio',115)]:
+            tree.heading(col,text=col)
+            tree.column(col,width=width,stretch=True)
+        tree.pack(fill='both',expand=True)
+        help_text=tk.StringVar(value='Selecciona un PDF y después una página.')
+        tk.Label(left,textvariable=help_text,fg=INK,bg=LIGHT,
+                 wraplength=445,justify='left').pack(anchor='w',pady=5)
+        preview=tk.Label(right,bg=WHITE,anchor='n',
+                         text='Vista previa de la página seleccionada')
+        preview.pack(fill='both',expand=True,padx=5,pady=5)
+        self.inbox_photo=None
+        info=tk.StringVar(value='')
+        tk.Label(right,textvariable=info,bg=WHITE,fg=INK,
+                 wraplength=490,justify='left').pack(pady=4)
+
+        def render_list(prefer=None):
+            tree.delete(*tree.get_children())
+            rows={p['pagina']:p for p in self.inbox.pages(selected['sha'])}
+            for physical in selected['order']:
+                p=rows[physical]
+                display=(f'{physical+1}  ↻'
+                         if selected['rotations'].get(physical) else
+                         str(physical+1))
+                tree.insert('', 'end',iid=str(physical),text=display,
+                    values=(p['estado'],
+                            p['sesion_id'] or 'Sin identificar',
+                            p['folio'] or '—'))
+            key=str(prefer if prefer is not None else
+                    selected['order'][0] if selected['order'] else '')
+            if key and tree.exists(key):
+                tree.selection_set(key)
+                tree.see(key)
+                show_page()
+
+        def choose_doc(_event=None):
+            sel=doctree.selection()
+            if not sel:return
+            digest=sel[0]
+            selected['sha']=digest
+            selected['order']=[p['pagina'] for p in self.inbox.pages(digest)]
+            selected['rotations']={}
+            selected['page']=None
+            render_list()
+            help_text.set(f'{len(selected["order"])} páginas en el PDF. '
+                          'Subir/bajar y girar sólo cambian la copia exportada.')
+
+        def show_page(_event=None):
+            if not selected['sha']:return
+            sel=tree.selection()
+            if not sel:return
+            page=int(sel[0])
+            selected['page']=page
+            try:
+                image=self.inbox.render_page(
+                    selected['sha'],page,
+                    rotate=selected['rotations'].get(page,0),
+                    scale=.65)
+                target_width=max(250,min(490,self.window.winfo_width()//3))
+                target_height=max(260,min(550,self.window.winfo_height()-365))
+                image.thumbnail((target_width,target_height))
+                self.inbox_photo=ImageTk.PhotoImage(image,master=self.window)
+                preview.configure(image=self.inbox_photo,text='')
+                record=next(p for p in self.inbox.pages(selected['sha'])
+                            if p['pagina']==page)
+                info.set('Hoja '+str(page+1)+' · '+record['estado']+
+                         ' · '+(record['diagnostico'] or
+                                record['folio'] or 'Sin observaciones'))
+            except Exception as exc:
+                info.set('Error al mostrar evidencia: '+str(exc))
+                preview.configure(image='',text='No se pudo abrir la página.')
+
+        def rearrange(delta):
+            page=selected['page']
+            if page is None:return
+            position=selected['order'].index(page)
+            next_pos=position+delta
+            if not 0<=next_pos<len(selected['order']):return
+            selected['order'][position],selected['order'][next_pos]=(
+                selected['order'][next_pos],selected['order'][position])
+            render_list(page)
+
+        def rotate(delta):
+            page=selected['page']
+            if page is None:return
+            selected['rotations'][page]=(
+                selected['rotations'].get(page,0)+delta)%360
+            render_list(page)
+
+        def save_pdf(one=False,original=False):
+            if not selected['sha']:
+                messagebox.showwarning('Selecciona PDF',
+                    'Primero selecciona un documento.',parent=self.window)
+                return
+            file_name=('Original_'+selected['sha'][:10]+'.pdf'
+                       if original else
+                       'Pagina_'+str(selected['page']+1)+'.pdf'
+                       if one and selected['page'] is not None else
+                       'PDF_Organizado.pdf')
+            output=filedialog.asksaveasfilename(
+                parent=self.window,initialfile=file_name,
+                defaultextension='.pdf',filetypes=[('PDF','*.pdf')])
+            if not output:return
+            try:
+                if original:
+                    from shutil import copyfile
+                    src=self.inbox.original(selected['sha'])
+                    self.inbox.validate_output(output)
+                    if src.resolve()==Path(output).resolve():
+                        raise ValueError('No se puede sobrescribir el original.')
+                    copyfile(src,output)
+                else:
+                    entries=([selected['page']] if one else
+                             selected['order'])
+                    entries=[i for i in entries if i is not None]
+                    self.inbox.assemble([
+                        (selected['sha'],page,
+                         selected['rotations'].get(page,0))
+                        for page in entries],Path(output))
+                self.feedback.set('PDF exportado sin alterar el original.')
+                messagebox.showinfo('PDF generado',
+                                    'Guardado en:\n'+output,parent=self.window)
+            except (OSError,ValueError,ImportError) as exc:
+                messagebox.showerror('No se pudo organizar PDF',
+                                     str(exc),parent=self.window)
+
+        def associate_pending():
+            if selected['sha'] is None or selected['page'] is None:
+                return
+            page=next(p for p in self.inbox.pages(selected['sha'])
+                      if p['pagina']==selected['page'])
+            if page['estado'] not in ('pendiente','identificada'):
+                messagebox.showinfo('No disponible',
+                    'Esta hoja ya tiene lectura o revisión; consúltala en '
+                    'Historial.',parent=self.window)
+                return
+            sessions=self.store.sessions()
+            if not sessions:
+                return
+            names={x['id']:x['nombre_evaluacion'] or x['titulo']
+                   for x in sessions if x['cantidad_participantes']}
+            choose=tk.Toplevel(self.window)
+            choose.title('Vincular hoja sin QR')
+            choose.geometry('560x350')
+            choose.transient(self.window);choose.grab_set()
+            vars_={key:tk.StringVar() for key in
+                   ('sesion','id','folio','revisor','motivo')}
+            options=[f'{value} · {sid}' for sid,value in names.items()]
+            if not options:
+                choose.destroy()
+                return
+            vars_['sesion'].set(options[0])
+            for label,key in [('Aplicación verificada','sesion'),
+                              ('ID personal en la hoja','id'),
+                              ('Folio impreso en la hoja','folio'),
+                              ('Revisor','revisor'),
+                              ('Justificación','motivo')]:
+                tk.Label(choose,text=label).pack(anchor='w',padx=14,pady=(5,1))
+                if key=='sesion':
+                    ttk.Combobox(choose,textvariable=vars_[key],
+                                 values=options,state='readonly').pack(
+                                     fill='x',padx=14)
+                else:
+                    ttk.Entry(choose,textvariable=vars_[key]).pack(
+                        fill='x',padx=14)
+            def confirm():
+                sid=vars_['sesion'].get().rsplit(' · ',1)[-1]
+                try:
+                    name=self.inbox.bind_manual_pending(
+                        selected['sha'],selected['page'],sid,
+                        vars_['id'].get(),vars_['folio'].get(),
+                        vars_['revisor'].get(),vars_['motivo'].get())
+                except (ValueError,OSError) as exc:
+                    messagebox.showerror('No se vinculó la hoja',
+                                         str(exc),parent=choose)
+                    return
+                choose.destroy()
+                self.feedback.set('Hoja vinculada con evidencia: '+name+
+                                  '. Aún requiere revisión manual de respuestas.')
+                render_list(selected['page'])
+            ttk.Button(choose,text='Vincular sin calificar',
+                       command=confirm).pack(pady=12)
+
+        montage_status=tk.StringVar(value='Montaje: 0 páginas de varios PDF.')
+        tk.Label(self.stage,textvariable=montage_status,bg=LIGHT,
+                 fg=INK).pack(anchor='w',pady=(4,0))
+
+        def add_to_montage(all_pages=False):
+            if selected['sha'] is None:
+                return
+            indices=(selected['order'] if all_pages else
+                     [selected['page']] if selected['page'] is not None else [])
+            selected['montaje'].extend(
+                (selected['sha'],index,selected['rotations'].get(index,0))
+                for index in indices)
+            montage_status.set(
+                f'Montaje: {len(selected["montaje"])} páginas '
+                'de uno o más PDF. Sin cambiar originales.')
+
+        def export_montage():
+            if not selected['montaje']:
+                messagebox.showinfo('Montaje vacío',
+                    'Añade páginas o documentos antes de exportar.',
+                    parent=self.window)
+                return
+            dest=filedialog.asksaveasfilename(
+                parent=self.window,initialfile='PDF_Combinado.pdf',
+                defaultextension='.pdf',filetypes=[('PDF','*.pdf')])
+            if not dest:return
+            try:
+                self.inbox.assemble(selected['montaje'],Path(dest))
+                self.feedback.set(
+                    f'PDF combinado: {len(selected["montaje"])} páginas '
+                    'sin modificar fuentes.')
+                messagebox.showinfo('Montaje exportado',
+                                    'Guardado en:\n'+dest,parent=self.window)
+            except (ValueError,OSError,ImportError) as exc:
+                messagebox.showerror('Error al combinar PDF',
+                                     str(exc),parent=self.window)
+
+        def clear_montage():
+            selected['montaje'].clear()
+            montage_status.set('Montaje: 0 páginas de varios PDF.')
+
+        commands=[
+            ('Subir página',lambda:rearrange(-1)),
+            ('Bajar página',lambda:rearrange(1)),
+            ('Girar 90°',lambda:rotate(90)),
+            ('Extraer página',lambda:save_pdf(one=True)),
+            ('Exportar PDF ordenado',lambda:save_pdf()),
+            ('Copiar original',lambda:save_pdf(original=True)),
+            ('Vincular pendiente',associate_pending),
+        ]
+        for start in (0,4):
+            toolbar=tk.Frame(self.stage,bg=LIGHT)
+            toolbar.pack(fill='x',pady=1)
+            for label,command in commands[start:start+4]:
+                self._btn(toolbar,label,command)
+        montage_toolbar=tk.Frame(self.stage,bg=LIGHT)
+        montage_toolbar.pack(fill='x',pady=1)
+        for label,action in [
+            ('Añadir página al montaje',lambda:add_to_montage()),
+            ('Añadir PDF completo',lambda:add_to_montage(True)),
+            ('Exportar PDF combinado',export_montage),
+            ('Vaciar montaje',clear_montage),
+        ]:
+            self._btn(montage_toolbar,label,action)
+        doctree.bind('<<TreeviewSelect>>',choose_doc)
+        tree.bind('<<TreeviewSelect>>',show_page)
+        doctree.selection_set(documents[0]['sha'])
+        choose_doc()
+
+    def save_bundle(self,internal=True):
+        if not self.session_id:
+            return
+        destination=filedialog.asksaveasfilename(
+            parent=self.window,defaultextension='.zip',
+            initialfile=('Expediente_Interno_' if internal
+                         else 'Resultados_Oficiales_')+self.session_id+'.zip',
+            filetypes=[('Archivo ZIP','*.zip')])
+        if not destination:
+            return
+        try:
+            export_session_bundle(
+                self.store,self.inbox,self.session_id,
+                Path(destination),internal=internal)
+            self.feedback.set('Paquete exportado con manifiesto SHA-256.')
+            messagebox.showinfo('Expediente guardado',
+                'Se generó el archivo:\n'+destination,parent=self.window)
+        except Exception as exc:
+            messagebox.showerror('No se pudo exportar expediente',
+                                 str(exc),parent=self.window)
 
     def _history(self):
         self._heading(

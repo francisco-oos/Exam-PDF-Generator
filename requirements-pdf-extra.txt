@@ -1,0 +1,5 @@
+# Opcionales. NO se requieren para la lectura OMR básica.
+# ZXing-C++: segundo lector QR en imágenes difíciles
+zxing-cpp>=2.2,<4
+# pikepdf: crear copia reparada de PDFs válidos pero problemáticos
+pikepdf>=9,<11
