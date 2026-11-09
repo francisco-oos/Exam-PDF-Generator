@@ -62,6 +62,62 @@ ambas modalidades, tanto con como sin lista.
   Respaldar y no subir a GitHub.
 - No declarar resultados oficiales sin probar impresión y escaneo físicos.
 
+## Escaneo por jornadas: retomar sin repetir ni perder resultados
+
+Una **evaluación** de Biblioteca puede tener una o más **aplicaciones
+impresas**. Cada aplicación tiene folios QR propios: los folios nunca se
+regeneran por el simple hecho de abrir el Historial. Para completar una
+aplicación durante varios días:
+
+1. Conservar las hojas ya impresas de esa misma aplicación (los QR y
+   folios originales). No pulsar **Generar PDF** para volver a escanearlas,
+   pues eso emitiría otra aplicación.
+2. Entrar a **Calificar y entregar → Escanear PDF** el día que corresponda.
+   Puede cargarse un PDF con solo parte de las personas. El QR firmado
+   encuentra la sesión anterior y añade sus hojas nuevas.
+3. Al reimportar **exactamente** el mismo PDF/página, no vuelve a crear
+   la hoja ni a calificarla. Si otro PDF contiene el **mismo folio y el
+   mismo conjunto de respuestas/dudas**, se registra como **reimportada
+   sin cambios** (el PDF se conserva, no duplica trabajo).
+4. Si el mismo folio aparece con **respuestas diferentes**, se marca como
+   duplicado conflictivo para decisión humana: la primera nota nunca se
+   sustituye automáticamente.
+5. Si una hoja antigua estaba pendiente por lectura débil y **nadie la
+   corrigió manualmente**, reimportar el mismo PDF permite que una mejora
+   posterior del lector actualice su registro si disminuyen las dudas.
+   Se conserva la evidencia anterior y se deja una anotación de máquina.
+   Las decisiones humanas previas nunca se borran.
+
+El Historial distingue **Cuestionario → Aplicación (fecha, cantidad de
+folios) → Folio** para evitar que parezcan exámenes distintos las filas
+de la misma evaluación. Si vuelves a usar las mismas preguntas en una
+aplicación nueva, sí se crea otra sesión con otros folios y fecha.
+
+## Rendimiento, lápices y revisión segura
+
+- La inspección de mezclas inicia con QR de encabezado a **175 dpi** y
+  recurre a **200 dpi, rotación y rectificación** solo para imágenes
+  difíciles. Muestra el avance por hoja y evita recorrer todas las
+  orientaciones en casos normales.
+- La calificación utiliza el **contraste medio y la cobertura dentro del
+  círculo**, en lugar de dos umbrales binarios fijos sobre todo el papel.
+  Se probaron intensidades sintéticas de lápiz, marcas dobles, desenfoque,
+  rotaciones y escaneos aclarados.
+- Las marcas de buena separación pueden validarse incluso con tonalidad
+  gris más clara. Una marca **demasiado tenue** y las **dobles marcas**
+  permanecen en revisión: nunca se corrigen por adivinación.
+- En Revisión el acetato digital se guarda en caché por hoja y sus opciones
+  visuales; cambiar de reactivo solo mueve el resaltado. El PNG original
+  y el PDF escaneado no se modifican.
+- La imagen se ajusta al alto visible de la ventana, sin dejar oculto
+  el encabezado. El zoom sigue disponible para decisiones difíciles.
+
+**Criterio de aceptación físico pendiente:** probar en la Xerox hojas reales
+de Cabos y Checadores, con lápiz del número 2, varias presiones,
+correcciones y doble marca. El PDF de dos hojas disponible para pruebas
+no equivale al lote nuevo de tres páginas que aparece en las capturas.
+No atribuirle sus métricas de reconocimiento al lote nuevo.
+
 ## Hojas mezcladas de diferentes evaluaciones
 
 Es posible que al escanear Cabos se incluya accidentalmente una hoja de
