@@ -173,7 +173,8 @@ class OMRStore:
             ''')
     def create_session(self,title,questions,people,paper='Carta',modo='personalizado'):
         validate_questions(questions)
-        if modo not in ('tradicional','ecologico','personalizado'):raise ValueError('Modalidad inválida.')
+        if modo not in ('normal','tradicional','ecologico','personalizado'):
+            raise ValueError('Modalidad de sesión inválida.')
         if paper not in PAPERS:raise ValueError('Formato inválido.')
         if len(people)>MAX_PARTICIPANTS:raise ValueError('Demasiadas personas.')
         sid=uuid4().hex[:12];secret=secrets.token_hex(32)
@@ -200,7 +201,12 @@ class OMRStore:
         return dict(s)|{'preguntas':json.loads(s['preguntas_json']),'personal':participants}
     def sessions(self):
         with self.connect() as db:
-            return [dict(r) for r in db.execute('SELECT id,titulo,modo,papel,creada,estado FROM sesiones ORDER BY creada DESC')]
+            return [dict(r) for r in db.execute("""
+                SELECT s.id,s.titulo,s.modo,s.papel,s.creada,s.estado,
+                       (SELECT COUNT(*) FROM participantes p
+                        WHERE p.sesion_id=s.id) AS cantidad_participantes
+                FROM sesiones s ORDER BY s.creada DESC
+            """)]
     def register_page(self,sid,source_sha,page_idx,image,token,answers,uncertain,state):
         """No recalifica por duplicados; archiva cada página para inspección humana."""
         if image is None or image.ndim!=3:raise ValueError('Imagen de página inválida.')
