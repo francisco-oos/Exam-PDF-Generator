@@ -325,3 +325,22 @@ def test_combinar_paginas_de_dos_documentos_sin_editar_fuentes(tmp_path):
                for _,source,old_hash in archived)
     assert len([e for e in inbox.events()
                 if e['accion']=='pdf_organizado'])==2
+
+
+@pytest.mark.parametrize('location', ['bandeja', 'originales', 'escaneos'])
+def test_resultado_individual_no_sobrescribe_evidencia(tmp_path, location):
+    store=OMRStore(tmp_path/'omr')
+    inbox=DocumentInbox(store)
+    sid=store.create_session('Prueba',qs(),people('A',1),'Carta')
+    paper=create_forms_pdf(store,sid,tmp_path/'hoja.pdf')
+    _,digest,archived=_ingest_and_grade(store,inbox,paper)
+    target=archived if location=='bandeja' else store.root/location/'fuente.pdf'
+    target.parent.mkdir(parents=True,exist_ok=True)
+    if target!=archived:
+        target.write_bytes(paper.read_bytes())
+    before=target.read_bytes()
+    person=store.session(sid)['personal'][0]
+    with pytest.raises(ValueError,match='original|escaneo'):
+        participant_receipt(store,sid,person['id'],target)
+    assert target.read_bytes()==before
+    assert sha_file(archived)==digest

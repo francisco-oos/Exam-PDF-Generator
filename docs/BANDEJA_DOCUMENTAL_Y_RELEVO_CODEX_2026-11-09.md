@@ -277,3 +277,18 @@ mismo archivo, sin crear múltiples documentos paralelos de relevo.
   (Actions run 42712304947). Docker local no tiene el motor en ejecución.
 - Aceptación física F01–F16 y Xerox todavía pendiente; los resultados
   anteriores son automáticos/sintéticos, no certifican papel ni lápiz real.
+
+### Tanda 2: protección de evidencias en PDF individual
+
+- Reproducción con tres regresiones fallidas: exportar resultado individual
+  sobre un PDF de la bandeja, de originales históricos o de escaneos
+  sobrescribía la evidencia. El organizador ya protegía esas rutas, pero
+  participant_receipt no invocaba esa validación.
+- Corrección: reutilizar DocumentInbox.validate_output antes de escribir.
+  Se conservan la interfaz pública y el formato del PDF individual.
+- Suite bandeja documental + Tk: **18 aprobadas**, 24.11 s. Los tres casos
+  nuevos comprueban rechazo y conservación exacta de bytes/SHA original.
+- Apertura visual desde Iniciar_Windows.bat, vista previa del cuadernillo,
+  navegación a Calificar y entregar y Bandeja PDF comprobadas en Windows.
+- Omisiones iniciales: dos tests de enlaces simbólicos sin permisos y
+  un inicio Tk intermitente; el test Tk pasó en ambas tandas focalizadas.

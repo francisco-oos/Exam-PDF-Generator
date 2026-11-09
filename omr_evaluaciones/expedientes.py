@@ -68,7 +68,7 @@ def participant_receipt(store: OMRStore, sid: str, person_id: str,
                           else f'{data["porcentaje"]}%'),
         'Aviso: solo los resultados validados son definitivos.',
     ]
-    target=Path(target)
+    target=DocumentInbox(store).validate_output(target)
     target.parent.mkdir(parents=True,exist_ok=True)
     temp=target.with_name(target.name+'.part')
     try:
