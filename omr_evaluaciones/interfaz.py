@@ -12,6 +12,7 @@ from threading import Thread
 from PIL import Image,ImageTk,ImageDraw
 import cv2
 
+from .expedientes import EvidenceStore, export_expediente
 from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
                     export_report,PAPERS,bubble_positions,RENDER_DPI,
                     render_review_with_acetato,inspect_pdf_sessions)
@@ -101,6 +102,7 @@ class OMRApp:
                 self.window.geometry(
                     f'{self.window.winfo_screenwidth()}x{self.window.winfo_screenheight()}+0+0')
         self.store=OMRStore(db_root or Path(__file__).resolve().parents[1]/'datos'/'omr')
+        self.evidence=EvidenceStore(self.store)
         self.session_id=None
         self.mode=tk.StringVar(value='personalizado')
         self.paper=tk.StringVar(value=paper if paper in PAPERS else 'Carta')
@@ -134,7 +136,7 @@ class OMRApp:
         tk.Label(sidebar,text='Escanea · Revisa · Entrega' if self.review_only else
                  'Diseña · Aplica · Califica',bg=NAVY,fg=WHITE,
                  font=('Segoe UI',11,'bold')).pack(anchor='w',padx=21,pady=(0,17))
-        for item in ['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']:
+        for item in ['Inicio','Participantes','Hojas con QR','Escanear PDF','Bandeja PDF','Revisión','Resultados','Excel de entrega','Historial']:
             b=tk.Button(sidebar,text=item,anchor='w',bd=0,highlightthickness=0,bg=NAVY,fg='#dae6ea',
                 activebackground='#1e5360',activeforeground=WHITE,font=('Segoe UI',10),padx=21,pady=12,
                 command=lambda v=item:self.navigate(v))
@@ -171,8 +173,8 @@ class OMRApp:
             self.parent.focus_force()
 
     def _refresh_navigation(self):
-        all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']
-        active=(['Historial','Escanear PDF','Revisión','Resultados','Excel de entrega']
+        all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Bandeja PDF','Revisión','Resultados','Excel de entrega','Historial']
+        active=(['Historial','Escanear PDF','Bandeja PDF','Revisión','Resultados','Excel de entrega']
                 if self.review_only else
                 (['Inicio','Historial'] if self.mode.get() in ('tradicional','ecologico')
                  else all_items))
@@ -210,7 +212,7 @@ class OMRApp:
         self.active_view=page;self._clear()
         for item,b in self.buttons.items():b.configure(bg='#1c5163' if item==page else NAVY)
         pages={'Inicio':self._home,'Participantes':self._roster,'Hojas con QR':self._paper,
-            'Escanear PDF':self._scanner,'Revisión':self._review,'Resultados':self._results,
+            'Escanear PDF':self._scanner,'Bandeja PDF':self._bandeja,'Revisión':self._review,'Resultados':self._results,
             'Excel de entrega':self._export,'Historial':self._history}
         pages[page]()
 
@@ -360,6 +362,10 @@ class OMRApp:
         self._scan_status=tk.Text(self.stage,height=8,wrap='word',bg=WHITE,fg=INK,font=('Consolas',10))
         self._scan_status.pack(fill='x',pady=10)
 
+    def _bandeja(self):
+        from .bandeja_ui import show_bandeja
+        show_bandeja(self)
+
     def simulate_scanned(self):
         if not self.session_id:return
         try:
@@ -373,27 +379,38 @@ class OMRApp:
         if f:self._run_scan(Path(f))
 
     def _run_scan(self,source):
-        """Primero inspecciona TODAS las páginas sin escribir calificaciones."""
+        """Archivar ORIGINAL antes de intentar clasificar o calificar."""
         if self.scanning:
             messagebox.showinfo('Lectura en proceso',
                                 'Ya hay un lote en procesamiento.',parent=self.window)
             return
         self.scanning=True
-        self.feedback.set('Verificando los QR de todas las hojas y sus evaluaciones…')
+        self.feedback.set('Archivando documento y verificando QR por página…')
         def inspect():
             try:
+                doc,repeated=self.evidence.ingest(Path(source))
+                self.scan_updates.put((
+                    'progress',str(source),
+                    ('Archivo ya existente; recuperando estado…' if repeated
+                     else 'PDF original archivado de manera segura.')
+                ))
                 result=inspect_pdf_sessions(
-                    self.store,Path(source),
+                    self.store,Path(doc['ruta']),
                     progress=lambda i,n:self.scan_updates.put(
-                        ('progress',source,f'Identificando QR: hoja {i} de {n}…')),
+                        ('progress',str(source),
+                         f'Identificando QR: hoja {i} de {n}…'))
                 )
-                self.scan_updates.put(('preflight',source,result))
+                self.evidence.inspect(doc['sha'],result)
+                self.scan_updates.put(('preflight',str(source),{
+                    'inspection':result,'sha':doc['sha'],
+                    'original_path':doc['ruta'],'repetido':repeated,
+                }))
             except Exception as exc:
-                self.scan_updates.put(('error',source,str(exc)))
+                self.scan_updates.put(('error',str(source),str(exc)))
         Thread(target=inspect,daemon=True).start()
         self.window.after(120,self._finish_scan)
 
-    def _process_verified_groups(self,source,inspection,original_session):
+    def _process_verified_groups(self,source,inspection,original_session,document_sha):
         """Una sesión y una clave por grupo de páginas, después de aprobación."""
         def work():
             processed=[]
@@ -409,10 +426,12 @@ class OMRApp:
                     indices=[number-1 for number in group['paginas']]
                     report=scan_document(
                         self.store,sid,Path(source),page_indices=indices)
+                    self.evidence.record_report(document_sha,sid,report)
                     processed.append({'sid':sid,'evaluacion':group['evaluacion'],
                                       'paginas':group['paginas'],'report':report})
                 self.scan_updates.put(('ok',source,{
                     'processed':processed,'inspection':inspection,
+                    'document_sha':document_sha,
                     'original_session':original_session,
                 }))
             except Exception as exc:
@@ -443,7 +462,7 @@ class OMRApp:
             return
 
         if status=='preflight':
-            inspection=payload
+            inspection=payload['inspection']
             groups=inspection['grupos']
             summary=describe_scan_inspection(inspection,self.session_id)
             if not groups:
@@ -451,8 +470,9 @@ class OMRApp:
                 self.feedback.set('Sin evaluaciones verificadas. Ninguna hoja fue calificada.')
                 messagebox.showwarning(
                     'No se pudo identificar la evaluación',
-                    summary+'\n\nRevisa los QR o selecciona y verifica la evaluación '
-                    'de cada hoja antes de una captura manual.',
+                    summary+'\n\nEl PDF completo fue archivado en Bandeja PDF. '
+                    'Puedes recuperar sus páginas e identificar manualmente '
+                    'las que no tienen QR verificable.',
                     parent=self.window)
                 return
             foreign=bool(self.session_id and any(
@@ -472,7 +492,9 @@ class OMRApp:
                     self.feedback.set('Lectura cancelada: no se calificó ninguna hoja.')
                     return
             self.feedback.set('Procesando hojas por evaluación y clave verificada…')
-            self._process_verified_groups(source,inspection,self.session_id)
+            self._process_verified_groups(
+                payload['original_path'],inspection,self.session_id,
+                payload['sha'])
             return
 
         self.scanning=False
@@ -881,6 +903,9 @@ class OMRApp:
                  font=('Segoe UI',12,'bold')).pack(anchor='w')
         self._btn(c,'Generar Excel oficial',lambda:self.save_excel(False),True)
         self._btn(c,'Generar Excel interno',lambda:self.save_excel(True))
+        self._btn(c,'Expediente de entrega (ZIP)',lambda:self.save_expediente(False))
+        self._btn(c,'Expediente interno + evidencias (ZIP)',
+                  lambda:self.save_expediente(True))
         self._note('El reporte oficial no revela las respuestas correctas. Si hay pendientes, se etiqueta PROVISIONAL. La sesión se guarda y permite reexportar sin escanear de nuevo.')
 
     def save_excel(self,internal=False):
@@ -892,6 +917,30 @@ class OMRApp:
             self.feedback.set('Excel exportado: '+str(target))
             messagebox.showinfo('Archivo generado','Excel disponible en:\n'+str(target),parent=self.window)
         except Exception as exc:messagebox.showerror('No se pudo exportar',str(exc),parent=self.window)
+
+    def save_expediente(self,internal=False):
+        if not self.session_id:
+            messagebox.showwarning('Sin aplicación',
+                'Selecciona una aplicación desde Historial.',
+                parent=self.window)
+            return
+        name=('Expediente_Interno_' if internal else 'Expediente_Entrega_')
+        target=filedialog.asksaveasfilename(
+            parent=self.window,defaultextension='.zip',
+            filetypes=[('Expediente ZIP','*.zip')],
+            initialfile=name+self.session_id+'.zip')
+        if not target:return
+        try:
+            export_expediente(self.store,self.evidence,self.session_id,
+                             Path(target),internal=internal)
+            self.feedback.set('Expediente generado: '+str(target))
+            messagebox.showinfo('Expediente exportado',
+                'Resultados, evidencia y manifiesto de integridad listos.'
+                '\nEl original no ha sido modificado.',
+                parent=self.window)
+        except (OSError,ValueError,ImportError) as exc:
+            messagebox.showerror('No se pudo exportar',str(exc),
+                                 parent=self.window)
 
     def _history(self):
         self._heading(
