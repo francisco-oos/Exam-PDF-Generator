@@ -17,7 +17,9 @@ from .demo import create_synthetic_scan
 NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
 
 class OMRApp:
-    def __init__(self,parent=None,db_root=None):
+    def __init__(self,parent=None,db_root=None, *,
+                 questions=None, title=None, paper=None, source=None):
+        self.parent = parent
         self.window=tk.Toplevel(parent) if parent is not None else tk.Tk()
         self.window.title('Evaluaciones · Folios, escaneo y calificación OMR')
         w=min(1390,self.window.winfo_screenwidth()-50)
@@ -28,11 +30,15 @@ class OMRApp:
         self.store=OMRStore(db_root or Path(__file__).resolve().parents[1]/'datos'/'omr')
         self.session_id=None
         self.mode=tk.StringVar(value='personalizado')
-        self.paper=tk.StringVar(value='Carta')
-        self.title=tk.StringVar(value='Evaluación de conocimientos')
-        self.file_questions=tk.StringVar(value='')
+        self.paper=tk.StringVar(value=paper if paper in PAPERS else 'Carta')
+        self.title=tk.StringVar(value=title or 'Evaluación de conocimientos')
+        self.file_questions=tk.StringVar(value=source or ('Cuestionario abierto en el generador' if questions else ''))
         self.file_roster=tk.StringVar(value='')
-        self.questions=[];self.people=[]
+        # Reutilizamos la clave y los temas del cuestionario que ya se está
+        # diseñando. No obligamos al evaluador a cargar dos veces el XLSX.
+        self.questions=[{'tema':q.section, 'pregunta':q.prompt,
+                         'correcta':'ABCD'[q.correct]} for q in (questions or [])]
+        self.people=[]
         self.active_page=None
         self.photo=None
         self.scan_updates=Queue()
@@ -58,7 +64,11 @@ class OMRApp:
             self.buttons[item]=b
             b.pack(fill='x',padx=9,pady=1)
         tk.Label(sidebar,text='Datos locales · Sin Internet\nQR firmado · Revisión humana',
-            bg=NAVY,fg='#a4b9c1',justify='left',font=('Segoe UI',9)).pack(side='bottom',anchor='w',padx=21,pady=26)
+            bg=NAVY,fg='#a4b9c1',justify='left',font=('Segoe UI',9)).pack(side='bottom',anchor='w',padx=21,pady=(12,18))
+        tk.Button(sidebar,text='← Diseño e impresión',command=self.return_to_generator,
+            bg='#205267',fg=WHITE,activebackground='#297083',
+            activeforeground=WHITE,anchor='w',bd=0,padx=14,pady=11,
+            font=('Segoe UI',10,'bold')).pack(side='bottom',fill='x',padx=9,pady=4)
         right=tk.Frame(self.window,bg=LIGHT)
         right.pack(side='left',fill='both',expand=True)
         bar=tk.Frame(right,bg=WHITE,height=63)
@@ -68,6 +78,19 @@ class OMRApp:
         self.state_label.pack(side='right',padx=18)
         self.stage=tk.Frame(right,bg=LIGHT,padx=22,pady=18)
         self.stage.pack(fill='both',expand=True)
+
+    def return_to_generator(self):
+        """Devuelve al generador integral sin perder lo abierto en la ventana padre."""
+        if self.parent is None or not self.parent.winfo_exists():
+            messagebox.showinfo('Diseño e impresión',
+                'Abre Iniciar_Windows.bat para usar el diseñador, '
+                'la vista PDF real y la generación de cuadernillos.',
+                parent=self.window)
+            return
+        self.window.destroy()
+        self.parent.deiconify()
+        self.parent.lift()
+        self.parent.focus_force()
 
     def _refresh_navigation(self):
         all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']
@@ -133,7 +156,11 @@ class OMRApp:
         self._btn(c2,'Crear sesión de aplicación',self.create_session,True)
         if self.session_id:tk.Label(c2,text='Sesión actual: '+self.session_id,bg=WHITE,fg='#667e8d').pack(side='left',padx=8)
         if self.mode.get()!='personalizado':
-            self._note('En modos tradicional y ecológico las hojas normales, el acetato y el cuadernillo continúan en el generador existente. La calificación con QR se habilita solo al elegir Personalizado.')
+            self._note('La impresión tradicional y ecológica se prepara en el mismo generador, '
+                       'con editor visual, cuadernillo, respuestas y acetato. '
+                       'Pulsa el botón siguiente para regresar sin cargar preguntas otra vez.')
+            c3=self._card()
+            self._btn(c3,'Abrir diseñador e imprimir PDF',self.return_to_generator,True)
 
     def _note(self,text):
         tk.Label(self.stage,text=text,bg='#e3f1f3',fg='#244e5b',padx=13,pady=12,wraplength=850,justify='left').pack(fill='x',pady=10)
@@ -468,7 +495,8 @@ class OMRApp:
             self.navigate('Resultados' if self.mode.get()=='personalizado' else 'Inicio')
         self._btn(self.stage,'Abrir sesión seleccionada',reopen,True)
 
-def launch(parent=None):
-    app=OMRApp(parent=parent)
+def launch(parent=None, *, questions=None, title=None, paper=None, source=None):
+    """Abre la calificación dentro del generador y hereda preguntas si existen."""
+    app=OMRApp(parent=parent,questions=questions,title=title,paper=paper,source=source)
     if parent is None:app.window.mainloop()
     return app
