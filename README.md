@@ -90,6 +90,15 @@ No existe un tercer selector «Folio/QR».
 8. **Resultados** y **Excel de entrega** se habilitan tras verificar
    las hojas; las incidencias se indican **PROVISIONALES**.
 
+**Escaneos con hojas traspapeladas:** el calificador examina primero
+**todas las páginas** y muestra una alerta si encuentra QR firmados de
+**distintas evaluaciones** (por ejemplo, Cabos y Checadores). El mensaje
+identifica la aplicación y sus páginas; **Sí** autoriza procesar cada
+grupo con su propia clave, **No** cancela sin calificar. Las hojas sin QR
+verificable no se asignan automáticamente ni se califican por su posición.
+El módulo para el personal ya no ofrece botones de simulación o datos
+ficticios; esas pruebas se ejecutan exclusivamente mediante CI.
+
 Sin lista no hay QR válido ni sesión de calificación automática: se rellenan
 datos a mano y se usa acetato. **No se intentará identificar automáticamente
 a alguien por su letra o por el orden de las páginas.**
