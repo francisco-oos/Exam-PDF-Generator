@@ -24,7 +24,7 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 2. Pulsa **Descargar plantilla Excel**. El archivo `Plantilla_Cuestionario.xlsx` incluye la pestaña obligatoria **Preguntas**, un **Ejemplo** independiente y una **Guia**. En `Preguntas`, cada fila indica un tema, la pregunta, las cuatro opciones A/B/C/D y la columna **Correcta** con una sola letra A, B, C o D. Las imágenes se indican con el nombre del PNG/JPG en una carpeta `imagenes` junto al Excel.
 3. Selecciona **Importar XLSX** o modifica el cuestionario con **Editar preguntas y opciones** (añadir, editar, eliminar). La plantilla y el origen nunca se sobrescriben.
 4. Usa los botones **Paleta** del título y del subtítulo; cada uno admite RGB hexadecimal `#RRGGBB`, y la previsualización refleja la selección.
-5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar documentos**, el examen se guarda también en la biblioteca.
+5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar PDF de examen**, el cuestionario se guarda también en la biblioteca.
 6. La biblioteca permanece en **`datos/biblioteca.sqlite3`** dentro de la carpeta del proyecto; está excluida de Git y no se sube a Internet. Haz copias de seguridad de ese archivo cuando el programa esté cerrado. **La base no está cifrada:** cualquier persona con acceso a ella puede leer las respuestas correctas; protege el equipo y las copias de respaldo.
 
 El acetato imprime cada respuesta correcta como **círculo del color RGB elegido con relleno semitransparente** para facilitar el conteo. Su transparencia real depende del material e impresora: prueba papel y acetato superpuestos **al mismo tamaño y al 100 %**, sin ajuste de escala, antes de uso oficial.
@@ -42,28 +42,64 @@ La ventana **Diseñar e imprimir** es la entrada principal; usa **Cerrar aplicac
 **Verificación técnica:** en la rama de desarrollo `feature/modernizacion-integral`, la CI para Windows (Python 3.11/3.12/3.13), Ubuntu y Docker concluyó satisfactoriamente en la [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). La automatización no sustituye la prueba del editor con el equipo físico del usuario ni la superposición de hoja y acetato en impresora al 100 %.
 
 
-## Calificación con folios QR y PDF escaneado (módulo OMR)
+## Flujo único: diseñar, imprimir, calificar y entregar
 
-El apartado integrado **Calificar y entregar** permite importar preguntas y una lista CSV/XLSX de personas; generar una hoja con **folio visible, ID, nombre, QR firmado y marcas negras** por participante; leer el PDF multipágina escaneado, identificar personas, comprobar las burbujas y revisar dudas junto a la imagen original antes de exportar.
+**Windows:** abre una sola vez `Iniciar_Windows.bat`; **Linux:** `Iniciar_Linux.sh`.
+La aplicación abre el diseñador PDF real. **No hay dos generadores ni una segunda
+captura de preguntas.**
 
-La vista de calificación se adapta al tipo de examen: los modos **Tradicional** y **Ecológico** conservan el flujo normal del generador y ocultan las herramientas de escaneo; **Personalizado** habilita importación de personal, impresión QR, lectura, revisión, resultados e informes. Es posible utilizar el cuadernillo reutilizable con las hojas QR personalizadas.
+1. Importa el XLSX de preguntas o abre un cuestionario de la biblioteca.
+2. **Participantes (opcional):** descarga **Plantilla de participantes**, rellena
+   exclusivamente la pestaña **Participantes** y carga el CSV/XLSX. La plantilla
+   incluye cabeceras `ID_personal`, `Nombre`, `Area_adscripcion`, `Grupo`, `Turno`,
+   y una hoja **Ejemplo** separada que **no se importa**. ID como texto para
+   conservar ceros iniciales. Máximo 500 personas, una fila por persona.
+   **Quitar lista** vuelve a la generación genérica.
+3. Elige un único **tipo de examen**:
+   - **Tradicional:** sin lista, cuadernillo/hoja sin datos; con lista, además
+     crea un juego por persona en `Por_participante/` y
+     `Paquetes_individuales.zip`, con una hoja de respuestas agrupada.
+   - **Ecológico:** un solo cuadernillo reutilizable, con marca de agua
+     «NO RAYAR NI MANCHAR». Con lista, `Hoja_respuestas.pdf` contiene hojas
+     identificadas para cada participante; sin lista es una hoja genérica.
+   - **Con folio y QR:** con lista, un cuadernillo reutilizable y
+     `Hoja_respuestas.pdf` con **folio, nombre, ID, QR firmado y cuatro
+     marcas de registro** por persona. `Acetato_clave.pdf` se genera con la
+     MISMA geometría que el lector OMR, no con la del formato convencional.
+     Si no hay lista, el programa crea PDFs genéricos **sin emitir QR ni folios**.
+4. Comprueba en la vista **Cuadernillo / Respuestas / Acetato** el PDF real.
+   La vista de una hoja QR contiene un **QR de demostración no válido**,
+   que se sustituye por QR/HMAC real al generar la sesión.
+5. Pulsa **Generar PDF de examen**. La exportación crea una nueva carpeta
+   sin modificar el Excel original. Conserva `manifest.json`, hashes y
+   `LEEME_IMPRESION.txt` con instrucciones de ese lote.
+6. Para hojas QR impresas, entra a **Evaluaciones → Calificar y entregar
+   resultados**. Esta pantalla se abre maximizada solo con **Historial**,
+   **Escanear PDF**, **Revisión**, **Resultados** y **Excel de entrega**.
+   Selecciona la sesión indicada en `Sesion_OMR.txt`, escanea y revisa
+   incidencias; vuelve al diseñador sin perder cambios.
 
-**Inicio en Windows:** ejecuta `Iniciar_Windows.bat` una sola vez. Se presenta directamente **Diseñar e imprimir**, sin una segunda ventana de generador. Elige **Normal**, **Ecológico** o **Con folio y QR** en el panel izquierdo. En todos los casos puedes preparar el cuadernillo y generar respuestas, clave y acetato. Para la modalidad con folio pulsa **Preparar hojas con folio y QR**, importa la lista de participantes y genera sus hojas individuales. El calificador recibe las preguntas, la clave, el título y el tamaño de papel del examen abierto sin pedir una segunda importación.
+Las modalidades convencional y ecológica admiten **calificación manual
+con acetato**; la lectura automática está habilitada únicamente en hojas QR
+con lista y sesión persistida. Las hojas tradicionales y ecológicas tienen
+geometría convencional para su acetato; las hojas OMR y su acetato comparten
+`bubble_positions`, por lo que no deben intercambiarse entre modalidades.
 
-Los iniciadores de Windows y Linux verifican e instalan, cuando hacen falta, los complementos del lector OMR en el mismo entorno virtual. Si arrancas manualmente con Python, puedes instalarlos con:
+**Inicio y dependencias:** ambos iniciadores instalan las bibliotecas OMR
+faltantes en el entorno virtual del mismo proyecto. No se necesita Docker
+ni otra ventana para generar o calificar. `calificar_omr.py --solo-calificar`
+permanece como opción técnica antigua, no como flujo recomendado.
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-omr.txt
-.\Iniciar_Windows.bat
-```
+**Datos privados:** las listas de personal y sesiones quedan en disco local
+y **no están cifradas**. Protege las carpetas `salidas/`, `datos/omr/`,
+`datos/biblioteca.sqlite3`, las copias de respaldo y las claves.
+No subas esos datos, hojas escaneadas ni resultados reales a GitHub.
 
-Por compatibilidad, `python calificar_omr.py` **también abre el sistema integral**; `python calificar_omr.py --solo-calificar` queda reservado para pruebas técnicas. Desde el menú superior **Evaluaciones → Calificar y entregar resultados** se abre el espacio OMR maximizado (inicia en el historial de sesiones). El editor se oculta y regresa al salir, incluso con la X, sin reiniciar ni perder la configuración. Las calificaciones automáticas corresponden a hojas con folio/QR; las modalidades normal y ecológica siguen admitiendo corrección manual con acetato.
-
-Si usas Linux: `python -m pip install -r requirements-omr.txt`, asegurando `libzbar0` si deseas usar el lector redundante de QR. La aplicación principal sigue funcionando aunque no instales estos complementos.
-
-**Mediciones sintéticas:** 20 QR/20 hojas detectados; 19 hojas validadas automáticamente y una con doble marca retenida para revisión; las 380 marcas de las 19 hojas validadas coincidieron con el patrón artificial. **No se ha medido precisión con la Xerox VersaLink C7120 física**: antes de calificar oficialmente hay que imprimir y escanear tandas reales y calibrar umbrales. El libro Excel de entrega es PROVISIONAL si quedan incidencias. Las sesiones y los PDF de personal permanecen únicamente en `datos/omr/`.
-
-Consulta el [manual de escaneo, criterios y mantenimiento](docs/OMR_ESCANEO_CALIFICACION.md). Hay una [plantilla de personal de ejemplo](plantillas/Plantilla_Personal_OMR.xlsx) con IDs que conservan ceros iniciales.
+**Validación:** las pruebas con PDF y escaneos sintéticos comprueban que QR,
+identidad, HMAC, folio, geometría y resultados se relacionan con la misma
+sesión. **La precisión del escáner físico Xerox VersaLink C7120 aún requiere
+impresión al 100 %, escaneo y calibración con respuestas conocidas**.
+Consulta [el manual de escaneo y corrección](docs/OMR_ESCANEO_CALIFICACION.md).
 
 ## Características
 
