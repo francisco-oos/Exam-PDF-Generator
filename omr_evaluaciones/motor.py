@@ -430,14 +430,12 @@ def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
     return path
 
 
-def create_acetato_omr(store:OMRStore,sid:str,target:Path, *, color='#167341'):
-    """Acetato opcional compatible con la hoja QR, nunca con geometría convencional."""
+def _draw_acetato_omr(cnv, session: dict, *, color='#167341'):
     from reportlab.lib import colors
     from src.evaluaciones.core import _font
-    s=store.session(sid)
+    s=session
     w,h=PAPERS[s['papel']]
     normal,bold=_font()
-    cnv=Canvas(str(target),pagesize=(w,h),pageCompression=1)
     cnv.setFont(bold,12)
     cnv.setFillColor(colors.HexColor('#213A4C'))
     cnv.drawString(44,h-68,'ACETATO · HOJA CON FOLIO Y QR')
@@ -460,8 +458,26 @@ def create_acetato_omr(store:OMRStore,sid:str,target:Path, *, color='#167341'):
     cnv.setFillColor(colors.HexColor('#213A4C'))
     cnv.drawCentredString(w/2,22,'ACETATO QR · IMPRIMIR AL 100 %')
     cnv.showPage()
+
+
+def create_acetato_omr(store:OMRStore,sid:str,target:Path, *, color='#167341'):
+    """Acetato compatible con las hojas QR generadas para ESTA sesión."""
+    s=store.session(sid)
+    cnv=Canvas(str(target),pagesize=PAPERS[s['papel']],pageCompression=1)
+    _draw_acetato_omr(cnv,s,color=color)
     cnv.save()
     return Path(target)
+
+
+def preview_acetato_omr(questions, paper, *, color='#167341'):
+    """La vista previa del acetato usa las mismas coordenadas de la hoja QR."""
+    from io import BytesIO
+    validate_questions(questions)
+    data=BytesIO()
+    cnv=Canvas(data,pagesize=PAPERS[paper],pageCompression=1)
+    _draw_acetato_omr(cnv,{'papel':paper,'preguntas':questions},color=color)
+    cnv.save()
+    return data.getvalue()
 
 
 def preview_formulario_omr(questions, title, paper, *,
