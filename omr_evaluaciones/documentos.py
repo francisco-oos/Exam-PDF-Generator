@@ -238,10 +238,13 @@ class DocumentInbox:
                     (SELECT nombre_original FROM ingresos_documentos_omr i
                      WHERE i.sha=d.sha ORDER BY fecha DESC LIMIT 1) AS nombre,
                     (SELECT COUNT(*) FROM paginas_documentos_omr p
-                     WHERE p.sha=d.sha AND p.estado IN
-                     ('pendiente','identificada','manual_pendiente',
-                      'conflicto_identidad','conflicto_duplicado')
-                    ) AS pendientes,
+                     WHERE p.sha=d.sha AND (
+                       p.estado IN ('pendiente','identificada',
+                                    'conflicto_identidad','conflicto_duplicado')
+                       OR (p.estado='manual_pendiente' AND
+                           COALESCE((SELECT h.estado FROM hojas h
+                                     WHERE h.id=p.hoja_id),'')!='validada')
+                     )) AS pendientes,
                     (SELECT COUNT(*) FROM ingresos_documentos_omr i
                      WHERE i.sha=d.sha) AS veces_recibido
                 FROM documentos_omr d ORDER BY d.recibido DESC,d.sha
@@ -250,8 +253,16 @@ class DocumentInbox:
     def pages(self, digest):
         with self.store.connect() as db:
             return [dict(x) for x in db.execute("""
-                SELECT * FROM paginas_documentos_omr
-                WHERE sha=? ORDER BY pagina
+                SELECT p.sha,p.pagina,p.sesion_id,p.folio,p.persona,
+                    p.hoja_id,p.diagnostico,p.revisada,
+                    CASE WHEN p.estado='manual_pendiente'
+                                  AND h.estado='validada'
+                         THEN 'procesada_manual'
+                         ELSE p.estado END AS estado,
+                    h.estado AS estado_omr
+                FROM paginas_documentos_omr p
+                LEFT JOIN hojas h ON h.id=p.hoja_id
+                WHERE p.sha=? ORDER BY p.pagina
             """,(digest,))]
 
     def original(self, digest):
@@ -268,8 +279,16 @@ class DocumentInbox:
             raise ValueError('Aplicación inválida.')
         with self.store.connect() as db:
             return [dict(x) for x in db.execute("""
-                SELECT * FROM paginas_documentos_omr WHERE sesion_id=?
-                ORDER BY sha,pagina
+                SELECT p.sha,p.pagina,p.sesion_id,p.folio,p.persona,
+                    p.hoja_id,p.diagnostico,p.revisada,
+                    CASE WHEN p.estado='manual_pendiente'
+                                  AND h.estado='validada'
+                         THEN 'procesada_manual'
+                         ELSE p.estado END AS estado,
+                    h.estado AS estado_omr
+                FROM paginas_documentos_omr p
+                LEFT JOIN hojas h ON h.id=p.hoja_id
+                WHERE p.sesion_id=? ORDER BY p.sha,p.pagina
             """,(sid,))]
 
     def events(self, digest=None):
