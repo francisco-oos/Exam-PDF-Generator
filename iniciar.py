@@ -578,6 +578,21 @@ def build_ui(*, open_editor=False):
     tk.Button(toolbar,text='Guardar cuestionario',command=save_in_library,
         bg=TEAL,fg=WHITE,bd=0,padx=9,pady=9,cursor='hand2').pack(side='left')
 
+    def abrir_omr():
+        """Abre el módulo opcional de QR/escáner sin bloquear el generador principal."""
+        try:
+            from omr_evaluaciones.interfaz import launch
+            launch(root)
+        except (ImportError, OSError) as exc:
+            messagebox.showerror('Faltan componentes del lector OMR',
+                'Instala los complementos con:\\n\\n'
+                '.\\\\.venv\\\\Scripts\\\\python.exe -m pip install -r requirements-omr.txt'
+                '\\n\\nDetalle: '+str(exc),parent=root)
+
+    tk.Button(toolbar,text='Calificar · QR',command=abrir_omr,
+        bg='#DDECF0',fg=NAVY,bd=0,padx=10,pady=9,cursor='hand2',
+        font=('Segoe UI',9,'bold')).pack(side='left',padx=(8,0))
+
     exporting = [False]
 
     def run():
