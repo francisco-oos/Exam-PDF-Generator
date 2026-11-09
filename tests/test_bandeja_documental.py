@@ -142,7 +142,7 @@ def test_organizar_extraer_girar_sin_tocar_el_pdf_original(tmp_path):
     assert image.width>50 and image.height>50
     with pytest.raises(ValueError,match='Rotación'):
         inbox.assemble([(digest,0,45)],tmp_path/'no.pdf')
-    with pytest.raises(ValueError,match='originales'):
+    with pytest.raises(ValueError,match='original'):
         inbox.assemble([(digest,0,0)],archive)
 
 
