@@ -894,7 +894,8 @@ def _decode_qr(gray, *, allow_full=True):
 
 
 def render_review_with_acetato(original_bgr, paper, questions, *,
-                              show_acetato=True, issue_numbers=()):
+                              show_acetato=True, issue_numbers=(),
+                              already_aligned=False):
     """Renderiza evidencia ALINEADA y acetato digital transparente, nunca el original.
 
     La homografía usa las cuatro marcas, incluso cuando el QR falló.
@@ -907,7 +908,13 @@ def render_review_with_acetato(original_bgr, paper, questions, *,
     if original_bgr is None or len(original_bgr.shape)!=3:
         raise ValueError('La imagen escaneada no es RGB/BGR.')
     gray=cv2.cvtColor(original_bgr,cv2.COLOR_BGR2GRAY)
-    aligned=next(_rectify(gray,paper),None)
+    expected_size=tuple(round(d*RENDER_DPI/72) for d in PAPERS[paper])
+    if already_aligned and (gray.shape[1],gray.shape[0])==expected_size:
+        # Los escaneos válidos fueron rectificados antes de archivarse.
+        # No encontrar de nuevo cuatro marcas ni calcular la homografía.
+        aligned=gray
+    else:
+        aligned=next(_rectify(gray,paper),None)
     if aligned is None:
         raise ValueError('No se pueden alinear cuatro marcas. '
                          'Captura manualmente sin acetato digital o vuelve a escanear.')
