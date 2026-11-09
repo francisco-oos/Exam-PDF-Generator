@@ -19,9 +19,13 @@ NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
 class OMRApp:
     def __init__(self,parent=None,db_root=None, *,
                  questions=None, title=None, paper=None, source=None,
-                 on_return=None, start_page='Inicio', review_only=False):
+                 on_return=None, start_page='Inicio', review_only=False,
+                 library_db_path=None, on_open_exam=None):
         self.parent = parent
         self.on_return = on_return
+        self.on_open_exam = on_open_exam
+        self.library_db_path = (Path(library_db_path) if library_db_path
+                                else Path(__file__).resolve().parents[1]/'datos'/'biblioteca.sqlite3')
         self.review_only = review_only
         self.window=tk.Toplevel(parent) if parent is not None else tk.Tk()
         self.window.title('Evaluaciones · Folios, escaneo y calificación OMR')
@@ -507,39 +511,140 @@ class OMRApp:
         except Exception as exc:messagebox.showerror('No se pudo exportar',str(exc),parent=self.window)
 
     def _history(self):
-        self._heading('Historial de aplicaciones','Abre una sesión guardada para ver hojas, calificaciones e incidencias sin repetir el escaneo.')
+        self._heading(
+            'Historial de evaluaciones y aplicaciones',
+            'La biblioteca y sus folios/escaneos se relacionan por el ID del cuestionario. '
+            'La clave y los resultados permanecen en la sesión original.',
+        )
+        from biblioteca import list_exams
+        exams=(list_exams(self.library_db_path)
+               if self.library_db_path.is_file() else [])
         sessions=self.store.sessions()
         if self.review_only:
             sessions=[x for x in sessions if x.get('cantidad_participantes',0)>0]
-        if not sessions:
-            self._note('Aún no hay evaluaciones con personal. Desde Diseñar e imprimir '
-                       'elige Normal o Ecológico, carga una lista y genera los PDFs: '
-                       'sus hojas llevarán QR automáticamente.')
-        if not self.review_only:
-            self._btn(self.stage, 'Nueva aplicación con folio y QR',
-                      lambda: self.navigate('Inicio'))
-        tree=self._table(['ID','Evaluación','Modalidad','Formato','Fecha'],
-            [(s['id'],s['titulo'],
-              {'normal':'Normal + QR','ecologico':'Ecológico + QR',
-               'personalizado':'QR (histórico)'}.get(s['modo'],s['modo']),
-              s['papel'],s['creada'][:16]) for s in sessions])
-        def reopen():
-            sel=tree.selection()
-            if not sel:return
-            row=tree.item(sel[0],'values');self.session_id=row[0]
-            session=self.store.session(self.session_id)
-            self.mode.set(session['modo']);self.title.set(session['titulo']);self.paper.set(session['papel'])
-            self.questions=session['preguntas'];self.people=session['personal']
-            self.feedback.set('Sesión histórica cargada: '+self.session_id)
+
+        # La biblioteca conserva el nombre de la evaluación. Los folios nacen
+        # como aplicaciones de esa evaluación y no duplican otro cuestionario.
+        linked={x['cuestionario_id'] for x in sessions if x.get('cuestionario_id')}
+        box=tk.Frame(self.stage,bg=LIGHT)
+        box.pack(fill='both',expand=True,pady=(5,8))
+        cols=('Modalidad','Participantes','Escaneadas','Pendientes','Fecha')
+        tree=ttk.Treeview(box,columns=cols,show='tree headings',height=13,
+                          selectmode='browse')
+        tree.heading('#0',text='Evaluación / aplicación / folio')
+        tree.column('#0',width=380,minwidth=280,stretch=True)
+        for col,width in [('Modalidad',120),('Participantes',104),
+                          ('Escaneadas',95),('Pendientes',95),('Fecha',148)]:
+            tree.heading(col,text=col)
+            tree.column(col,width=width,minwidth=75,stretch=True)
+        scroll=ttk.Scrollbar(box,orient='vertical',command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side='left',fill='both',expand=True)
+        scroll.pack(side='right',fill='y')
+        known={}
+        for exam in exams:
+            iid='exam:'+exam['id']
+            tree.insert('', 'end',iid=iid,
+                text=exam['nombre'] or exam['titulo'],
+                values=('Biblioteca · rev. '+str(exam['revision']),
+                        '—','—','—',
+                        exam['actualizado_en'][:16].replace('T',' ')),open=True)
+            known[exam['id']]=iid
+        for session in sessions:
+            sid=session['id']
+            parent=known.get(session.get('cuestionario_id'),'')
+            name=session.get('nombre_evaluacion') or session['titulo']
+            if not session.get('nombre_evaluacion'):
+                name += ' · histórica '+sid[:8]
+            mode={'normal':'Normal + QR','ecologico':'Ecológico + QR',
+                  'personalizado':'QR (anterior)'}.get(
+                      session['modo'],session['modo'])
+            tree.insert(parent,'end',iid='session:'+sid,
+                text=name+' · '+sid[:8],
+                values=(mode,session['cantidad_participantes'],
+                        session.get('hojas_escaneadas',0),
+                        session.get('hojas_pendientes',0),
+                        session['creada'][:16].replace('T',' ')))
+        if not exams and not sessions:
+            self._note('Todavía no hay evaluaciones guardadas. Diseña el examen, '
+                       'ponle un nombre y genera los documentos.')
+        elif not sessions:
+            self._note('Los cuestionarios están guardados; para calificar '
+                       'automáticamente genera hojas con una lista de participantes.')
+
+        def selected_entry():
+            chosen=tree.selection()
+            return chosen[0] if chosen else None
+
+        def open_item():
+            selected=selected_entry()
+            if not selected:return
+            if selected.startswith('exam:'):
+                if self.on_open_exam is None:
+                    messagebox.showinfo('Abrir evaluación',
+                        'Vuelve a Diseñar e imprimir y abre el examen en Biblioteca.',
+                        parent=self.window)
+                    return
+                exam_id=selected.split(':',1)[1]
+                # Cerrar OMR restaura la raíz y el diseñador; el callback carga
+                # después ese examen exacto por UUID, nunca solo por título.
+                self.return_to_generator()
+                self.on_open_exam(exam_id)
+                return
+            sid=selected.split(':',1)[1]
+            try:
+                session=self.store.session(sid)
+            except ValueError as exc:
+                messagebox.showerror('Sesión inválida',str(exc),parent=self.window)
+                return
+            self.session_id=sid
+            self.mode.set(session['modo'])
+            self.title.set(session['titulo'])
+            self.paper.set(session['papel'])
+            self.questions=session['preguntas']
+            self.people=session['personal']
+            self.feedback.set('Aplicación abierta: '+
+                (session.get('nombre_evaluacion') or session['titulo'])+
+                ' · Folios: '+str(len(self.people)))
             self.navigate('Resultados' if self.review_only or
                           self.mode.get()=='personalizado' else 'Inicio')
-        self._btn(self.stage,'Abrir sesión seleccionada',reopen,True)
+
+        def rename_item():
+            selected=selected_entry()
+            if not selected or not selected.startswith('session:'):
+                messagebox.showinfo('Renombrar aplicación',
+                    'Selecciona un registro con folios/QR para ponerle un nombre.',
+                    parent=self.window)
+                return
+            sid=selected.split(':',1)[1]
+            session=self.store.session(sid)
+            proposed=session.get('nombre_evaluacion') or session['titulo']
+            name=simpledialog.askstring('Nombre de la aplicación',
+                'Nombre visible en el historial (no altera respuestas ni folios):',
+                initialvalue=proposed,parent=self.window)
+            if name is None:return
+            try:self.store.rename_session(sid,name)
+            except ValueError as exc:
+                messagebox.showerror('Nombre inválido',str(exc),parent=self.window)
+                return
+            self.navigate('Historial')
+
+        toolbar=tk.Frame(self.stage,bg=LIGHT)
+        toolbar.pack(fill='x',pady=(0,6))
+        self._btn(toolbar,'Abrir seleccionado',open_item,True)
+        self._btn(toolbar,'Renombrar aplicación anterior',rename_item)
+        self._btn(toolbar,'Actualizar historial',
+                  lambda:self.navigate('Historial'))
+        tree.bind('<Double-Button-1>',lambda _event:open_item())
+
 
 def launch(parent=None, *, questions=None, title=None, paper=None, source=None,
-           on_return=None, start_page='Inicio', review_only=False):
+           on_return=None, start_page='Inicio', review_only=False,
+           library_db_path=None, on_open_exam=None):
     """Abre la calificación dentro del generador y hereda preguntas si existen."""
     app=OMRApp(parent=parent,questions=questions,title=title,paper=paper,
                source=source,on_return=on_return,start_page=start_page,
-               review_only=review_only)
+               review_only=review_only,
+               library_db_path=library_db_path,on_open_exam=on_open_exam)
     if parent is None:app.window.mainloop()
     return app
