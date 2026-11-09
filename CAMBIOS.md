@@ -1,5 +1,16 @@
 # Historial de cambios
 
+## 2026-11-08 · Nuevo módulo OMR QR (rama separada, en revisión)
+
+- La aplicación conserva **un único punto de entrada para el usuario**: `Iniciar_Windows.bat` abre el generador y su editor PDF. El antiguo `calificar_omr.py` abre ahora el generador completo (el modo aislado es `--solo-calificar`).
+- El editor PDF incluye acceso directo a «Calificar · QR / escáner», transfiriendo título, papel y preguntas cargadas; el botón de regreso devuelve al editor. En modalidades tradicional y ecológica se conserva la impresión completa del generador.
+- Importa participantes CSV/XLSX, imprime hojas con QR firmado HMAC, folio visible, marcas de registro y burbujas con geometría única.
+- Lee un PDF multipágina con OpenCV y PDFium; rectifica rotaciones y pequeñas inclinaciones, valida QR, marca dudas y permite revisión con imagen original y zoom de reactivo.
+- Historial y archivo local en SQLite, conservación del PDF original y SHA-256, prevención de duplicados, bitácora de correcciones y Excel oficial/interno.
+- Resultados por tema y promedio calculados solo con participantes validados, sin regla aprobatoria automática.
+- Referencias comparadas: OMRChecker y ScoreForm (MIT); código OMR propio. 37 pruebas locales exitosas, prueba gráfica en Xvfb y benchmark sintético de 20×20. **La Xerox VersaLink C7120 todavía no ha sido calibrada físicamente**.
+- No se modifica el PR #8 de modernización. La rama OMR parte de él para evitar conflictos; no fusionar antes de aceptación.
+
 ## 2026-11-08 · Modernización integral y acetato RGB (PR #8, en revisión)
 
 - Incorporada la paleta RGB del acetato, independiente de la hoja de respuestas, en Tkinter, vista PDF, generación y SQLite; el valor previo verde conserva su compatibilidad.

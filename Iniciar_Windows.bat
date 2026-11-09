@@ -40,6 +40,19 @@ if errorlevel 1 (
         exit /b 1
     )
 )
+REM Instalar el lector OMR en el mismo entorno: el menu Calificar debe funcionar
+REM sin un segundo instalador ni ejecutar otro script por separado.
+".venv\Scripts\python.exe" -c "import cv2,numpy,qrcode; import omr_evaluaciones.motor" >nul 2>&1
+if errorlevel 1 (
+    echo Instalando complementos de calificacion OMR...
+    ".venv\Scripts\python.exe" -m pip install -r requirements-omr.txt
+    if errorlevel 1 (
+        echo No se pudieron instalar los complementos OMR.
+        echo Revisa la conexion e intenta de nuevo.
+        pause
+        exit /b 1
+    )
+)
 if not exist "ejemplos\Plantilla_20_preguntas.xlsx" (
     echo Creando plantilla de ejemplo...
     ".venv\Scripts\python.exe" crear_ejemplo.py

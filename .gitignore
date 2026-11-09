@@ -10,3 +10,7 @@ datos/**
 !datos/salidas/
 !datos/entradas/.gitkeep
 !datos/salidas/.gitkeep
+
+# Imágenes y PDFs sintéticos de pruebas OMR
+tests/outputs/
+demo/

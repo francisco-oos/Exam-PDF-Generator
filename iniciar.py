@@ -44,6 +44,10 @@ def open_folder(path: Path):
 def build_ui(*, open_editor=False):
     """Construir la ventana sin entrar al ciclo de eventos (permite smoke tests)."""
     root = tk.Tk()
+    # El diseñador PDF real es el único espacio de trabajo visible al iniciar.
+    # La raíz conserva variables/callbacks de compatibilidad, pero no se muestra.
+    if open_editor:
+        root.withdraw()
     root.title('Generador de evaluaciones | Diseño empresarial')
     root.geometry('1340x818')
     root.minsize(900, 600)
@@ -70,9 +74,24 @@ def build_ui(*, open_editor=False):
     paper_choice = tk.StringVar(value='A4')
     body_font = tk.StringVar(value='9.0')
     reuse_booklet = tk.BooleanVar(value=True)
+    modo_examen = tk.StringVar(value='ecologico')
+    lista_personal = tk.StringVar(value='')
+    resumen_personal = tk.StringVar(value='Sin lista: documentos genéricos, sin folios ni QR.')
+    personal_actual: list[dict] = []
     instructions_var = tk.StringVar(value='Lee cada pregunta y elige una respuesta. Marca tus respuestas únicamente en la hoja separada.')
     dirty = tk.StringVar(value='Sin guardar en biblioteca')
     large_preview: list[dict | None] = [None]
+
+    def active_window():
+        """Devuelve la ventana visible para diálogos y controles secundarios."""
+        editor = large_preview[0]
+        if editor is not None:
+            try:
+                if editor['win'].winfo_exists():
+                    return editor['win']
+            except tk.TclError:
+                pass
+        return root
 
     lib_name = tk.StringVar(value='')
     active_id: list[str | None] = [None]
@@ -170,7 +189,7 @@ def build_ui(*, open_editor=False):
         if not confirm_replace():
             return
         chosen=filedialog.askopenfilename(title='Seleccionar Excel de preguntas',
-                    filetypes=[('Libro de Excel','*.xlsx')],parent=root)
+                    filetypes=[('Libro de Excel','*.xlsx')],parent=active_window())
         if chosen:
             active_id[0]=None
             lib_name.set('')
@@ -189,7 +208,7 @@ def build_ui(*, open_editor=False):
 
     def choose_logo():
         chosen=filedialog.askopenfilename(title='Seleccionar logotipo',
-                   filetypes=[('Imágenes PNG/JPEG','*.png *.jpg *.jpeg')],parent=root)
+                   filetypes=[('Imágenes PNG/JPEG','*.png *.jpg *.jpeg')],parent=active_window())
         if chosen:logo_var.set(chosen)
 
     tk.Button(logorow,text='Elegir logo',command=choose_logo,bg='#ecf2f5',fg=NAVY,
@@ -226,7 +245,7 @@ def build_ui(*, open_editor=False):
         try:current=hex_color(var.get())
         except ExamError:current='#213A4C'
         rgb=colorchooser.askcolor(color=current,
-                                  title='Elegir color RGB para '+label,parent=root)
+                                  title='Elegir color RGB para '+label,parent=active_window())
         if rgb and rgb[1]:var.set(rgb[1].upper())
     tk.Button(colorsrow,text='Paleta',command=lambda:choose_color(color_title,'título'),
               bg='#e4edf1',bd=0,padx=8,pady=7,cursor='hand2').grid(row=1,column=1,sticky='w',pady=(5,0))
@@ -294,6 +313,82 @@ def build_ui(*, open_editor=False):
                 cache['error']=str(exc)
         return cache['questions']
 
+    def seleccionar_personal():
+        """La lista se valida antes de aceptarla; no altera el XLSX del usuario."""
+        path=filedialog.askopenfilename(
+            parent=active_window(),title='Seleccionar lista de participantes',
+            filetypes=[('Excel y CSV','*.xlsx *.csv')])
+        if not path:
+            return
+        try:
+            from omr_evaluaciones.motor import read_roster
+            personas=read_roster(Path(path))
+        except (ValueError,OSError,ImportError) as exc:
+            messagebox.showerror('Lista de participantes no válida',
+                                 str(exc),parent=active_window())
+            return
+        personal_actual[:]=personas
+        lista_personal.set(path)
+        resumen_personal.set(
+            f'{len(personas)} participantes cargados. Se imprimirá el mismo examen '
+            'de acuerdo con la modalidad elegida.')
+        status.set(f'Lista cargada: {len(personas)} participantes.')
+
+    def quitar_personal():
+        personal_actual.clear()
+        lista_personal.set('')
+        resumen_personal.set('Sin lista: documentos genéricos, sin folios ni QR.')
+        status.set('Lista retirada. El examen puede generarse sin personal.')
+
+    def descargar_personal():
+        """Plantilla vacía común, con ejemplo aparte y los IDs forzados a texto."""
+        destino=filedialog.asksaveasfilename(
+            parent=active_window(),title='Descargar plantilla de participantes',
+            initialfile='Plantilla_Participantes.xlsx',defaultextension='.xlsx',
+            filetypes=[('Libro Excel','*.xlsx')])
+        if not destino:
+            return
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font,PatternFill
+            from openpyxl.utils import get_column_letter
+            libro=Workbook()
+            hoja=libro.active
+            hoja.title='Participantes'
+            campos=['ID_personal','Nombre','Area_adscripcion','Grupo','Turno']
+            hoja.append(campos)
+            for i,width in enumerate([20,36,29,20,17],1):
+                columna=get_column_letter(i)
+                hoja.column_dimensions[columna].width=width
+                celda=hoja.cell(1,i)
+                celda.font=Font(bold=True,color='FFFFFF')
+                celda.fill=PatternFill('solid',fgColor='17374A')
+            hoja.freeze_panes='A2'
+            hoja.auto_filter.ref='A1:E1'
+            for fila in range(2,503):
+                hoja.cell(fila,1).number_format='@'
+            ejemplo=libro.create_sheet('Ejemplo')
+            ejemplo.append(campos)
+            ejemplo.append(['000001','Persona ficticia Uno','Área de prueba','A','Día'])
+            ejemplo.append(['000002','Persona ficticia Dos','Área de prueba','A','Noche'])
+            guia=libro.create_sheet('Guia')
+            notas=[
+                'Rellena ÚNICAMENTE la hoja Participantes; Ejemplo no se importa.',
+                'ID_personal: único, obligatorio y con formato de texto (conserva 000001).',
+                'Nombre: obligatorio. Área, Grupo y Turno son opcionales.',
+                'Una fila por participante. No dupliques IDs. Máximo 500 personas.',
+                'Una misma lista sirve para tradicional, ecológico y folio/QR.',
+                'Sin cargar la lista, el programa genera documentos genéricos.',
+            ]
+            for n,linea in enumerate(notas,1):
+                guia.cell(n,1,linea)
+            guia.column_dimensions['A'].width=105
+            libro.save(destino)
+            status.set('Plantilla vacía de participantes guardada en: '+destino)
+        except (OSError,ValueError) as exc:
+            messagebox.showerror('No se pudo guardar la plantilla',
+                                 str(exc),parent=active_window())
+
     def preview_data():
         """Configuración única para ambas vistas; evita divergencias de colores."""
         questions=load_questions()
@@ -308,7 +403,10 @@ def build_ui(*, open_editor=False):
              color_respuestas=safe_color(color_answers,'#213A4C'),
              color_acetato=hex_color(color_acetate.get(), 'Color del acetato'),
              tamano_papel=paper_choice.get(),letra=float(body_font.get()),
-             reutilizable=bool(reuse_booklet.get()))
+             reutilizable=bool(reuse_booklet.get()),
+             modo_examen=modo_examen.get(), cantidad_personas=len(personal_actual),
+             participante_nombre=personal_actual[0]['nombre'] if personal_actual else '',
+             participante_id=personal_actual[0]['id'] if personal_actual else '')
 
     def open_large_preview():
         """Abre el editor dedicado, con controles junto al PDF real.
@@ -318,6 +416,7 @@ def build_ui(*, open_editor=False):
         """
         if large_preview[0] is not None:
             try:
+                large_preview[0]['win'].deiconify()
                 large_preview[0]['win'].lift()
                 large_preview[0]['win'].focus_force()
                 return
@@ -331,10 +430,18 @@ def build_ui(*, open_editor=False):
             'reutilizable': reuse_booklet, 'color_titulo': color_title,
             'color_subtitulo': color_subtitle, 'color_respuestas': color_answers,
             'color_acetato': color_acetate, 'instrucciones': instructions_var,
+            'modo_examen': modo_examen, 'lista_personal': lista_personal,
+            'nombre_evaluacion': lib_name,
         }
         editor=open_design_studio(root,datos_fn=preview_data,variables=vars_studio,
             editar_preguntas=edit_current,guardar=save_in_library,generar=run,
-            importar=choose_xlsx,biblioteca=open_library,plantilla=template_download,estado=dirty)
+            importar=choose_xlsx,biblioteca=open_library,plantilla=template_download,
+            estado=dirty,calificar=abrir_omr,
+            seleccionar_personal=seleccionar_personal,
+            descargar_personal=descargar_personal,
+            quitar_personal=quitar_personal,
+            resumen_personal=resumen_personal,
+            on_close=close_application if open_editor else None)
         large_preview[0]={'win':editor}
         def clear_state(event):
             if event.widget is editor:
@@ -361,6 +468,9 @@ def build_ui(*, open_editor=False):
             preview_info.set(f'{len(questions)} preguntas · {topics} temas · Vista: {current_view.get()}')
 
     def schedule(*_):
+        # No renderizar una segunda miniatura detrás del PDF real.
+        if open_editor:
+            return
         if scheduled[0] is not None:
             root.after_cancel(scheduled[0])
         scheduled[0]=root.after(250,render)
@@ -391,9 +501,9 @@ def build_ui(*, open_editor=False):
     def template_download():
         origin=BASE/'plantillas'/'Plantilla_Cuestionario.xlsx'
         if not origin.is_file():
-            messagebox.showerror('Plantilla no disponible','No se encontró la plantilla incluida en el proyecto.',parent=root)
+            messagebox.showerror('Plantilla no disponible','No se encontró la plantilla incluida en el proyecto.',parent=active_window())
             return
-        target=filedialog.asksaveasfilename(parent=root,defaultextension='.xlsx',
+        target=filedialog.asksaveasfilename(parent=active_window(),defaultextension='.xlsx',
                 initialfile='Plantilla_Cuestionario.xlsx',title='Guardar plantilla para rellenar',
                 filetypes=[('Archivo de Excel','*.xlsx')])
         if not target:return
@@ -401,7 +511,7 @@ def build_ui(*, open_editor=False):
             from shutil import copyfile
             copyfile(origin,target)
             status.set('Plantilla guardada en: '+str(target))
-        except OSError as exc:messagebox.showerror('No se pudo guardar',str(exc),parent=root)
+        except OSError as exc:messagebox.showerror('No se pudo guardar',str(exc),parent=active_window())
 
     def save_in_library(*, silent=False):
         try:
@@ -418,10 +528,10 @@ def build_ui(*, open_editor=False):
             dirty.set('Guardado en biblioteca')
             status.set('Cuestionario guardado en biblioteca local SQLite')
             if not silent:
-                messagebox.showinfo('Biblioteca','Cuestionario, respuestas, imágenes y datos guardados. Puedes abrirlo o editarlo después.',parent=root)
+                messagebox.showinfo('Biblioteca','Cuestionario, respuestas, imágenes y datos guardados. Puedes abrirlo o editarlo después.',parent=active_window())
             return key
         except (ExamError,OSError,ValueError) as exc:
-            if not silent:messagebox.showerror('No se guardó',str(exc),parent=root)
+            if not silent:messagebox.showerror('No se guardó',str(exc),parent=active_window())
             return None
 
     def confirm_replace():
@@ -430,29 +540,61 @@ def build_ui(*, open_editor=False):
             return True
         answer = messagebox.askyesnocancel('Cambios pendientes',
             '¿Guardar el cuestionario antes de continuar?\n'
-            'Sí: guardar en biblioteca. No: continuar sin guardar. Cancelar: seguir editando.', parent=root)
+            'Sí: guardar en biblioteca. No: continuar sin guardar. Cancelar: seguir editando.', parent=active_window())
         if answer is None:
             return False
         return not answer or save_in_library(silent=True) is not None
 
     def edit_current():
         questions=load_questions()
-        edited=edit_questions(root,questions)
+        edited=edit_questions(active_window(),questions)
         if edited is None:return
         new_path=BASE/'datos'/'ediciones'/uuid4().hex/'Preguntas.xlsx'
         try:
             export_workbook(edited,new_path)
         except (ExamError,OSError) as exc:
-            messagebox.showerror('Edición no guardada',str(exc),parent=root);return
+            messagebox.showerror('Edición no guardada',str(exc),parent=active_window());return
         file_var.set(str(new_path))
         cache['key']=None
         schedule()
         status.set('Preguntas editadas. Usa «Guardar cuestionario» para conservar los cambios en la biblioteca.')
 
+    def cargar_examen_biblioteca(exam_id):
+        """Restaura por ID el examen ligado a una aplicación OMR.
+
+        El nombre de una sesión no se usa como llave: podría repetirse.
+        """
+        if not confirm_replace():
+            return False
+        try:
+            exam=load_exam(db_path,exam_id,BASE/'datos'/'biblioteca_cache')
+            workbook=export_workbook(
+                exam.questions,BASE/'datos'/'biblioteca_cache'/exam.id/'Preguntas.xlsx')
+        except (ExamError,OSError,ValueError) as exc:
+            messagebox.showerror('No se pudo abrir la evaluación',
+                                 str(exc),parent=active_window())
+            return False
+        active_id[0]=exam.id
+        lib_name.set(exam.nombre)
+        company_var.set(exam.empresa);group_var.set(exam.grupo)
+        title_var.set(exam.titulo);subtitle_var.set(exam.subtitulo)
+        color_title.set(exam.color_titulo);color_subtitle.set(exam.color_subtitulo)
+        color_acetate.set(exam.color_acetato);color_answers.set(exam.color_respuestas)
+        paper_choice.set(exam.tamano_papel);body_font.set(f'{exam.letra:.1f}')
+        reuse_booklet.set(exam.reutilizable)
+        modo_examen.set('ecologico' if exam.reutilizable else 'normal')
+        instructions_var.set(exam.instrucciones)
+        logo_var.set(str(exam.logo) if exam.logo else '')
+        file_var.set(str(workbook));cache['key']=None
+        dirty.set('Guardado en biblioteca')
+        status.set(f'Cuestionario «{exam.nombre}» · revisión {exam.revision}.')
+        schedule()
+        return True
+
     def open_library():
         """Gestiona biblioteca y papelera; no elimina archivos PDF ya exportados."""
-        win=tk.Toplevel(root);win.title('Biblioteca y papelera de cuestionarios')
-        win.geometry('920x560');win.minsize(760,440);win.transient(root);win.grab_set()
+        win=tk.Toplevel(active_window());win.title('Biblioteca y papelera de cuestionarios')
+        win.geometry('920x560');win.minsize(760,440);win.transient(active_window());win.grab_set()
         tk.Label(win,text='Biblioteca de cuestionarios',font=('Segoe UI',17,'bold'),
                  padx=18,pady=12).pack(anchor='w')
         options=tk.Frame(win,padx=18);options.pack(fill='x')
@@ -497,26 +639,8 @@ def build_ui(*, open_editor=False):
         def load_selected():
             if trashed.get():return
             item=pick()
-            if not item:return
-            if not confirm_replace():return
-            try:
-                exam=load_exam(db_path,item,BASE/'datos'/'biblioteca_cache')
-                workbook=export_workbook(exam.questions,BASE/'datos'/'biblioteca_cache'/exam.id/'Preguntas.xlsx')
-            except (ExamError,OSError,ValueError) as exc:
-                messagebox.showerror('No se pudo abrir',str(exc),parent=win);return
-            active_id[0]=exam.id
-            lib_name.set(exam.nombre);company_var.set(exam.empresa);group_var.set(exam.grupo)
-            title_var.set(exam.titulo);subtitle_var.set(exam.subtitulo)
-            color_title.set(exam.color_titulo);color_subtitle.set(exam.color_subtitulo)
-            color_acetate.set(exam.color_acetato)
-            color_answers.set(exam.color_respuestas);paper_choice.set(exam.tamano_papel)
-            body_font.set(f'{exam.letra:.1f}');reuse_booklet.set(exam.reutilizable)
-            instructions_var.set(exam.instrucciones)
-            logo_var.set(str(exam.logo) if exam.logo else '')
-            file_var.set(str(workbook));cache['key']=None
-            status.set(f'Cuestionario cargado · revisión {exam.revision}. Puedes editarlo y diseñarlo.')
-            dirty.set('Guardado en biblioteca')
-            win.destroy();schedule()
+            if item and cargar_examen_biblioteca(item):
+                win.destroy()
         def delete_selected():
             item=pick()
             if not item:return
@@ -578,6 +702,46 @@ def build_ui(*, open_editor=False):
     tk.Button(toolbar,text='Guardar cuestionario',command=save_in_library,
         bg=TEAL,fg=WHITE,bd=0,padx=9,pady=9,cursor='hand2').pack(side='left')
 
+    def volver_al_diseno():
+        """Restaura la misma instancia del diseñador, sin reiniciar el formulario."""
+        editor = large_preview[0]
+        if editor is not None and editor['win'].winfo_exists():
+            editor['win'].deiconify()
+            editor['win'].lift()
+            editor['win'].focus_force()
+        elif open_editor:
+            open_large_preview()
+        else:
+            root.deiconify()
+            root.lift()
+
+    def abrir_omr():
+        """Calificación dedicada, sincronizada por ID con la biblioteca."""
+
+        def abrir_evaluacion_desde_historial(exam_id):
+            # La ventana OMR ya se cerró antes de invocar este callback.
+            cargar_examen_biblioteca(exam_id)
+        visible = active_window()
+        visible.withdraw()
+        try:
+            from omr_evaluaciones.interfaz import launch
+            # La clave y las preguntas vienen del examen actualmente editado.
+            launch(root, questions=load_questions(),
+                   title=title_var.get(), paper=paper_choice.get(),
+                   source=file_var.get(), on_return=volver_al_diseno,
+                   start_page='Historial', review_only=True,
+                   library_db_path=db_path,
+                   on_open_exam=abrir_evaluacion_desde_historial)
+        except (ImportError, OSError, tk.TclError) as exc:
+            volver_al_diseno()
+            messagebox.showerror('No se pudo abrir la calificación',
+                'Comprueba las dependencias OMR en requirements-omr.txt.\n' +
+                'Detalle: ' + str(exc), parent=active_window())
+
+    tk.Button(toolbar,text='Calificar · QR',command=abrir_omr,
+        bg='#DDECF0',fg=NAVY,bd=0,padx=10,pady=9,cursor='hand2',
+        font=('Segoe UI',9,'bold')).pack(side='left',padx=(8,0))
+
     exporting = [False]
 
     def run():
@@ -593,13 +757,27 @@ def build_ui(*, open_editor=False):
                 color_titulo=color_title.get(), color_subtitulo=color_subtitle.get(),
                 color_respuestas=color_answers.get(), color_acetato=color_acetate.get(),
                 tamano_papel=paper_choice.get(), letra=float(body_font.get()),
-                reutilizable=bool(reuse_booklet.get()))
+                reutilizable=bool(reuse_booklet.get()),
+                modo_examen=modo_examen.get(),
+                lista_personal=lista_personal.get() or None)
             source, title, subtitle = Path(file_var.get()), title_var.get(), subtitle_var.get()
         except (ValueError, OSError) as exc:
-            messagebox.showerror('Revisa los ajustes', str(exc), parent=root)
+            messagebox.showerror('Revisa los ajustes', str(exc), parent=active_window())
             return
         # Guardar ahora evita asociar los cambios posteriores con esta exportación.
         saved = save_in_library(silent=True)
+        if saved is None:
+            messagebox.showerror('No se pudo vincular la evaluación',
+                'Guarda un nombre válido en la biblioteca antes de imprimir.',
+                parent=active_window())
+            return
+        revision = next((item['revision'] for item in list_exams(db_path)
+                         if item['id']==saved),None)
+        options.update(
+            nombre_evaluacion=lib_name.get().strip() or title,
+            cuestionario_id=saved,
+            revision_biblioteca=revision,
+        )
         exporting[0] = True
         btn.config(state='disabled', text='Generando…')
         status.set('Generando documentos; puedes seguir consultando la vista previa.')
@@ -625,15 +803,25 @@ def build_ui(*, open_editor=False):
             btn.config(state='normal', text='Generar documentos')
             if error:
                 status.set('No se completó la exportación. Revisa los datos e inténtalo de nuevo.')
-                messagebox.showerror('No se pudo generar la evaluación', error, parent=root)
+                messagebox.showerror('No se pudo generar la evaluación', error, parent=active_window())
                 return
             last_output[0] = folder
             status.set('Documentos generados: '+folder.name)
+            try:
+                import json
+                metadata=json.loads((folder/'manifest.json').read_text(encoding='utf-8'))
+                info=(f"Modalidad: {metadata.get('modo_examen','normal')} · "
+                      f"Participantes: {metadata.get('participantes',0)}.")
+                if metadata.get('sesion_omr'):
+                    info+=' Sesión de calificación: '+metadata['sesion_omr']+'.'
+            except (ValueError,OSError):
+                info='Consulta LEEME_IMPRESION.txt para imprimir el lote.'
             openbtn.configure(state='normal')
             messagebox.showinfo('Evaluación generada',
-                'Se generaron cuatro PDF, copia de preguntas, recursos y manifiesto SHA-256.' +
+                'Documentos generados desde el mismo cuestionario. '+info+
+                ' Incluyen los archivos correspondientes a la modalidad elegida.' +
                 (' La configuración se guardó en biblioteca.' if saved else ' La biblioteca no se pudo guardar; usa Guardar cuestionario.') +
-                '\n\n'+str(folder)+'\n\nImprime hoja y acetato a escala 100 %.', parent=root)
+                '\n\n'+str(folder)+'\n\nImprime hoja y acetato a escala 100 %.', parent=active_window())
         root.after(80, receive_export)
 
     btn=tk.Button(bottom,text='Generar documentos',command=run,fg=WHITE,bg=TEAL,
@@ -645,21 +833,27 @@ def build_ui(*, open_editor=False):
         if last_output[0] is not None:
             try:open_folder(last_output[0])
             except (OSError,FileNotFoundError) as exc:
-                messagebox.showerror('No se puede abrir el resultado',str(exc),parent=root)
+                messagebox.showerror('No se puede abrir el resultado',str(exc),parent=active_window())
 
     openbtn=tk.Button(bottom,text='Abrir resultado',command=open_last,
            fg=NAVY,bg='#e4edf1',padx=13,pady=11,bd=0,cursor='hand2',font=('Segoe UI',9))
     openbtn.config(state='disabled')
     openbtn.pack(side='right',padx=(0,10))
-    root.after(50,render)
+    if not open_editor:
+        root.after(50, render)
     if open_editor:
-        root.after(100,open_large_preview)
+        root.after(100, open_large_preview)
     def close_application():
+        """Cierra toda la aplicación desde la única ventana visible."""
         if exporting[0]:
-            messagebox.showinfo('Exportación en curso', 'Espera a que termine la exportación antes de cerrar.', parent=root)
-            return
-        if confirm_replace():
-            root.destroy()
+            messagebox.showinfo('Exportación en curso',
+                'La exportación está en proceso; vuelve a cerrar al terminar.',
+                parent=active_window())
+            return False
+        if not confirm_replace():
+            return False
+        root.destroy()
+        return True
     root.protocol('WM_DELETE_WINDOW', close_application)
     return root
 

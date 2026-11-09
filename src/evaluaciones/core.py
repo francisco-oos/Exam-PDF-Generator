@@ -306,55 +306,70 @@ def _bubbles(questions: list[Question], page_size=A4):
 def _answer_sheet(path: Path | BytesIO, questions: list[Question], title: str, subtitle: str,
                   *, acetate: bool, normal: str, bold: str,
                   title_color=TINT, subtitle_color=MUTED,
-                  size=A4, answer_color=TINT, acetate_color=colors.HexColor(DEFAULT_ACETATE_COLOR)):
+                  size=A4, answer_color=TINT, acetate_color=colors.HexColor(DEFAULT_ACETATE_COLOR),
+                  participantes: list[dict] | None = None):
     """Hoja y acetato comparten tamaño, numeración y posición de círculos."""
     w, h = size
     c = Canvas(path if isinstance(path, BytesIO) else str(path), pagesize=size,pageCompression=1)
     c.setTitle('Acetato de clave' if acetate else 'Hoja de respuestas')
     slots = list(_bubbles(questions, size))
     pages = 1 + max((p for p, _, _ in slots), default=0)
-    for page in range(pages):
-        if not acetate:
-            _canvas_header(c,title,subtitle,'HOJA DE RESPUESTAS',normal,bold,
-                           size=size,ink=answer_color,title_color=title_color,subtitle_color=subtitle_color)
-            c.setFillColor(answer_color)
-            c.setFont(normal,9.3)
-            c.drawString(49,h-142,'Nombre: ___________________________________________')
-            c.drawString(49,h-162,'Fecha: _______________    Grupo / área: _______________')
-            c.setFont(normal,8)
-            c.drawString(50,h-192,'Marca una sola respuesta (A, B, C o D) en cada pregunta.')
-        for current, number, coords in slots:
-            if current != page:
-                continue
-            y = coords[0][1]
+    # El mismo diseño y la misma geometría sirven para impresión genérica o
+    # lotes individualizados. No se repite el cuadernillo en modalidad ecológica.
+    if acetate and participantes:
+        raise ExamError('El acetato no debe incluir datos personales.')
+    personas = participantes if participantes else [None]
+    for persona in personas:
+        for page in range(pages):
             if not acetate:
+                _canvas_header(c,title,subtitle,'HOJA DE RESPUESTAS',normal,bold,
+                               size=size,ink=answer_color,title_color=title_color,subtitle_color=subtitle_color)
                 c.setFillColor(answer_color)
-                c.setFont(bold,9)
-                c.drawRightString(coords[0][0]-22,y-3,str(number)+'.')
-                for k,(x,yy) in enumerate(coords):
-                    c.setStrokeColor(answer_color)
-                    c.setLineWidth(1.1)
-                    c.circle(x,yy,RADIUS,stroke=1,fill=0)
-                    c.setFont(normal,7.4)
-                    c.drawCentredString(x,yy-RADIUS-12,'ABCD'[k])
-            else:
-                k=questions[number-1].correct
-                x,yy=coords[k]
-                # Respuesta coloreada, pero translúcida: se sigue viendo la marca.
-                c.saveState()
-                c.setStrokeColor(acetate_color)
-                c.setLineWidth(2.2)
-                c.setFillColor(acetate_color)
-                c.setFillAlpha(.26)
-                c.circle(x,yy,RADIUS+4.0,stroke=1,fill=1)
-                c.restoreState()
-        _alignment(c,size=size,ink=TINT if acetate else answer_color)
-        c.setFont(normal,7.2)
-        c.setFillColor(TINT if acetate else answer_color)
-        c.drawCentredString(w/2,22,
-            ('CLAVE PARA ACETATO - SUPERPONER AL 100 % / SIN AJUSTAR' if acetate
-             else 'Imprimir al 100 % / sin ajustar al papel')+f'  ·  Página {page+1}/{pages}')
-        c.showPage()
+                c.setFont(normal,9.3)
+                if persona is None:
+                    c.drawString(49,h-142,'Nombre: ___________________________________________')
+                    c.drawString(49,h-162,'Fecha: _______________    Grupo / área: _______________')
+                else:
+                    # La identidad se captura una sola vez por la plantilla;
+                    # escapar caracteres de control para dibujar texto seguro.
+                    name=' '.join(str(persona['nombre']).split())[:65]
+                    ident=' '.join(str(persona['id']).split())[:64]
+                    group=' '.join(str(persona.get('grupo','')).split())[:48]
+                    c.drawString(49,h-142,'Nombre: '+name)
+                    c.drawString(49,h-162,'ID: '+ident+'    Grupo: '+group)
+                c.setFont(normal,8)
+                c.drawString(50,h-192,'Marca una sola respuesta (A, B, C o D) en cada pregunta.')
+            for current, number, coords in slots:
+                if current != page:
+                    continue
+                y = coords[0][1]
+                if not acetate:
+                    c.setFillColor(answer_color)
+                    c.setFont(bold,9)
+                    c.drawRightString(coords[0][0]-22,y-3,str(number)+'.')
+                    for k,(x,yy) in enumerate(coords):
+                        c.setStrokeColor(answer_color)
+                        c.setLineWidth(1.1)
+                        c.circle(x,yy,RADIUS,stroke=1,fill=0)
+                        c.setFont(normal,7.4)
+                        c.drawCentredString(x,yy-RADIUS-12,'ABCD'[k])
+                else:
+                    k=questions[number-1].correct
+                    x,yy=coords[k]
+                    c.saveState()
+                    c.setStrokeColor(acetate_color)
+                    c.setLineWidth(2.2)
+                    c.setFillColor(acetate_color)
+                    c.setFillAlpha(.26)
+                    c.circle(x,yy,RADIUS+4.0,stroke=1,fill=1)
+                    c.restoreState()
+            _alignment(c,size=size,ink=TINT if acetate else answer_color)
+            c.setFont(normal,7.2)
+            c.setFillColor(TINT if acetate else answer_color)
+            c.drawCentredString(w/2,22,
+                ('CLAVE PARA ACETATO - SUPERPONER AL 100 % / SIN AJUSTAR' if acetate
+                 else 'Imprimir al 100 % / sin ajustar al papel')+f'  ·  Página {page+1}/{pages}')
+            c.showPage()
     c.save()
 
 
@@ -363,7 +378,8 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
               normal: str,bold: str, *, empresa: str = '', puesto: str = '',
               instrucciones: str = '', logo: Path | None = None,
               color_titulo=TINT, color_subtitulo=MUTED,
-              size=A4, font_size: float = 9.0, reusable: bool = False):
+              size=A4, font_size: float = 9.0, reusable: bool = False,
+              participante: dict | None = None):
     # KeepTogether mantiene juntas las opciones; ReportLab pagina automáticamente.
     page_w, page_h = size
     paper_width = page_w - 94
@@ -399,8 +415,16 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
     # La modalidad ecológica no imprime identidad en el cuadernillo.
     story=[header_table,Spacer(1,13)]
     if not reusable:
-        story.extend([Paragraph('Nombre: _________________________________________   Fecha: __________________',styles['small']),
-                      Paragraph('Número / folio: __________________________   Grupo / turno: __________________',styles['small'])])
+        if participante:
+            nombre=escape(str(participante['nombre'])[:130])
+            ident=escape(str(participante['id'])[:64])
+            grupo=escape(str(participante.get('grupo',''))[:80])
+            story.extend([
+                Paragraph('Nombre: '+nombre+'   Fecha: __________________',styles['small']),
+                Paragraph('ID: '+ident+'   Grupo: '+grupo,styles['small'])])
+        else:
+            story.extend([Paragraph('Nombre: _________________________________________   Fecha: __________________',styles['small']),
+                          Paragraph('Número / folio: __________________________   Grupo / turno: __________________',styles['small'])])
     if not instrucciones:
         instrucciones='Lee cada reactivo. Marca UNA respuesta en la hoja separada. No escribas tus respuestas en el cuadernillo.'
     # Sin interpretación HTML del usuario; se aceptan instrucciones en texto plano.

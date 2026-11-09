@@ -39,6 +39,11 @@ class PreviewData:
     tamano_papel: str = 'A4'
     letra: float = 9.0
     reutilizable: bool = False
+    # Datos de impresión, independientes de las preguntas/clave almacenadas.
+    modo_examen: str = 'ecologico'
+    cantidad_personas: int = 0
+    participante_nombre: str = ''
+    participante_id: str = ''
 
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

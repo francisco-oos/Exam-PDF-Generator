@@ -11,7 +11,7 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 - **Cuadernillo reutilizable** (activado por defecto al diseñar uno nuevo): elimina los campos personales **solo del cuadernillo**; el participante escribe nombre, fecha y grupo en su **hoja de respuestas**. Las páginas del cuadernillo llevan la marca de agua tenue «NO RAYAR NI MANCHAR» detrás del contenido.
 - **Tamaño de impresión:** A4 (210 × 297 mm), Carta (8.5 × 11 pulgadas) u Oficio mexicano (8.5 × 13 pulgadas). No mezcles acetatos y hojas de distintos tamaños o generaciones.
 - **Letra de opciones y preguntas:** 8–12 puntos en intervalos de 0.5; podrás revisar la cantidad REAL de páginas sin imprimir.
-- **Vista ampliada · PDF exacto:** abre una ventana independiente, con navegación de páginas y zoom, que renderiza el PDF completo en memoria mediante PDFium. La vista pequeña al costado sigue siendo orientativa.
+- **Vista previa única · PDF exacto:** al iniciar se abre directamente el diseñador con controles a la izquierda y PDF real a la derecha; cuenta con zoom y navegación. Ya no se muestra una segunda ventana de generador ni su miniatura orientativa.
 - **Color RGB de la hoja de respuestas:** tinta para encabezados y círculos; el papel sigue blanco para gastar menos tinta. La clave para acetato usa un color RGB configurable; su valor inicial sigue siendo verde translúcido.
 - Estas opciones también quedan guardadas en cada cuestionario SQLite y se restauran al reabrirlo, con migración no destructiva para bibliotecas anteriores.
 - El ejemplo predeterminado contiene **20 preguntas generales** de matemáticas, lenguaje, ciencia y lógica, sin nombres ni procesos de empresas.
@@ -22,9 +22,9 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 
 1. En Windows abre `Iniciar_Windows.bat`, o en Linux `Iniciar_Linux.sh`.
 2. Pulsa **Descargar plantilla Excel**. El archivo `Plantilla_Cuestionario.xlsx` incluye la pestaña obligatoria **Preguntas**, un **Ejemplo** independiente y una **Guia**. En `Preguntas`, cada fila indica un tema, la pregunta, las cuatro opciones A/B/C/D y la columna **Correcta** con una sola letra A, B, C o D. Las imágenes se indican con el nombre del PNG/JPG en una carpeta `imagenes` junto al Excel.
-3. Selecciona el XLSX con **Examinar** o modifica el cuestionario directamente usando **Editar preguntas** (añadir, editar, eliminar). La plantilla y el origen nunca se sobrescriben.
+3. Selecciona **Importar XLSX** o modifica el cuestionario con **Editar preguntas y opciones** (añadir, editar, eliminar). La plantilla y el origen nunca se sobrescriben.
 4. Usa los botones **Paleta** del título y del subtítulo; cada uno admite RGB hexadecimal `#RRGGBB`, y la previsualización refleja la selección.
-5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar documentos**, el examen se guarda también en la biblioteca.
+5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar PDF de examen**, el cuestionario se guarda también en la biblioteca.
 6. La biblioteca permanece en **`datos/biblioteca.sqlite3`** dentro de la carpeta del proyecto; está excluida de Git y no se sube a Internet. Haz copias de seguridad de ese archivo cuando el programa esté cerrado. **La base no está cifrada:** cualquier persona con acceso a ella puede leer las respuestas correctas; protege el equipo y las copias de respaldo.
 
 El acetato imprime cada respuesta correcta como **círculo del color RGB elegido con relleno semitransparente** para facilitar el conteo. Su transparencia real depende del material e impresora: prueba papel y acetato superpuestos **al mismo tamaño y al 100 %**, sin ajuste de escala, antes de uso oficial.
@@ -37,9 +37,77 @@ El editor de diseño permite recorrer el **PDF generado por el mismo motor de im
 
 La paleta **Color del acetato** es independiente de las del título, subtítulo y hoja de respuestas. Admite colores `#RRGGBB`, se guarda en `datos/biblioteca.sqlite3`, se recupera al volver a abrir el cuestionario y se aplica al contorno y al sombreado de los círculos de respuesta correcta. Los archivos anteriores usan el verde predeterminado `#167341` hasta que se edite su configuración. **Las coordenadas de las burbujas no cambian por elegir otro color.**
 
-Al abrir un editor existente, usa los botones **Volver al generador**, la **X** de la ventana o **Esc** para salir. Los cambios de texto y color que aún no se hayan guardado se detectan antes de cambiar de cuestionario o cerrar la aplicación. Para conservar la configuración y las claves, pulsa **Guardar cuestionario**. Antes de instalar una actualización, respalda la biblioteca SQLite con la aplicación cerrada; la migración del color del acetato crea además una copia previa `.bak` si la columna no existía.
+La ventana **Diseñar e imprimir** es la entrada principal; usa **Cerrar aplicación**, la **X** o **Esc** para salir. Los cambios de texto y color que aún no se hayan guardado se detectan antes de cambiar de cuestionario o cerrar la aplicación. Para conservar la configuración y las claves, pulsa **Guardar cuestionario**. Antes de instalar una actualización, respalda la biblioteca SQLite con la aplicación cerrada; la migración del color del acetato crea además una copia previa `.bak` si la columna no existía.
 
 **Verificación técnica:** en la rama de desarrollo `feature/modernizacion-integral`, la CI para Windows (Python 3.11/3.12/3.13), Ubuntu y Docker concluyó satisfactoriamente en la [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). La automatización no sustituye la prueba del editor con el equipo físico del usuario ni la superposición de hoja y acetato en impresora al 100 %.
+
+
+## Dos modalidades de cuadernillo y una hoja universal
+
+El escritorio muestra **una sola ventana de diseño** y únicamente los modos
+**Normal** y **Ecológico**. **El QR no es un modo:** se incorpora
+automáticamente cuando se carga una lista válida de participantes.
+No existe un tercer selector «Folio/QR».
+
+1. Importa o edita las preguntas del mismo examen y revisa su vista PDF real.
+2. **Participantes (opcional):** descarga la plantilla XLSX, rellena la pestaña
+   **Participantes** (ID como texto, Nombre y, opcionalmente, área, grupo, turno)
+   y pulsa **Cargar lista**. La pestaña de ejemplo no se importa. Puedes
+   quitar la lista para volver a una evaluación anónima.
+3. Escoge el **tipo de cuadernillo**:
+   - **Normal, sin lista:** cuadernillo individual en blanco + hoja universal
+     con espacios para nombre, folio e ID; **sin QR**.
+   - **Normal, con lista:** un juego por persona, con **cuadernillo identificado**
+     y la **misma hoja de respuestas** con nombre, ID, folio y QR. Se guarda
+     el lote en `Hoja_respuestas.pdf` y cada juego en `Por_participante/`
+     y `Paquetes_individuales.zip`.
+   - **Ecológico, sin lista:** un cuadernillo reutilizable con aviso
+     «NO RAYAR NI MANCHAR» y hoja universal sin QR para llenar a mano.
+   - **Ecológico, con lista:** el **mismo cuadernillo reutilizable** compartido
+     por todo el grupo y una hoja por persona con folio, ID, nombre y QR.
+4. Consulta **Cuadernillo**, **Respuestas** y **Acetato** en la misma vista.
+   Todas las hojas del escritorio usan **idéntica disposición de burbujas,
+   marcas de registro y acetato**, tanto con como sin lista. El QR de la
+   vista previa con lista es solo ilustrativo; al generar se crea un QR
+   distinto y firmado para cada persona.
+5. **Generar PDF de examen** crea la carpeta del lote y el manifiesto de hashes.
+   Solo si se cargó lista registra una sesión OMR con su clave, asociada
+   a los folios. El identificador queda en `Sesion_OMR.txt`.
+6. Para hojas con QR impresas, usa **Calificar y entregar** →
+   **Escanear PDF**. El lector identifica automáticamente la sesión
+   correcta por **QR firmado**, incluso cuando varios exámenes tienen
+   el mismo título. La vista **Historial** muestra las evaluaciones de
+   Biblioteca junto a sus aplicaciones QR y folios, con nombre elegido,
+   modalidad, participantes, escaneos y pendientes. Si es antigua y no
+   conservó nombre, usa **Renombrar aplicación anterior**.
+7. En **Revisión** puedes superponer el **acetato digital** verde alineado
+   por las cuatro marcas, resaltar dudas y avanzar hoja por hoja. Para
+   cualquier lectura fallida, vuelve a importar el mismo escaneo:
+   las hojas antes «sin identificar» se reevalúan sin duplicarse y
+   **sin sobrescribir correcciones humanas**. Si sigue sin identificar,
+   verifica ID y folio y utiliza **Capturar hoja completa**, seleccionando
+   A/B/C/D/BLANCO con bitácora por reactivo.
+8. **Resultados** y **Excel de entrega** se habilitan tras verificar
+   las hojas; las incidencias se indican **PROVISIONALES**.
+
+**Escaneos con hojas traspapeladas:** el calificador examina primero
+**todas las páginas** y muestra una alerta si encuentra QR firmados de
+**distintas evaluaciones** (por ejemplo, Cabos y Checadores). El mensaje
+identifica la aplicación y sus páginas; **Sí** autoriza procesar cada
+grupo con su propia clave, **No** cancela sin calificar. Las hojas sin QR
+verificable no se asignan automáticamente ni se califican por su posición.
+El módulo para el personal ya no ofrece botones de simulación o datos
+ficticios; esas pruebas se ejecutan exclusivamente mediante CI.
+
+Sin lista no hay QR válido ni sesión de calificación automática: se rellenan
+datos a mano y se usa acetato. **No se intentará identificar automáticamente
+a alguien por su letra o por el orden de las páginas.**
+
+**Impresión y seguridad:** usa siempre escala 100 % y tamaño de papel coincidente
+para hojas y acetato. Protege `salidas/`, `datos/omr/` y las copias:
+contienen nombres y claves locales sin cifrado. No subas datos reales a Git.
+Antes de usar resultados oficiales hay que validar con escaneos físicos y
+calibrar el reconocimiento en la Xerox; las pruebas digitales son sintéticas.
 
 ## Características
 
@@ -50,7 +118,7 @@ Al abrir un editor existente, usa los botones **Volver al generador**, la **X** 
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
 - CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
-- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final con el tamaño seleccionado es la referencia para impresión.
+- **Interfaz de escritorio unificada:** una sola vista PDF real, opciones Normal/Ecológico, QR automático al cargar lista y hoja universal compatible con escáner y acetato. Calificar y entregar se abre en pantalla completa.
 
 ## Iniciar con Docker — recomendado (Windows y Linux)
 

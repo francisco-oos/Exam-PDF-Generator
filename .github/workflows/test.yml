@@ -19,8 +19,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Instalar librería QR redundante en Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libzbar0
       - name: Instalar dependencias
-        run: python -m pip install -r requirements-dev.txt
+        run: python -m pip install -r requirements-dev.txt -r requirements-omr.txt
       - name: Preparar Tk y Xvfb en Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
@@ -37,6 +40,9 @@ jobs:
           call Iniciar_Windows.bat --verificar
           .venv\Scripts\python.exe -c "import sys; assert sys.version_info[:2] == (3, 13), sys.version"
 
+      - name: Prueba gráfica OMR en Xvfb
+        if: runner.os == 'Linux' && matrix.python == '3.13'
+        run: xvfb-run -a python tests/smoke_gui.py
       - name: Preparar plantilla de ejemplo
         run: python crear_ejemplo.py
       - name: Probar el generador de 20 preguntas
