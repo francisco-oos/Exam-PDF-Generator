@@ -48,12 +48,16 @@ El módulo opcional **Calificar · QR** permite importar preguntas y una lista C
 
 La vista de calificación se adapta al tipo de examen: los modos **Tradicional** y **Ecológico** conservan el flujo normal del generador y ocultan las herramientas de escaneo; **Personalizado** habilita importación de personal, impresión QR, lectura, revisión, resultados e informes. Es posible utilizar el cuadernillo reutilizable con las hojas QR personalizadas.
 
-Instalación adicional, solo para activar la lectura óptica en Windows:
+**Inicio recomendado en Windows:** abre siempre `Iniciar_Windows.bat` para ver el generador completo: importar/editar preguntas, vista previa PDF, biblioteca, cuadernillo, hoja de respuestas y acetato. Dentro del editor hay un botón **Calificar · QR / escáner**. Al pulsarlo, el calificador recibe las preguntas, el título y el tamaño de papel del examen abierto, sin importarlos de nuevo.
+
+Instala los complementos del lector solo cuando quieras usar la calificación automática:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-omr.txt
-.\.venv\Scripts\python.exe calificar_omr.py
+.\Iniciar_Windows.bat
 ```
+
+Por compatibilidad, `python calificar_omr.py` **también abre ahora el generador integral**; `python calificar_omr.py --solo-calificar` queda reservado para pruebas técnicas del lector aislado. En los modos tradicional y ecológico, el botón **Diseño e impresión** de la vista OMR devuelve al generador principal. No son dos aplicaciones que haya que instalar por separado.
 
 Si usas Linux: `python -m pip install -r requirements-omr.txt`, asegurando `libzbar0` si deseas usar el lector redundante de QR. La aplicación principal sigue funcionando aunque no instales estos complementos.
 
