@@ -361,3 +361,88 @@ def test_resuelve_sesion_por_qr_firmado_con_titulos_identicos(tmp_path):
     pdf=create_forms_pdf(store,sid_b,tmp_path/'hoja_b.pdf')
     assert resolve_pdf_session(store,pdf)==sid_b
     assert resolve_pdf_session(store,pdf)!=sid_a
+
+
+
+def test_lote_cabos_checadores_no_mezcla_claves(tmp_path):
+    """Cabos y Checadores mezclados: cada QR dirige su hoja al examen correcto."""
+    import fitz
+    from omr_evaluaciones.motor import inspect_pdf_sessions
+    store=OMRStore(tmp_path/'store')
+    cabos=store.create_session('Examen Cabos',questions(10),people(1),
+        'Carta','normal',nombre_evaluacion='Cabos')
+    checadores=store.create_session('Examen Checadores',
+        [{'tema':'Verificación','pregunta':f'Control {i+1}',
+          'correcta':'DCBA'[i%4]} for i in range(10)],
+        [{'id':'C002','nombre':'Checador ficticio'}],
+        'Carta','ecologico',nombre_evaluacion='Checadores')
+    a=create_forms_pdf(store,cabos,tmp_path/'Cabos.pdf')
+    b=create_forms_pdf(store,checadores,tmp_path/'Checadores.pdf')
+    # Hojas impresas y contestadas, no se decide a partir de texto OCR.
+    sa=tmp_path/'Scan_Cabos.pdf'
+    sb=tmp_path/'Scan_Checadores.pdf'
+    fake_scanned_pdf(a,sa,'Carta',[list('ABCDABCDAB')])
+    fake_scanned_pdf(b,sb,'Carta',[list('DCBADC BADC'.replace(' ',''))])
+    mixed=tmp_path/'Hojas_traspapeladas.pdf'
+    with fitz.open() as merged:
+        for path in (sa,sb):
+            with fitz.open(path) as doc:
+                merged.insert_pdf(doc)
+        merged.save(mixed)
+    inspected=inspect_pdf_sessions(store,mixed)
+    assert inspected['total_paginas']==2
+    assert inspected['mezclado'] is True
+    assert inspected['no_identificadas']==[]
+    assert [item['sesion_id'] for item in inspected['paginas']]==[
+        cabos,checadores]
+    assert [g['paginas'] for g in inspected['grupos']]==[[1],[2]]
+    first=scan_document(store,cabos,mixed,page_indices=[0])
+    second=scan_document(store,checadores,mixed,page_indices=[1])
+    assert first['leidas']==1 and second['leidas']==1
+    assert first['validadas']==1 and second['validadas']==1
+    assert len(store.pages(cabos))==1
+    assert len(store.pages(checadores))==1
+    assert store.pages(cabos)[0]['token']==store.session(cabos)['personal'][0]['token']
+    assert store.pages(checadores)[0]['token']==store.session(checadores)['personal'][0]['token']
+    assert store.results(cabos)['validados']==1
+    assert store.results(checadores)['validados']==1
+
+
+def test_hoja_sin_qr_no_se_atribuye_automaticamente(tmp_path):
+    import fitz
+    from omr_evaluaciones.motor import (
+        inspect_pdf_sessions, create_generic_forms_pdf,
+    )
+    store=OMRStore(tmp_path/'store')
+    sid=store.create_session('Cabos',questions(4),people(1),
+                             'Carta','normal')
+    signed=create_forms_pdf(store,sid,tmp_path/'con_qr.pdf')
+    generic=create_generic_forms_pdf(questions(4),'Anónimo','Carta',
+                                      tmp_path/'sin_qr.pdf')
+    mixed=tmp_path/'mezclado.pdf'
+    with fitz.open() as target:
+        with fitz.open(generic) as anon:
+            target.insert_pdf(anon)
+        with fitz.open(signed) as ok:
+            target.insert_pdf(ok)
+        target.save(mixed)
+    result=inspect_pdf_sessions(store,mixed)
+    assert result['no_identificadas'][0]['pagina']==1
+    assert result['grupos'][0]['sesion_id']==sid
+    assert result['grupos'][0]['paginas']==[2]
+    scan_document(store,sid,mixed,page_indices=[1])
+    assert len(store.pages(sid))==1
+    assert store.results(sid)['validados']==1
+    # El índice original se conserva y puede reimportarse sin duplicar notas.
+    assert store.pages(sid)[0]['pagina']==1
+    assert scan_document(store,sid,mixed,page_indices=[1])['repetidas']==1
+
+
+def test_validar_indices_de_paginas_de_lote(tmp_path):
+    store=OMRStore(tmp_path/'store')
+    sid=store.create_session('Prueba',questions(2),people(1),'Carta')
+    form=create_forms_pdf(store,sid,tmp_path/'single.pdf')
+    with pytest.raises(ValueError,match='fuera del PDF'):
+        scan_document(store,sid,form,page_indices=[99])
+    with pytest.raises(ValueError,match='fuera del PDF'):
+        scan_document(store,sid,form,page_indices=[])
