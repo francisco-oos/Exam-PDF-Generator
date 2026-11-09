@@ -10,7 +10,7 @@ from io import BytesIO
 from PIL import Image
 
 from src.evaluaciones.core import (
-    _answer_sheet, _exam_pdf, _font, paper_dimensions,
+    _exam_pdf, _font, paper_dimensions,
 )
 from vista_previa import PreviewData
 
@@ -22,21 +22,22 @@ def build_preview_pdf(data: PreviewData, view: str) -> bytes:
         raise ValueError('Vista PDF no válida.')
     if not data.questions:
         raise ValueError('Selecciona un archivo con preguntas válidas para la vista exacta.')
-    # En modo QR la vista exacta de respuestas y acetato es la del lector OMR,
-    # nunca la del acetato convencional que usa otras coordenadas.
-    if data.modo_examen == 'folio' and data.cantidad_personas > 0 and view != 'Cuadernillo':
+    # UNA SOLA hoja: la geometría OMR es idéntica con o sin lista.
+    # La presencia de personal solo añade nombre, folio y un QR de muestra.
+    if view != 'Cuadernillo':
         from omr_evaluaciones.motor import (
             preview_formulario_omr, preview_acetato_omr,
         )
-        qs=[{'tema':q.section,'pregunta':q.prompt,'correcta':'ABCD'[q.correct]}
-            for q in data.questions]
+        qs=[{'tema':q.section,'pregunta':q.prompt,
+             'correcta':'ABCD'[q.correct]} for q in data.questions]
         if view == 'Respuestas':
             return preview_formulario_omr(
-                qs, data.titulo or 'Evaluación', data.tamano_papel,
+                qs,data.titulo or 'Evaluación',data.tamano_papel,
                 empresa=data.empresa,grupo=data.grupo,subtitulo=data.subtitulo,
                 color_titulo=data.color_titulo,color_respuestas=data.color_respuestas,
                 nombre=data.participante_nombre or 'Participante de ejemplo',
                 identifier=data.participante_id or '000001',
+                con_personal=data.cantidad_personas > 0,
             )
         return preview_acetato_omr(
             qs,data.tamano_papel,color=data.color_acetato,
@@ -56,18 +57,6 @@ def build_preview_pdf(data: PreviewData, view: str) -> bytes:
                                  'grupo':data.grupo}
                                 if data.modo_examen=='normal' and data.cantidad_personas
                                 else None))
-    else:
-        _answer_sheet(buffer,list(data.questions),data.titulo or 'Evaluación',data.subtitulo,
-                      acetate=view == 'Acetato',normal=normal,bold=bold,
-                      title_color=colors.HexColor(data.color_titulo),
-                      subtitle_color=colors.HexColor(data.color_subtitulo),
-                      answer_color=colors.HexColor(data.color_respuestas),size=size,
-                      acetate_color=colors.HexColor(data.color_acetato),
-                      participantes=([{'id':data.participante_id,
-                                      'nombre':data.participante_nombre,
-                                      'grupo':data.grupo}]
-                                     if view=='Respuestas' and data.cantidad_personas
-                                     else None))
     return buffer.getvalue()
 
 
