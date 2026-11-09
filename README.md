@@ -22,7 +22,7 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 
 1. En Windows abre `Iniciar_Windows.bat`, o en Linux `Iniciar_Linux.sh`.
 2. Pulsa **Descargar plantilla Excel**. El archivo `Plantilla_Cuestionario.xlsx` incluye la pestaña obligatoria **Preguntas**, un **Ejemplo** independiente y una **Guia**. En `Preguntas`, cada fila indica un tema, la pregunta, las cuatro opciones A/B/C/D y la columna **Correcta** con una sola letra A, B, C o D. Las imágenes se indican con el nombre del PNG/JPG en una carpeta `imagenes` junto al Excel.
-3. Selecciona el XLSX con **Examinar** o modifica el cuestionario directamente usando **Editar preguntas** (añadir, editar, eliminar). La plantilla y el origen nunca se sobrescriben.
+3. Selecciona **Importar XLSX** o modifica el cuestionario con **Editar preguntas y opciones** (añadir, editar, eliminar). La plantilla y el origen nunca se sobrescriben.
 4. Usa los botones **Paleta** del título y del subtítulo; cada uno admite RGB hexadecimal `#RRGGBB`, y la previsualización refleja la selección.
 5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar documentos**, el examen se guarda también en la biblioteca.
 6. La biblioteca permanece en **`datos/biblioteca.sqlite3`** dentro de la carpeta del proyecto; está excluida de Git y no se sube a Internet. Haz copias de seguridad de ese archivo cuando el programa esté cerrado. **La base no está cifrada:** cualquier persona con acceso a ella puede leer las respuestas correctas; protege el equipo y las copias de respaldo.
@@ -37,7 +37,7 @@ El editor de diseño permite recorrer el **PDF generado por el mismo motor de im
 
 La paleta **Color del acetato** es independiente de las del título, subtítulo y hoja de respuestas. Admite colores `#RRGGBB`, se guarda en `datos/biblioteca.sqlite3`, se recupera al volver a abrir el cuestionario y se aplica al contorno y al sombreado de los círculos de respuesta correcta. Los archivos anteriores usan el verde predeterminado `#167341` hasta que se edite su configuración. **Las coordenadas de las burbujas no cambian por elegir otro color.**
 
-Al abrir un editor existente, usa los botones **Volver al generador**, la **X** de la ventana o **Esc** para salir. Los cambios de texto y color que aún no se hayan guardado se detectan antes de cambiar de cuestionario o cerrar la aplicación. Para conservar la configuración y las claves, pulsa **Guardar cuestionario**. Antes de instalar una actualización, respalda la biblioteca SQLite con la aplicación cerrada; la migración del color del acetato crea además una copia previa `.bak` si la columna no existía.
+La ventana **Diseñar e imprimir** es la entrada principal; usa **Cerrar aplicación**, la **X** o **Esc** para salir. Los cambios de texto y color que aún no se hayan guardado se detectan antes de cambiar de cuestionario o cerrar la aplicación. Para conservar la configuración y las claves, pulsa **Guardar cuestionario**. Antes de instalar una actualización, respalda la biblioteca SQLite con la aplicación cerrada; la migración del color del acetato crea además una copia previa `.bak` si la columna no existía.
 
 **Verificación técnica:** en la rama de desarrollo `feature/modernizacion-integral`, la CI para Windows (Python 3.11/3.12/3.13), Ubuntu y Docker concluyó satisfactoriamente en la [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). La automatización no sustituye la prueba del editor con el equipo físico del usuario ni la superposición de hoja y acetato en impresora al 100 %.
 
@@ -48,16 +48,16 @@ El módulo opcional **Calificar · QR** permite importar preguntas y una lista C
 
 La vista de calificación se adapta al tipo de examen: los modos **Tradicional** y **Ecológico** conservan el flujo normal del generador y ocultan las herramientas de escaneo; **Personalizado** habilita importación de personal, impresión QR, lectura, revisión, resultados e informes. Es posible utilizar el cuadernillo reutilizable con las hojas QR personalizadas.
 
-**Inicio recomendado en Windows:** abre siempre `Iniciar_Windows.bat` para ver el generador completo: importar/editar preguntas, vista previa PDF, biblioteca, cuadernillo, hoja de respuestas y acetato. Dentro del editor hay un botón **Calificar · QR / escáner**. Al pulsarlo, el calificador recibe las preguntas, el título y el tamaño de papel del examen abierto, sin importarlos de nuevo.
+**Inicio en Windows:** ejecuta `Iniciar_Windows.bat` una sola vez. Se presenta directamente **Diseñar e imprimir**, sin una segunda ventana de generador. Elige **Normal**, **Ecológico** o **Con folio y QR** en el panel izquierdo. En todos los casos puedes preparar el cuadernillo y generar respuestas, clave y acetato. Para la modalidad con folio pulsa **Preparar hojas con folio y QR**, importa la lista de participantes y genera sus hojas individuales. El calificador recibe las preguntas, la clave, el título y el tamaño de papel del examen abierto sin pedir una segunda importación.
 
-Instala los complementos del lector solo cuando quieras usar la calificación automática:
+Los iniciadores de Windows y Linux verifican e instalan, cuando hacen falta, los complementos del lector OMR en el mismo entorno virtual. Si arrancas manualmente con Python, puedes instalarlos con:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-omr.txt
 .\Iniciar_Windows.bat
 ```
 
-Por compatibilidad, `python calificar_omr.py` **también abre ahora el generador integral**; `python calificar_omr.py --solo-calificar` queda reservado para pruebas técnicas del lector aislado. En los modos tradicional y ecológico, el botón **Diseño e impresión** de la vista OMR devuelve al generador principal. No son dos aplicaciones que haya que instalar por separado.
+Por compatibilidad, `python calificar_omr.py` **también abre el sistema integral**; `python calificar_omr.py --solo-calificar` queda reservado para pruebas técnicas. Desde el menú superior **Evaluaciones → Calificar y entregar resultados** se abre el espacio OMR maximizado (inicia en el historial de sesiones). El editor se oculta y regresa al salir, incluso con la X, sin reiniciar ni perder la configuración. Las calificaciones automáticas corresponden a hojas con folio/QR; las modalidades normal y ecológica siguen admitiendo corrección manual con acetato.
 
 Si usas Linux: `python -m pip install -r requirements-omr.txt`, asegurando `libzbar0` si deseas usar el lector redundante de QR. La aplicación principal sigue funcionando aunque no instales estos complementos.
 
@@ -74,7 +74,7 @@ Consulta el [manual de escaneo, criterios y mantenimiento](docs/OMR_ESCANEO_CALI
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
 - CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
-- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final con el tamaño seleccionado es la referencia para impresión.
+- **Interfaz de escritorio unificada:** una sola ventana de diseño con vista del PDF real, selector Normal/Ecológico/Folio-QR, menú para calificar y entregar, biblioteca, editor de preguntas y exportación. En modo OMR se oculta el diseñador para revisar a pantalla completa.
 
 ## Iniciar con Docker — recomendado (Windows y Linux)
 
