@@ -426,6 +426,44 @@ def create_organized_pdf(src:Path,dest:Path,page_order,rotations=None):
     return dest
 
 
+def combine_pdfs(inputs,output):
+    """Combina dos o más PDF archivados en una COPIA, sin tocar metadatos OMR.
+
+    Este archivo de salida no se asocia automáticamente a una evaluación:
+    debe reimportarse por QR para crear nuevas evidencias.
+    """
+    from pypdf import PdfReader,PdfWriter
+    paths=[Path(source) for source in inputs]
+    target=Path(output)
+    if len(paths)<2:
+        raise ValueError("Selecciona al menos dos PDF para combinar.")
+    if any(not p.is_file() or p.suffix.lower()!=".pdf" or
+           p.stat().st_size>MAX_PDF_SIZE for p in paths):
+        raise ValueError("Los documentos de origen deben ser PDF válidos.")
+    if target.resolve() in {p.resolve() for p in paths}:
+        raise ValueError("El PDF combinado no puede sobrescribir un original.")
+    writer=PdfWriter()
+    count=0
+    for path in paths:
+        reader=PdfReader(str(path),strict=False)
+        if reader.is_encrypted:
+            raise ValueError("No se puede combinar un PDF cifrado.")
+        count+=len(reader.pages)
+        if count>1500:
+            raise ValueError("La combinación supera el límite de 1500 páginas.")
+        for page in reader.pages:
+            writer.add_page(page)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    temp=target.with_name("."+target.name+"."+uuid4().hex+".tmp")
+    try:
+        with temp.open("wb") as stream:
+            writer.write(stream)
+        os.replace(temp,target)
+    finally:
+        temp.unlink(missing_ok=True)
+    return target
+
+
 def export_expediente(store:OMRStore,evidence:EvidenceStore,sid:str,
                       output:Path,*,internal=False):
     """ZIP de una aplicación: Excel + PDF vinculado + bitácora y hashes.
