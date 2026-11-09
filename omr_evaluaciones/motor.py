@@ -772,6 +772,52 @@ def _decode_qr(gray):
         pass
     return None
 
+def render_review_with_acetato(original_bgr, paper, questions, *,
+                              show_acetato=True, issue_numbers=()):
+    """Renderiza evidencia ALINEADA y acetato digital transparente, nunca el original.
+
+    La homografía usa las cuatro marcas, incluso cuando el QR falló.
+    Si no hay cuatro marcas fiables NO superpone la clave sobre una posición
+    estimada: exige revisión manual sin overlay. La clave jamás se escribe en
+    el PDF escaneado que se conserva en disco.
+    """
+    from PIL import ImageDraw
+    validate_questions(questions)
+    if original_bgr is None or len(original_bgr.shape)!=3:
+        raise ValueError('La imagen escaneada no es RGB/BGR.')
+    gray=cv2.cvtColor(original_bgr,cv2.COLOR_BGR2GRAY)
+    aligned=next(_rectify(gray,paper),None)
+    if aligned is None:
+        raise ValueError('No se pueden alinear cuatro marcas. '
+                         'Captura manualmente sin acetato digital o vuelve a escanear.')
+    background=Image.fromarray(aligned).convert('RGBA')
+    overlay=Image.new('RGBA',background.size,(0,0,0,0))
+    draw=ImageDraw.Draw(overlay,'RGBA')
+    height=PAPERS[paper][1]
+    factor=RENDER_DPI/72.0
+    coordinates=bubble_positions(paper,len(questions))
+    if show_acetato:
+        for idx,(q,options) in enumerate(zip(questions,coordinates)):
+            x,y=options[ANSWER_CHOICES.index(q['correcta'])]
+            px,py=round(x*factor),round((height-y)*factor)
+            r=round((RADIUS+3.5)*factor)
+            draw.ellipse((px-r,py-r,px+r,py+r),
+                         fill=(15,155,94,65),outline=(0,120,80,230),
+                         width=max(3,round(1.3*factor)))
+    for n in issue_numbers:
+        if not isinstance(n,int) or not 1<=n<=len(coordinates):
+            continue
+        options=coordinates[n-1]
+        coords=[(round(x*factor),round((height-y)*factor)) for x,y in options]
+        left=min(x for x,y in coords)-35
+        right=max(x for x,y in coords)+35
+        top=min(y for x,y in coords)-27
+        bottom=max(y for x,y in coords)+27
+        draw.rectangle((left,top,right,bottom),outline=(242,147,23,255),
+                       width=max(4,round(2*factor)))
+    return Image.alpha_composite(background,overlay).convert('RGB')
+
+
 def _recognize(gray,paper,questions_count):
     """Mide tinta en el núcleo de cada círculo, evitando los contornos impresos."""
     scale=RENDER_DPI/72.0
