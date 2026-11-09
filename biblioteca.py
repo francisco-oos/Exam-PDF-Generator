@@ -75,6 +75,8 @@ def db_connect(db_path: Path) -> sqlite3.Connection:
         'letra': 'REAL NOT NULL DEFAULT 9.0',
         'reutilizable': 'INTEGER NOT NULL DEFAULT 0',
         'color_respuestas': "TEXT NOT NULL DEFAULT '#213A4C'",
+        # Papelera: sólo oculta cuestionarios, conserva íntegros sus BLOB.
+        'eliminado_en': 'TEXT',
     }
     for name,definition in additions.items():
         if name not in existing:
@@ -170,7 +172,9 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
     now=datetime.now(timezone.utc).isoformat()
     with db_connect(db_path) as conn:
         conn.execute('BEGIN IMMEDIATE')
-        old=conn.execute('SELECT creado_en,revision FROM cuestionarios WHERE id=?',(exam_id,)).fetchone()
+        old=conn.execute('SELECT creado_en,revision,eliminado_en FROM cuestionarios WHERE id=?',(exam_id,)).fetchone()
+        if old is not None and old['eliminado_en'] is not None:
+            raise ExamError('El cuestionario está en la papelera. Restáuralo antes de editarlo.')
         version=int(old['revision'])+1 if old else 1
         created=old['creado_en'] if old else now
         conn.execute('''INSERT INTO cuestionarios
@@ -195,19 +199,56 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
     return exam_id
 
 
-def list_exams(db_path: Path) -> list[dict]:
-    """Obtiene el índice de bancos de preguntas, sin cargar BLOB de imagen."""
+def _valid_exam_id(exam_id: str) -> None:
+    """Nunca interpola identificadores de entrada en consultas SQL."""
+    if not isinstance(exam_id, str) or not re.fullmatch(r'[0-9a-f]{32}', exam_id):
+        raise ExamError('Identificador de cuestionario inválido.')
+
+
+def list_exams(db_path: Path, *, trash: bool = False) -> list[dict]:
+    """Lista registros activos o eliminados, sin cargar recursos ni claves."""
     with db_connect(db_path) as conn:
-        rows=conn.execute('''SELECT id,nombre,grupo,titulo,actualizado_en,revision,
-                              json_array_length(preguntas_json) AS total
-                              FROM cuestionarios ORDER BY actualizado_en DESC, nombre''').fetchall()
+        condition='IS NOT NULL' if trash else 'IS NULL'
+        rows=conn.execute(f"""SELECT id,nombre,grupo,titulo,actualizado_en,revision,
+                                eliminado_en,json_array_length(preguntas_json) AS total
+                              FROM cuestionarios WHERE eliminado_en {condition}
+                              ORDER BY actualizado_en DESC, nombre""").fetchall()
         return [dict(r) for r in rows]
 
 
-def delete_exam(db_path: Path, exam_id: str):
-    """Elimina un cuestionario identificado, respetando cascada de recursos."""
+def delete_exam(db_path: Path, exam_id: str) -> None:
+    """Mueve a papelera conservando preguntas e imágenes para recuperación."""
+    _valid_exam_id(exam_id)
     with db_connect(db_path) as conn:
-        conn.execute('DELETE FROM cuestionarios WHERE id=?',(exam_id,))
+        now=datetime.now(timezone.utc).isoformat()
+        result=conn.execute("""UPDATE cuestionarios SET eliminado_en=?
+                               WHERE id=? AND eliminado_en IS NULL""",(now,exam_id))
+        if result.rowcount != 1:
+            raise ExamError('No se encontró el cuestionario activo; quizá ya fue eliminado.')
+
+
+def restore_exam(db_path: Path, exam_id: str) -> None:
+    """Recupera de papelera con el mismo ID, revisión y recursos."""
+    _valid_exam_id(exam_id)
+    with db_connect(db_path) as conn:
+        result=conn.execute("""UPDATE cuestionarios SET eliminado_en=NULL
+                               WHERE id=? AND eliminado_en IS NOT NULL""",(exam_id,))
+        if result.rowcount != 1:
+            raise ExamError('No se encontró el cuestionario en la papelera.')
+
+
+def purge_exam(db_path: Path, exam_id: str) -> None:
+    """Borrado irreversible sólo si el cuestionario ya está en papelera.
+
+    Las claves foráneas eliminan sus BLOB. La interfaz pide confirmación doble;
+    este método valida también el estado para evitar borrados accidentales.
+    """
+    _valid_exam_id(exam_id)
+    with db_connect(db_path) as conn:
+        result=conn.execute('DELETE FROM cuestionarios WHERE id=? AND eliminado_en IS NOT NULL',
+                            (exam_id,))
+        if result.rowcount != 1:
+            raise ExamError('Mueve primero el cuestionario a la papelera.')
 
 
 def _resources(conn,exam_id):
@@ -218,7 +259,9 @@ def _resources(conn,exam_id):
 def load_exam(db_path: Path, exam_id: str, workdir: Path) -> StoredExam:
     """Materializa en una carpeta aislada, también las imágenes BLOB originales."""
     with db_connect(db_path) as conn:
-        row=conn.execute('SELECT * FROM cuestionarios WHERE id=?',(exam_id,)).fetchone()
+        _valid_exam_id(exam_id)
+        row=conn.execute('SELECT * FROM cuestionarios WHERE id=? AND eliminado_en IS NULL',
+                         (exam_id,)).fetchone()
         if row is None:
             raise ExamError('No se encontró el cuestionario guardado.')
         items=json.loads(row['preguntas_json'])

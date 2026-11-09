@@ -149,3 +149,44 @@ La CI incluye Windows/Linux con Python 3.11/3.12/3.13, además de la prueba `Ini
 Los bancos de preguntas de Cabos, Checadores, Sobrestantes y Captura y verificación se conservan **en las carpetas privadas de Drive del evaluador**, nunca en el repositorio público: contienen las respuestas correctas. Cada archivo XLSX respeta las columnas `Tema, Pregunta, A, B, C, D, Correcta, Imagen`, con 20 preguntas y sin medios externos. Para utilizarlos, descárgalos a tu computadora y selecciónalos desde la ventana.
 
 El documento `Acetato_clave.pdf` sigue generado mediante la misma geometría fija que `Hoja_respuestas.pdf`. La previsualización muestra posiciones orientativas y no sustituye la prueba de superposición física al 100 %.
+
+## Editor visual del PDF (escritorio)
+
+Pulsa **Editar diseño · PDF real** en la parte superior del generador. Se abrirá
+una ventana grande dividida en dos áreas: herramientas a la izquierda y
+renderizado exacto del PDF a la derecha. Permite seleccionar **Cuadernillo**, **Respuestas**
+o **Acetato**, recorrer páginas, ajustar zoom, elegir Carta/A4/Oficio, modificar el
+texto del encabezado, tamaño de letra y las tres paletas RGB. También puedes
+abrir el editor de preguntas, guardar cambios en SQLite y generar los cuatro PDF
+sin cerrar esta ventana. Los cambios se reflejan en el PDF real en memoria.
+
+Este editor cambia los parámetros previstos por el generador: **no es un editor
+arbitrario de archivos PDF** ni permite arrastrar textos o imágenes libremente
+como Acrobat. Si necesitas reordenar, añadir o borrar preguntas, usa **Editar
+preguntas**; si deseas reposicionar cajas manualmente, necesitaríamos desarrollar
+un editor de maquetación distinto.
+
+## Eliminar cuestionarios sin perderlos por accidente
+
+En **Mis cuestionarios**, selecciona uno y pulsa **Eliminar de biblioteca**.
+Se moverá a **Papelera** después de confirmar, preservando las preguntas,
+respuestas correctas e imágenes en SQLite. Marca **Mostrar papelera** para
+**Restaurar** o **Eliminar definitivamente**. La eliminación definitiva requiere
+dos confirmaciones y borra ese cuestionario y sus recursos de la base (los PDF
+ya generados permanecen intactos). Respaldar `datos/biblioteca.sqlite3` sigue
+siendo recomendable antes de eliminar definitivamente.
+
+## Si Git no puede actualizar por la carpeta `ejemplos`
+
+Las instalaciones antiguas creaban `ejemplos/` como carpeta no rastreada. Al
+actualizar puede salir *untracked working tree files would be overwritten by merge*.
+En ese caso, **no uses `git clean -fd`**. Con la aplicación cerrada, en PowerShell:
+
+```powershell
+$destino = "$HOME\Documents\Respaldo-Ejemplos-$(Get-Date -Format yyyyMMdd-HHmmss)"
+Move-Item '.\ejemplos' $destino
+git pull --ff-only
+```
+
+Con esto conservas el contenido antiguo y permites que Git descargue el ejemplo
+genérico rastreado. Los cuestionarios y la base SQLite en `datos/` no se tocan.

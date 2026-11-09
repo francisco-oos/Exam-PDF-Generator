@@ -58,3 +58,11 @@ La CI de GitHub prueba Windows/Ubuntu con Python 3.11–3.13 y construcción Doc
 4. Modificar `preview_pdf.py` para mantener **vista exacta**, no recrear el diseño con posiciones aproximadas.
 5. Agregar tests de los tres tamaños y del modo reutilizable; generar render de PDF y comparar visualmente.
 6. Cambiar `README.md` y `CAMBIOS.md` en el mismo PR; no mezclar claves privadas con el repo público.
+
+### Editor de diseño y papelera
+
+- `estudio_diseno.open_design_studio`: crea la ventana de composición con dos paneles. No guarda por cada pulsación, sino que modifica `StringVar`/`BooleanVar` compartidas; el botón Guardar invoca la función de biblioteca de la interfaz principal.
+- `render_document_preview` genera PDF con ReportLab y lo renderiza con PDFium en memoria; la vista no es una maqueta distinta. No se editan PDF ya producidos ni se generan temporales en disco por cada cambio de color o letra.
+- `biblioteca.db_connect` ejecuta migraciones aditivas para bibliotecas de versiones anteriores; `eliminado_en` permite borrado lógico. `list_exams(trash=True)` muestra papelera. `restore_exam` recupera claves/recursos, y `purge_exam` exige un registro previamente eliminado y lo borra definitivamente en una transacción, aprovechando la clave foránea `ON DELETE CASCADE`.
+- La interfaz no expone directamente el borrado irreversible: solicita confirmación de nombre y la palabra `ELIMINAR`, para prevenir errores de ratón. Los PDF exportados son independientes y no se eliminan.
+- Tests: `python -m pytest -q tests/test_estudio_y_papelera.py`. Para la interfaz se puede usar `xvfb-run` en Linux o probar manualmente en Windows con datos de ejemplo.
