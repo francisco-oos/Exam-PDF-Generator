@@ -1102,9 +1102,9 @@ class OMRApp:
                 if original:
                     from shutil import copyfile
                     src=self.inbox.original(selected['sha'])
-                    if Path(output).resolve().is_relative_to(
-                            self.inbox.originals.resolve()):
-                        raise ValueError('No se puede sobrescribir ningún original.')
+                    self.inbox.validate_output(output)
+                    if src.resolve()==Path(output).resolve():
+                        raise ValueError('No se puede sobrescribir el original.')
                     copyfile(src,output)
                 else:
                     entries=([selected['page']] if one else
