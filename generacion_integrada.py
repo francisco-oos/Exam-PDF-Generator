@@ -27,7 +27,8 @@ MODOS = ('normal', 'ecologico', 'folio')
 
 def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
                     modo_examen: str = 'ecologico',
-                    lista_personal: str | Path | None = None, **opciones) -> Path:
+                    lista_personal: str | Path | None = None,
+                    omr_root: Path | None = None, **opciones) -> Path:
     """Prepara una carpeta coherente y deja la sesión QR asociada al mismo examen.
 
     - Normal: sin lista, documentos genéricos; con lista, juego por persona.
@@ -54,7 +55,7 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             col_a = colors.HexColor(opciones.get('color_respuestas', '#213A4C'))
             col_acetato = colors.HexColor(opciones.get('color_acetato', '#167341'))
             if modo_examen == 'folio':
-                db_root = Path(__file__).resolve().parent / 'datos' / 'omr'
+                db_root = Path(omr_root) if omr_root is not None else Path(__file__).resolve().parent / 'datos' / 'omr'
                 store = OMRStore(db_root)
                 data = [{'tema': q.section, 'pregunta': q.prompt,
                          'correcta': 'ABCD'[q.correct]} for q in questions]
