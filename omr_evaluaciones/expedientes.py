@@ -93,6 +93,38 @@ def _history_pdf(store,sid):
     return _paragraph_pdf('Bitácora interna de correcciones',lines)
 
 
+def _document_history_pdf(inbox: DocumentInbox, sid: str):
+    """Auditoría de páginas vinculadas a esta aplicación, sin datos de otras.
+
+    Un ingreso de archivo mixto puede involucrar varias evaluaciones:
+    se excluyen los eventos globales del PDF para no incluir material
+    de otras aplicaciones en el expediente.
+    """
+    pages=inbox.pages_for_session(sid)
+    lines=[
+        'Aplicación: '+sid,
+        f'Páginas archivadas vinculadas: {len(pages)}',
+        'Página física, SHA-256, folio y estado se conservan sin alterar PDF.',
+    ]
+    all_events={}
+    for row in pages:
+        key=(row['sha'],row['pagina'])
+        if key not in all_events:
+            all_events[key]=[
+                event for event in inbox.events(row['sha'])
+                if event['pagina']==row['pagina']
+            ]
+        lines.append(
+            f'Archivo {row["sha"][:24]}… · página {row["pagina"]+1} · '
+            f'folio {row["folio"] or "Pendiente"} · '
+            f'estado {row["estado"]}')
+        for e in all_events[key]:
+            lines.append(
+                f'  {e["fecha"]} · {e["accion"]} · '
+                f'{e["operador"]} · {e["detalle"]}')
+    return _paragraph_pdf('Historial documental por aplicación',lines)
+
+
 def _effective_pages(store: OMRStore, inbox: DocumentInbox, sid: str):
     """Solo una hoja efectiva por folio y aplicación.
 
@@ -166,6 +198,7 @@ def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
         used_documents=set()
         if internal:
             content['Bitacora.pdf']=_history_pdf(store,sid)
+            content['Historial_Documental.pdf']=_document_history_pdf(inbox,sid)
             if selections:
                 evidence=folder/'Evidencias_Ordenadas.pdf'
                 inbox.assemble(
