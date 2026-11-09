@@ -261,3 +261,75 @@ def test_migracion_legado_no_adivina_nombres_por_titulo(tmp_path):
     delete_exam(lib,other)
     assert store.link_legacy_library_by_exact_key(lib)==1
     assert store.session(sid2)['cuestionario_id']==exam_id
+
+
+
+def test_reactivos_provienen_del_examen_y_no_permiten_numeros_inventados():
+    from omr_evaluaciones.interfaz import (
+        review_question_options, selected_question_number,
+    )
+    questions=[
+        {'tema':'Operación', 'pregunta':'¿Cómo inspeccionar el equipo?', 'correcta':'B'},
+        {'tema':'Seguridad', 'pregunta':'¿Qué hacer con una doble marca?', 'correcta':'C'},
+        {'tema':'Inventario','pregunta':'¿Cuándo registrar el movimiento?', 'correcta':'A'},
+    ]
+    options=review_question_options(questions)
+    assert len(options)==3
+    assert options[0].startswith('01 · ¿Cómo inspeccionar')
+    assert options[1].startswith('02 · ¿Qué hacer')
+    assert selected_question_number(options[1],options)==2
+    assert selected_question_number(options[2],options)==3
+    with pytest.raises(ValueError,match='Selecciona una pregunta'):
+        selected_question_number('09',options)
+    with pytest.raises(ValueError,match='Selecciona una pregunta'):
+        selected_question_number('01 · Pregunta de otra evaluación',options)
+
+
+def test_selector_de_revision_usa_preguntas_de_sesion_qr_y_guarda_indice_correcto(
+        tmp_path):
+    """El combo es de solo lectura; la selección se traduce al reactivo del OMR."""
+    try:
+        parent=tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip('No hay escritorio Tk: '+str(exc))
+    try:
+        import numpy as np
+        from omr_evaluaciones.motor import OMRStore
+        from omr_evaluaciones.interfaz import OMRApp
+        store=OMRStore(tmp_path/'omr')
+        questions=[
+            {'tema':'Seguridad','pregunta':'¿Cuál es el primer paso?','correcta':'A'},
+            {'tema':'Operación','pregunta':'¿Cómo se reporta una falla?','correcta':'B'},
+            {'tema':'Inventario','pregunta':'¿Quién registra el cierre?','correcta':'C'},
+        ]
+        sid=store.create_session('Evaluación',questions,
+            [{'id':'00001','nombre':'Persona de prueba'}],'Carta','normal')
+        token=store.session(sid)['personal'][0]['token']
+        image=np.full((1000,850,3),255,dtype=np.uint8)
+        _,state=store.register_page(sid,'a'*64,0,image,token,
+            [None]*3,[{'pregunta':2,'razon':'doble marca'}],'revisar')
+        assert state=='revisar'
+        parent.withdraw()
+        app=OMRApp(parent=parent,db_root=tmp_path/'omr',
+            review_only=True,on_return=lambda:None)
+        app.session_id=sid
+        app.navigate('Revisión')
+        selectors=[w for w in _descendants(app.stage)
+                   if isinstance(w,ttk.Combobox) and
+                   any('primer paso' in x for x in w.cget('values'))]
+        assert len(selectors)==1
+        selector=selectors[0]
+        assert str(selector.cget('state'))=='readonly'
+        assert selector.get().startswith('02 ·')  # primera duda elegida
+        selector.current(2)
+        selector.event_generate('<<ComboboxSelected>>')
+        confirm=next(w for w in _descendants(app.stage)
+             if isinstance(w,tk.Button) and w.cget('text')=='Confirmar decisión')
+        confirm.invoke()
+        revisions=store.revisions(sid)
+        assert revisions[-1]['pregunta']==3
+        assert revisions[-1]['decision']=='A'
+        app.return_to_generator()
+    finally:
+        try:parent.destroy()
+        except tk.TclError:pass
