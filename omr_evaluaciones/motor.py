@@ -1120,6 +1120,7 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path, *, progress=None):
             'grupos':list(groups.values()),
             'no_identificadas':[x for x in items if not x['sesion_id']],
             'mezclado':len(groups)>1,
+            'pdf_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
             'segundos_prelectura':round(perf_counter()-started,3)}
 
 
@@ -1188,9 +1189,17 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path, *, page_indices=None):
         if stream.read(5)!=b'%PDF-':raise ValueError('Archivo PDF inválido.')
     s=store.session(sid)
     fingerprint=hashlib.sha256(path.read_bytes()).hexdigest()
-    folder=store.root/'originales'/sid;folder.mkdir(parents=True,exist_ok=True)
-    archived=folder/(fingerprint+'.pdf')
-    if not archived.exists():shutil.copy2(path,archived)
+    # Reutilizar la copia global inmutable, si la bandeja la archivó antes
+    # del escaneo. Los originales históricos siguen en su ruta anterior.
+    global_archive=store.root/'documentos'/'originales'/(fingerprint+'.pdf')
+    if global_archive.exists():
+        archived=global_archive
+    else:
+        folder=store.root/'originales'/sid
+        folder.mkdir(parents=True,exist_ok=True)
+        archived=folder/(fingerprint+'.pdf')
+        if not archived.exists():
+            shutil.copy2(path,archived)
     by_token={p['token']:p for p in s['personal']}
     report={'leidas':0,'validadas':0,'revisar':0,'sin_identificar':0,
             'duplicadas':0,'repetidas':0,'reprocesadas':0,'detalles':[]}
