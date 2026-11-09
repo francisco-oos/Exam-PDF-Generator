@@ -62,6 +62,27 @@ ambas modalidades, tanto con como sin lista.
   Respaldar y no subir a GitHub.
 - No declarar resultados oficiales sin probar impresión y escaneo físicos.
 
+## Selección de reactivos para corrección
+
+El QR firmado identifica la **sesión de aplicación**, no necesita almacenar
+el texto de todas las preguntas. La sesión conserva el orden de preguntas,
+sus temas y la clave empleada al generar los folios. Al escanear, se utiliza
+esa versión congelada del examen y no la última edición de Biblioteca.
+
+En **Calificar y entregar → Revisión**, el campo **Reactivo del examen
+identificado** es un selector de solo lectura con número y enunciado.
+Al elegir una hoja, propone automáticamente su primer reactivo dudoso. Al
+elegir otra pregunta de la lista, presenta el enunciado completo y resalta
+los círculos correspondientes en la evidencia; puede activarse el acercamiento.
+La decisión A/B/C/D/BLANCO se registra únicamente en la pregunta seleccionada,
+con revisor y justificación. **DESCARTAR** continúa aplicándose a la hoja
+completa, no a la pregunta.
+
+Si el QR apunta a una sesión diferente de la abierta, se valida primero la
+identidad HMAC y se carga la sesión correcta. Si falta la clave, no se puede
+comprobar la firma, o no hay una sesión válida, nunca se asignan respuestas
+a una evaluación basándose solo en su título.
+
 ## Recuperación de un escaneo que aparece «SIN IDENTIFICAR»
 
 Si el PDF original procede de la Xerox, no tienes que volver a imprimirlo
