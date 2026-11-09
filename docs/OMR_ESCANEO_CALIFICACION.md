@@ -62,6 +62,37 @@ ambas modalidades, tanto con como sin lista.
   Respaldar y no subir a GitHub.
 - No declarar resultados oficiales sin probar impresión y escaneo físicos.
 
+## Hojas mezcladas de diferentes evaluaciones
+
+Es posible que al escanear Cabos se incluya accidentalmente una hoja de
+Checadores. **No se debe calificar con la clave del examen abierto**.
+
+El programa inspecciona **todas las páginas del PDF antes de registrar
+calificaciones** y valida el QR, el token y la firma HMAC de la sesión
+original. Presenta una alerta con las evaluaciones encontradas, sus nombres
+y números de página. Por ejemplo:
+
+- **Cabos:** páginas 1, 2, 3 y 5.
+- **Checadores:** página 4, encontrada entre hojas de Cabos.
+- **Sin identificar:** páginas cuyo QR sea ilegible, desconocido o inválido.
+
+Al aparecer la alerta, el operador decide **Sí** para procesar únicamente
+hojas identificadas, cada una con la clave de su aplicación; **No** cancela
+la importación **sin calificar**. Las hojas sin QR válido quedan sin asignación
+y deben verificarse antes de cualquier captura manual. Nunca se relacionan
+por nombre escrito, parecido del título o posición en el lote.
+
+Tras confirmar, el programa conserva el PDF original, guarda cada hoja
+identificada en su aplicación y presenta el resultado general. Para revisar
+las diferentes aplicaciones o exportar sus resultados, entra a **Historial**.
+Al reimportar el mismo PDF no se duplican calificaciones ya procesadas.
+
+**En la interfaz para usuarios se retiraron los botones para simular lectura
+OMR y crear participantes/preguntas ficticios.** Las simulaciones continúan
+como pruebas automáticas del código, sin generar sesiones de ejemplo desde
+los botones del personal. La precisión con hojas de impresora/escáner físico
+sigue necesitando pruebas de aceptación.
+
 ## Selección de reactivos para corrección
 
 El QR firmado identifica la **sesión de aplicación**, no necesita almacenar
