@@ -344,3 +344,20 @@ def test_captura_manual_auditada_y_sin_calificar_desconocidos(tmp_path):
     assert result['validados']==1
     assert result['participantes'][0]['blancos']==1
     assert len(store.revisions(sid))==21 # enlace ID y 20 reactivos
+
+
+
+def test_resuelve_sesion_por_qr_firmado_con_titulos_identicos(tmp_path):
+    """Evita asignar un PDF a otra evaluación por nombre o posición en historial."""
+    from omr_evaluaciones.motor import resolve_pdf_session
+    store=OMRStore(tmp_path/'db')
+    sid_a=store.create_session(
+        'Evaluación de conocimientos',questions(20),people(1),'Carta',
+        'ecologico',nombre_evaluacion='Curso de inducción')
+    sid_b=store.create_session(
+        'Evaluación de conocimientos',questions(20),
+        [{'id':'002','nombre':'Otra persona de prueba'}],
+        'Carta','normal',nombre_evaluacion='Evaluación de seguridad')
+    pdf=create_forms_pdf(store,sid_b,tmp_path/'hoja_b.pdf')
+    assert resolve_pdf_session(store,pdf)==sid_b
+    assert resolve_pdf_session(store,pdf)!=sid_a
