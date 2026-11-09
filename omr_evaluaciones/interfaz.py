@@ -869,6 +869,32 @@ class OMRApp:
                       f'{p["aciertos"]}/{p["preguntas"]}' if p['aciertos'] is not None else '—',
                       str(p['porcentaje'])+'%' if p['porcentaje'] is not None else '—',
                       p['estado']) for p in report['participantes']])
+        def individual_pdf():
+            selected=listing.selection()
+            if not selected:
+                messagebox.showwarning('Elige participante',
+                    'Selecciona una fila para entregar solamente su resultado.',
+                    parent=self.window)
+                return
+            person_id=listing.item(selected[0],'values')[0]
+            destination=filedialog.asksaveasfilename(
+                parent=self.window,defaultextension='.pdf',
+                initialfile='Resultado_'+str(person_id)+'.pdf',
+                filetypes=[('PDF','*.pdf')])
+            if not destination:return
+            try:
+                participant_receipt(self.store,self.session_id,
+                                    str(person_id),Path(destination))
+                self.feedback.set('PDF individual generado sin datos de otros participantes.')
+                messagebox.showinfo('Resultado individual',
+                    'Resultado guardado en:\n'+destination,parent=self.window)
+            except Exception as exc:
+                messagebox.showerror('No se pudo exportar',
+                                     str(exc),parent=self.window)
+        individual_actions=tk.Frame(self.stage,bg=LIGHT)
+        individual_actions.pack(fill='x',pady=2)
+        self._btn(individual_actions,'Exportar resultado del participante (PDF)',
+                  individual_pdf,True)
         breakdown=tk.StringVar(value='Selecciona una persona para ver sus temas.')
         tk.Label(self.stage,textvariable=breakdown,bg=LIGHT,fg=INK,font=('Segoe UI',10),wraplength=860,justify='left').pack(anchor='w',pady=7)
         def show_detail(_event):
@@ -901,6 +927,14 @@ class OMRApp:
                  font=('Segoe UI',12,'bold')).pack(anchor='w')
         self._btn(c,'Generar Excel oficial',lambda:self.save_excel(False),True)
         self._btn(c,'Generar Excel interno',lambda:self.save_excel(True))
+        another=self._card()
+        self._btn(another,'Expediente interno con evidencias (ZIP)',
+                  lambda:self.save_bundle(True),True)
+        self._btn(another,'Paquete oficial de resultados (ZIP)',
+                  lambda:self.save_bundle(False))
+        self._note('El expediente interno contiene las hojas efectivas, '
+                   'bitácora y hashes. Un PDF original mezclado no se incluye '
+                   'íntegro para no exponer otra evaluación.')
         self._note('El reporte oficial no revela las respuestas correctas. Si hay pendientes, se etiqueta PROVISIONAL. La sesión se guarda y permite reexportar sin escanear de nuevo.')
 
     def save_excel(self,internal=False):
@@ -1155,6 +1189,27 @@ class OMRApp:
         tree.bind('<<TreeviewSelect>>',show_page)
         doctree.selection_set(documents[0]['sha'])
         choose_doc()
+
+    def save_bundle(self,internal=True):
+        if not self.session_id:
+            return
+        destination=filedialog.asksaveasfilename(
+            parent=self.window,defaultextension='.zip',
+            initialfile=('Expediente_Interno_' if internal
+                         else 'Resultados_Oficiales_')+self.session_id+'.zip',
+            filetypes=[('Archivo ZIP','*.zip')])
+        if not destination:
+            return
+        try:
+            export_session_bundle(
+                self.store,self.inbox,self.session_id,
+                Path(destination),internal=internal)
+            self.feedback.set('Paquete exportado con manifiesto SHA-256.')
+            messagebox.showinfo('Expediente guardado',
+                'Se generó el archivo:\n'+destination,parent=self.window)
+        except Exception as exc:
+            messagebox.showerror('No se pudo exportar expediente',
+                                 str(exc),parent=self.window)
 
     def _history(self):
         self._heading(
