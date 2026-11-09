@@ -51,3 +51,11 @@
 - Migración SQLite sin pérdida de datos: guarda tamaño, letra, modo reutilizable y color de respuestas.
 - Ejemplo de 20 preguntas de cultura general sin referencias a empresas, series o personal; plantilla XLSX descargable con ejemplos neutrales.
 - Documentación y docstrings de mantenimiento. Ver `docs/MANTENIMIENTO_Y_PRUEBAS.md`.
+
+## Editor de diseño y papelera recuperable
+
+- La vista grande se convirtió en **Editar diseño · PDF real**. El acceso está en la barra principal y junto a la vista previa. El panel de propiedades modifica título, subtítulo, empresa, grupo, papel, letra, reutilización y los tres colores RGB, mientras el documento se redibuja con la misma librería que los PDF finales.
+- `estudio_diseno.py` centraliza la ventana de edición: renderizado en memoria con PDFium, navegación entre hojas, zoom, actualización de variables compartidas y acciones de editar preguntas, guardar y generar. No se implementa edición libre por arrastre de objetos PDF externos.
+- La biblioteca SQLite incorpora **eliminado_en** mediante migración aditiva, con papelera, restauración y borrado definitivo. `delete_exam` oculta y conserva preguntas/recursos; `purge_exam` requiere que ya esté en papelera y elimina recursos en cascada. La interfaz exige confirmación y, para el borrado permanente, escribir `ELIMINAR`.
+- El editor mantiene los cambios de diseño sincronizados con la ventana principal y no altera PDF existentes hasta generar un nuevo juego. Los PDF previamente exportados no se eliminan al limpiar la biblioteca.
+- Se añadieron tests de regresión para papelera, restauración, recursos BLOB, IDs inválidos y vista PDF real.

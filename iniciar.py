@@ -11,13 +11,14 @@ import sys
 from uuid import uuid4
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, colorchooser
+from tkinter import ttk, filedialog, messagebox, colorchooser, simpledialog
 from PIL import ImageTk
-from preview_pdf import render_document_preview
+from estudio_diseno import open_design_studio
 
 from src.evaluaciones.core import ExamError, generate, read_questions
 from vista_previa import PreviewData, render_preview
-from biblioteca import (save_exam, load_exam, list_exams, export_workbook, hex_color,
+from biblioteca import (save_exam, load_exam, list_exams, delete_exam, restore_exam, purge_exam,
+    export_workbook, hex_color,
     DEFAULT_COLOR_TITLE, DEFAULT_COLOR_SUBTITLE)
 from editor_preguntas import edit_questions
 
@@ -105,7 +106,7 @@ def build_ui():
     mainarea.pack(side='left',fill='both',expand=True)
     tk.Label(mainarea,text='NUEVA EVALUACIÓN',bg=BG,fg=TEAL,
              font=('Segoe UI',10,'bold')).pack(anchor='w',padx=20,pady=(17,2))
-    tk.Label(mainarea,text='Preparar documentos',bg=BG,fg=NAVY,
+    tk.Label(mainarea,text='Preparar y diseñar documentos',bg=BG,fg=NAVY,
              font=('Segoe UI',21,'bold')).pack(anchor='w',padx=20)
     tk.Label(mainarea,text='Configura cualquier empresa, público o proyecto. Cuadernillos reutilizables y formatos Carta, A4 u Oficio.',
              bg=BG,fg=GRAY,font=('Segoe UI',9)).pack(anchor='w',padx=20,pady=(3,10))
@@ -248,7 +249,7 @@ def build_ui():
     tabs=tk.Frame(right,bg=WHITE)
     tabs.pack(fill='x',padx=13,pady=(0,5))
     tab_buttons={}
-    tk.Button(right,text='Ampliar · Vista exacta de PDF',command=lambda:open_large_preview(),
+    tk.Button(right,text='Abrir editor visual · PDF real',command=lambda:open_large_preview(),
         bg='#e4edf1',fg=NAVY,bd=0,padx=11,pady=7,cursor='hand2',
         font=('Segoe UI',9,'bold')).pack(anchor='center',pady=(0,7))
     preview_label=tk.Label(right,bg='#edf3f6',bd=0)
@@ -256,7 +257,7 @@ def build_ui():
     preview_info=tk.StringVar(value='Cargando vista previa…')
     tk.Label(right,textvariable=preview_info,bg=WHITE,fg=GRAY,
              font=('Segoe UI',9),wraplength=390,justify='center').pack(padx=10,pady=(3,1))
-    tk.Label(right,text='Vista en pantalla orientativa. Para imprimir utiliza\nlos PDF finales A4 al 100 % de escala.',
+    tk.Label(right,text='Vista orientativa. En «Editar diseño» verás\nel PDF real y podrás ajustar sus propiedades.',
              bg=WHITE,fg=GRAY,font=('Segoe UI',8),justify='center').pack(padx=10,pady=(0,5))
 
     def load_questions():
@@ -290,68 +291,33 @@ def build_ui():
              reutilizable=bool(reuse_booklet.get()))
 
     def open_large_preview():
-        """Ventana aparte: renderiza las páginas REALES en memoria (PDFium)."""
+        """Abre el editor dedicado, con controles junto al PDF real.
+
+        Las variables se comparten con el formulario principal: ningún ajuste
+        se pierde al regresar, y sólo Guardar lo persiste en la biblioteca.
+        """
         if large_preview[0] is not None:
-            try:large_preview[0]['win'].lift();return
-            except tk.TclError:large_preview[0]=None
-        win=tk.Toplevel(root)
-        win.title('Vista ampliada del PDF · ajustar páginas e impresión')
-        win.geometry('1080x830')
-        win.minsize(700,550)
-        head=tk.Frame(win,bg=BG,pady=9,padx=12)
-        head.pack(fill='x')
-        view_var=tk.StringVar(value=current_view.get())
-        page_var=tk.IntVar(value=1)
-        zoom=tk.IntVar(value=100)
-        display=tk.StringVar(value='Preparando páginas…')
-        ttk.Combobox(head,textvariable=view_var,values=('Cuadernillo','Respuestas','Acetato'),
-                     state='readonly',width=16).pack(side='left',padx=(0,10))
-        tk.Button(head,text='◀ Anterior',command=lambda:change_page(-1)).pack(side='left',padx=4)
-        tk.Button(head,text='Siguiente ▶',command=lambda:change_page(1)).pack(side='left',padx=4)
-        tk.Label(head,textvariable=display,bg=BG,fg=NAVY).pack(side='left',padx=10)
-        ttk.Combobox(head,textvariable=zoom,values=(70,85,100,125,150,175,200),
-                     state='readonly',width=5).pack(side='right')
-        tk.Label(head,text='Zoom %',bg=BG,fg=NAVY).pack(side='right',padx=(5,3))
-        wrapper=tk.Frame(win,bg='#dee7ed');wrapper.pack(fill='both',expand=True)
-        canvas=tk.Canvas(wrapper,bg='#dde7ec',highlightthickness=0)
-        sy=ttk.Scrollbar(wrapper,orient='vertical',command=canvas.yview)
-        sx=ttk.Scrollbar(wrapper,orient='horizontal',command=canvas.xview)
-        canvas.configure(yscrollcommand=sy.set,xscrollcommand=sx.set)
-        sy.pack(side='right',fill='y')
-        sx.pack(side='bottom',fill='x')
-        canvas.pack(fill='both',expand=True)
-        state={'win':win,'view':view_var,'page':page_var,'zoom':zoom,'canvas':canvas,
-               'display':display,'total':1,'job':None,'photo':None}
-        large_preview[0]=state
-        def change_page(offset):
-            page_var.set(max(1,min(state['total'],page_var.get()+offset)))
-            refresh()
-        def refresh(*_):
-            if not win.winfo_exists():return
             try:
-                data=preview_data()
-                width=int(max(460,min(1800,canvas.winfo_width()-32))*zoom.get()/100)
-                image,pages=render_document_preview(data,view_var.get(),page_var.get()-1,width)
-                state['total']=pages
-                page_var.set(min(page_var.get(),pages))
-                photo=ImageTk.PhotoImage(image,master=win)
-                state['photo']=photo
-                canvas.delete('all')
-                canvas.create_image(12,12,anchor='nw',image=photo)
-                canvas.configure(scrollregion=(0,0,image.width+24,image.height+24))
-                display.set(f'Página {page_var.get()} de {pages} · {data.tamano_papel} · {data.letra} pt')
-            except Exception as exc:
-                display.set('Sin vista exacta: '+str(exc)[:85])
-        def queue(*_):
-            if not win.winfo_exists():return
-            if state['job'] is not None:win.after_cancel(state['job'])
-            state['job']=win.after(430,refresh)
-        state['queue']=queue
-        view_var.trace_add('write',lambda *_: (page_var.set(1),queue()))
-        zoom.trace_add('write',queue)
-        canvas.bind('<Configure>',queue)
-        win.protocol('WM_DELETE_WINDOW',lambda: (large_preview.__setitem__(0,None),win.destroy()))
-        win.after(120,refresh)
+                large_preview[0]['win'].lift()
+                large_preview[0]['win'].focus_force()
+                return
+            except tk.TclError:
+                large_preview[0] = None
+        vars_studio = {
+            'titulo': title_var, 'subtitulo': subtitle_var,
+            'empresa': company_var, 'grupo': group_var,
+            'archivo': file_var, 'logotipo': logo_var,
+            'papel': paper_choice, 'letra': body_font,
+            'reutilizable': reuse_booklet, 'color_titulo': color_title,
+            'color_subtitulo': color_subtitle, 'color_respuestas': color_answers,
+        }
+        editor=open_design_studio(root,datos_fn=preview_data,variables=vars_studio,
+            editar_preguntas=edit_current,guardar=save_in_library,generar=run)
+        large_preview[0]={'win':editor}
+        def clear_state(event):
+            if event.widget is editor:
+                large_preview[0]=None
+        editor.bind('<Destroy>',clear_state,add='+')
 
     def render():
         scheduled[0]=None
@@ -366,9 +332,6 @@ def build_ui():
         except (OSError,ValueError) as exc:
             preview_info.set('Vista previa no disponible: '+str(exc))
             return
-        if large_preview[0] is not None:
-            try:large_preview[0]['queue']()
-            except tk.TclError:large_preview[0]=None
         if cache['error']:
             preview_info.set('Excel pendiente de revisar: '+cache['error'][:135])
         else:
@@ -455,27 +418,50 @@ def build_ui():
         status.set('Preguntas editadas. Usa «Guardar cuestionario» para conservar los cambios en la biblioteca.')
 
     def open_library():
-        win=tk.Toplevel(root);win.title('Mis cuestionarios guardados')
-        win.geometry('850x490');win.transient(root);win.grab_set()
+        """Gestiona biblioteca y papelera; no elimina archivos PDF ya exportados."""
+        win=tk.Toplevel(root);win.title('Biblioteca y papelera de cuestionarios')
+        win.geometry('920x560');win.minsize(760,440);win.transient(root);win.grab_set()
         tk.Label(win,text='Biblioteca de cuestionarios',font=('Segoe UI',17,'bold'),
-                 padx=18,pady=16).pack(anchor='w')
-        frame=tk.Frame(win,padx=18);frame.pack(fill='both',expand=True)
-        tree=ttk.Treeview(frame,columns=('nombre','grupo','preguntas','revision','fecha'),show='headings',selectmode='browse')
-        for col,caption,width in [('nombre','Nombre',245),('grupo','Área / grupo',140),
-                                  ('preguntas','Preguntas',78),('revision','Rev.',50),('fecha','Modificado UTC',180)]:
-            tree.heading(col,text=caption);tree.column(col,width=width,stretch=col in ('nombre','grupo'))
-        yscroll=ttk.Scrollbar(frame,orient='vertical',command=tree.yview)
-        tree.configure(yscrollcommand=yscroll.set);yscroll.pack(side='right',fill='y')
+                 padx=18,pady=12).pack(anchor='w')
+        options=tk.Frame(win,padx=18);options.pack(fill='x')
+        trashed=tk.BooleanVar(master=win,value=False)
+        tk.Checkbutton(options,text='Mostrar papelera (cuestionarios eliminados)',
+            variable=trashed,command=lambda:refresh(),font=('Segoe UI',10)).pack(side='left')
+        frame=tk.Frame(win,padx=18,pady=8);frame.pack(fill='both',expand=True)
+        tree=ttk.Treeview(frame,columns=('nombre','grupo','preguntas','revision','fecha'),
+                          show='headings',selectmode='browse')
+        for col,caption,width in [('nombre','Nombre',280),('grupo','Área / grupo',160),
+                                  ('preguntas','Preguntas',85),('revision','Rev.',48),
+                                  ('fecha','Modificado UTC',175)]:
+            tree.heading(col,text=caption)
+            tree.column(col,width=width,stretch=col in ('nombre','grupo'))
+        bar=ttk.Scrollbar(frame,orient='vertical',command=tree.yview)
+        tree.configure(yscrollcommand=bar.set);bar.pack(side='right',fill='y')
         tree.pack(fill='both',expand=True)
+        hint=tk.StringVar(master=win,value='Elige un cuestionario para abrirlo o enviarlo a la papelera.')
+        tk.Label(win,textvariable=hint,padx=18,fg=GRAY,anchor='w').pack(fill='x')
+        controls=tk.Frame(win,padx=18,pady=12);controls.pack(fill='x')
+        def pick():
+            selected=tree.selection()
+            return selected[0] if selected else None
         def refresh():
             tree.delete(*tree.get_children())
-            for x in list_exams(db_path):
-                tree.insert('', 'end',iid=x['id'],values=(x['nombre'],x['grupo'],x['total'],x['revision'],x['actualizado_en'][:19].replace('T',' ')))
+            for item in list_exams(db_path,trash=trashed.get()):
+                tree.insert('','end',iid=item['id'],values=(item['nombre'],item['grupo'],
+                    item['total'],item['revision'],item['actualizado_en'][:19].replace('T',' ')))
+            deleted=trashed.get()
+            opener.config(state='disabled' if deleted else 'normal')
+            remover.config(text='Eliminar definitivamente' if deleted else 'Eliminar de biblioteca',
+                           bg='#a73535' if deleted else '#e6b6b1')
+            recover.config(state='normal' if deleted else 'disabled')
+            hint.set('Papelera: restaura o elimina definitivamente con confirmación.' if deleted
+                    else 'Eliminar mueve a la papelera: podrás recuperar tus preguntas e imágenes.')
         def load_selected():
-            pick=tree.selection()
-            if not pick:return
+            if trashed.get():return
+            item=pick()
+            if not item:return
             try:
-                exam=load_exam(db_path,pick[0],BASE/'datos'/'biblioteca_cache')
+                exam=load_exam(db_path,item,BASE/'datos'/'biblioteca_cache')
                 workbook=export_workbook(exam.questions,BASE/'datos'/'biblioteca_cache'/exam.id/'Preguntas.xlsx')
             except (ExamError,OSError,ValueError) as exc:
                 messagebox.showerror('No se pudo abrir',str(exc),parent=win);return
@@ -488,15 +474,60 @@ def build_ui():
             instruction.delete('1.0','end');instruction.insert('1.0',exam.instrucciones)
             logo_var.set(str(exam.logo) if exam.logo else '')
             file_var.set(str(workbook));cache['key']=None
-            status.set(f'Cuestionario cargado · revisión {exam.revision}. Puedes editar preguntas o generar.')
+            status.set(f'Cuestionario cargado · revisión {exam.revision}. Puedes editarlo y diseñarlo.')
             win.destroy();schedule()
-        controls=tk.Frame(win,padx=18,pady=14);controls.pack(fill='x')
-        ttk.Button(controls,text='Abrir para editar',command=load_selected).pack(side='left')
-        ttk.Button(controls,text='Actualizar lista',command=refresh).pack(side='left',padx=8)
+        def delete_selected():
+            item=pick()
+            if not item:return
+            name=tree.item(item,'values')[0]
+            if trashed.get():
+                # Esta acción es irreversible: doble validación para evitar errores.
+                if not messagebox.askyesno('Eliminar definitivamente',
+                    f'¿Borrar permanentemente «{name}» y todas sus imágenes de la base?\n'
+                    'Los PDF exportados previamente no se eliminarán.',parent=win):return
+                confirmed=simpledialog.askstring('Confirmación final',
+                    f'Escribe ELIMINAR para confirmar el borrado de «{name}»:',parent=win)
+                if confirmed!='ELIMINAR':return
+                operation=purge_exam
+            else:
+                if not messagebox.askyesno('Mover a papelera',
+                   f'¿Eliminar «{name}» de la biblioteca?\n'
+                   'Podrás restaurarlo desde la papelera.',parent=win):return
+                operation=delete_exam
+            try:operation(db_path,item)
+            except (ExamError,OSError) as exc:
+                messagebox.showerror('No se pudo eliminar',str(exc),parent=win);return
+            if active_id[0]==item:
+                # Evitar que un Guardar posterior resucite o sobrescriba el eliminado.
+                active_id[0]=None
+                lib_name.set('')
+                status.set('Cuestionario eliminado de biblioteca; los archivos PDF siguen intactos.')
+            refresh()
+        def restore_selected():
+            item=pick()
+            if not item or not trashed.get():return
+            try:restore_exam(db_path,item)
+            except (ExamError,OSError) as exc:
+                messagebox.showerror('No se pudo restaurar',str(exc),parent=win);return
+            refresh()
+            hint.set('Cuestionario restaurado: aparece nuevamente en la biblioteca.')
+        opener=tk.Button(controls,text='Abrir para editar',command=load_selected,
+            bg=TEAL,fg=WHITE,bd=0,padx=12,pady=9)
+        opener.pack(side='left')
+        recover=tk.Button(controls,text='Restaurar',command=restore_selected,
+            bd=0,padx=12,pady=9)
+        recover.pack(side='left',padx=7)
+        remover=tk.Button(controls,text='Eliminar de biblioteca',command=delete_selected,
+            bg='#e6b6b1',fg=NAVY,bd=0,padx=12,pady=9)
+        remover.pack(side='left')
+        ttk.Button(controls,text='Actualizar',command=refresh).pack(side='left',padx=8)
         ttk.Button(controls,text='Cerrar',command=win.destroy).pack(side='right')
-        tree.bind('<Double-Button-1>',lambda event:load_selected())
+        tree.bind('<Double-Button-1>',lambda e:load_selected())
         refresh()
 
+    tk.Button(toolbar,text='Editar diseño · PDF real',command=open_large_preview,
+        bg=NAVY,fg=WHITE,bd=0,padx=10,pady=9,cursor='hand2',
+        font=('Segoe UI',9,'bold')).pack(side='left',padx=(0,7))
     tk.Button(toolbar,text='Descargar plantilla Excel',command=template_download,
         bg='#E4EDF1',fg=NAVY,bd=0,padx=9,pady=9,cursor='hand2').pack(side='left',padx=(0,7))
     tk.Button(toolbar,text='Mis cuestionarios',command=open_library,
