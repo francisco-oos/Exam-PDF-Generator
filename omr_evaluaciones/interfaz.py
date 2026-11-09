@@ -496,10 +496,15 @@ class OMRApp:
         pending=sum(group['report']['revisar'] for group in processed)
         repeated=sum(group['report']['repetidas'] for group in processed)
         unrecognized=len(inspection['no_identificadas'])
+        scan_time=sum(group['report'].get('segundos_calificacion',0.)
+                      for group in processed)
+        lookup_time=inspection.get('segundos_prelectura',0.)
         summary=(f'PDF: {source} · Aplicaciones: {len(processed)} · '
                  f'Hojas procesadas: {n} · Validadas: {valid} · '
                  f'Por revisar: {pending} · Reimportadas: {repeated} · '
-                 f'Sin asignar: {unrecognized}')
+                 f'Sin asignar: {unrecognized} · '
+                 f'Búsqueda QR: {lookup_time:.1f}s · '
+                 f'Lectura: {scan_time:.1f}s')
         self.feedback.set(summary)
         self.navigate('Revisión')
         if len(processed)>1 or unrecognized or (
