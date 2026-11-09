@@ -176,7 +176,9 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
         mode = exam_type.get()
         # Con QR se conserva el cuadernillo reutilizable; la identificación
         # del participante vive exclusivamente en su hoja personalizada.
-        variables['reutilizable'].set(mode != 'normal')
+        reusable = mode != 'normal'
+        if variables['reutilizable'].get() != reusable:
+            variables['reutilizable'].set(reusable)
         descriptions = {
             'normal': 'Genera cuadernillo, hoja de respuestas, clave y acetato normales.',
             'ecologico': 'Genera cuadernillo sin datos personales y con aviso NO RAYAR NI MANCHAR.',
