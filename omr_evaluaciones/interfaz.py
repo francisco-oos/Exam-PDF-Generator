@@ -590,6 +590,9 @@ class OMRApp:
             else:
                 ttk.Entry(form,textvariable=var).pack(fill='x')
         selected={'id':None}
+        # La imagen alineada y su acetato no cambian al elegir otro reactivo.
+        # Cachear hasta tres hojas evita decodificar PNG y rectificar por clic.
+        image_cache={}
         def redraw(*_):
             sel=tree.selection()
             if not sel:return
@@ -609,47 +612,58 @@ class OMRApp:
                 f'Pregunta {qid} · {item["tema"]}\n{item["pregunta"]}'
             )
             try:
-                # El archivo PNG archivado y el PDF original jamás se editan.
-                # La hoja se rectifica EN MEMORIA a partir de las cuatro marcas.
-                import cv2
-                original=cv2.imread(str(p['imagen']))
-                if original is None:
-                    raise OSError('No se encontró la evidencia archivada.')
-                try:
-                    img=render_review_with_acetato(
-                        original,session['papel'],session['preguntas'],
-                        show_acetato=show_acetato.get(),
-                        issue_numbers=(
-                            [i.get('pregunta') for i in p['dudas']
-                             if isinstance(i.get('pregunta'),int)]
-                            if show_overlay.get() else []
-                        ) + [qid],
-                    )
-                except ValueError as alignment_error:
-                    # No falsificar coincidencia del acetato sin cuatro marcas.
-                    img=Image.open(p['imagen']).convert('RGB')
-                    detail.set(detail.get()+' · SIN ACETATO: '+str(alignment_error))
-                if zoom_issue.get():
+                from PIL import ImageDraw
+                key=(p['id'],show_acetato.get(),show_overlay.get())
+                if key not in image_cache:
+                    # Cachear la vista BASE, no el recuadro del reactivo.
+                    original=cv2.imread(str(p['imagen']))
+                    if original is None:
+                        raise OSError('No se encontró la evidencia archivada.')
+                    aligned=(p['token'] is not None and
+                             not any('QR original ilegible' in
+                                     str(x.get('razon','')) for x in p['dudas']))
                     try:
-                        qid=selected_question_number(question.get(),
-                                                      question_choices)
-                        dots=bubble_positions(session['papel'],
-                                               len(session['preguntas']))[qid-1]
-                        height=PAPERS[session['papel']][1]
-                        xx=[round(x*RENDER_DPI/72) for x,y in dots]
-                        yy=[round((height-y)*RENDER_DPI/72) for x,y in dots]
-                        img=img.crop((max(0,min(xx)-120),max(0,min(yy)-85),
-                                    min(img.width,max(xx)+115),
-                                    min(img.height,max(yy)+90)))
-                    except (ValueError,IndexError):
-                        pass
-                # Aprovechar el espacio de revisión maximizado sin forzar
-                # reescalado hacia arriba ni alterar el escaneo original.
-                area_width = max(520, min(1150, self.window.winfo_width() - 790))
-                area_height = max(540, min(960, self.window.winfo_height() - 220))
-                img.thumbnail((area_width, area_height))
+                        base=render_review_with_acetato(
+                            original,session['papel'],session['preguntas'],
+                            show_acetato=show_acetato.get(),
+                            issue_numbers=([
+                                issue.get('pregunta') for issue in p['dudas']
+                                if isinstance(issue.get('pregunta'),int)
+                            ] if show_overlay.get() else []),
+                            already_aligned=aligned,
+                        )
+                    except ValueError as alignment_error:
+                        base=Image.open(p['imagen']).convert('RGB')
+                        detail.set(detail.get()+' · SIN ACETATO: '+
+                                   str(alignment_error))
+                    if len(image_cache)>=3:
+                        image_cache.pop(next(iter(image_cache)))
+                    image_cache[key]=base
+                img=image_cache[key].copy()
+                dots=bubble_positions(session['papel'],
+                                       len(session['preguntas']))[qid-1]
+                paper_height=PAPERS[session['papel']][1]
+                scale=RENDER_DPI/72
+                coords=[(round(x*scale),
+                         round((paper_height-y)*scale)) for x,y in dots]
+                left=max(0,min(x for x,y in coords)-29)
+                top=max(0,min(y for x,y in coords)-24)
+                right_edge=min(img.width,max(x for x,y in coords)+29)
+                bottom=min(img.height,max(y for x,y in coords)+24)
+                ImageDraw.Draw(img).rectangle(
+                    (left,top,right_edge,bottom),
+                    outline=(31,113,219),width=4)
+                if zoom_issue.get():
+                    img=img.crop((max(0,left-90),max(0,top-65),
+                                  min(img.width,right_edge+90),
+                                  min(img.height,bottom+65)))
+                # El tamaño de la etiqueta es MENOR que el del escritorio.
+                # Evitar que el encabezado o el pie se corten por usar 960 px.
+                width=max(300,min(970,self.window.winfo_width()-670))
+                height=max(250,min(850,self.window.winfo_height()-355))
+                img.thumbnail((width,height))
                 self.photo=ImageTk.PhotoImage(img,master=self.window)
-                image_label.configure(image=self.photo)
+                image_label.configure(image=self.photo,anchor='n')
             except Exception as exc:detail.set('No se puede mostrar imagen: '+str(exc))
         def choose_sheet(event=None):
             """Al cambiar de hoja, seleccionar su primera duda automáticamente."""
