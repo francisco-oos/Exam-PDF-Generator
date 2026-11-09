@@ -325,6 +325,26 @@ class WebService:
             self._event(db,user["id"],sheet_id,"RECLAMAR","Revisión temporal")
         return {"lease":token,"revision":rev,"vence_en_segundos":ttl}
 
+    def claim_next(self,user,sid):
+        """Repartir trabajo sin que dos personas reciban la misma hoja.
+
+        Los candidatos se consultan por evaluación autorizada y cada
+        reclamación se efectúa en BEGIN IMMEDIATE en claim(). Si otro
+        capturista gana la carrera, se intenta el siguiente.
+        """
+        self.require(user,roles={"admin","coordinador","capturista"},sid=sid)
+        candidates=self.list_sheets(user,sid)
+        for item in candidates:
+            if item["estado"]!="revisar" or item["ocupada_por_otro"]:
+                continue
+            try:
+                result=self.claim(user,item["id"])
+                return {"hoja_id":item["id"],**result}
+            except WebError as exc:
+                if exc.status != 409:
+                    raise
+        raise WebError("No hay hojas disponibles para reclamar.",404)
+
     def _event(self,db,uid,sheet,action,detail):
         db.execute("""INSERT INTO web_eventos
             (usuario_id,hoja_id,accion,detalle,fecha)
