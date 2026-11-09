@@ -1,0 +1,4 @@
+opencv-python>=4.8,<5
+numpy>=1.26,<3
+qrcode[pil]>=7.4,<9
+pyzbar>=0.1.9,<1
