@@ -24,7 +24,8 @@ LABEL = '#607487'
 
 def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
                        editar_preguntas=None, guardar=None, generar=None,
-                       importar=None, biblioteca=None, plantilla=None, estado=None):
+                       importar=None, biblioteca=None, plantilla=None, estado=None,
+                       calificar=None):
     """Crea el diseñador de dos paneles y devuelve la ventana (útil para pruebas).
 
     ``variables`` contiene StringVar/BooleanVar ya utilizadas por la ventana
@@ -94,6 +95,12 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     for title, action in [('Importar XLSX', importar), ('Abrir biblioteca y papelera', biblioteca), ('Descargar plantilla', plantilla)]:
         if action:
             ttk.Button(settings_inner, text=title, command=action).grid(sticky='ew', columnspan=2, pady=3)
+
+    if calificar is not None:
+        tk.Button(settings_inner, text='Calificar · QR / escáner',
+                  command=calificar, bg=ACCENT, fg=WHITE, bd=0, pady=10,
+                  font=('Segoe UI',10,'bold')).grid(
+                      sticky='ew', columnspan=2, pady=(8, 4))
 
     section('01 · Texto de portada', 'Cambia el título y observa el encabezado del cuadernillo.')
     field('Título de la evaluación', variables['titulo'])
