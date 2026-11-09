@@ -161,6 +161,11 @@ class EvidenceStore:
                     """,[(sha,i+1) for i in range(count)])
                     self._event(db,sha,None,"ARCHIVADO",
                                 f"{source.name}; {count} páginas")
+                else:
+                    # Otra subida del mismo archivo: una sola copia en disco,
+                    # pero conservar fecha/nombre del nuevo intento.
+                    self._event(db,sha,None,"REIMPORTACION_PDF",
+                                f"Reenviado como {source.name}")
             return self.document(sha),current is not None
         finally:
             temp.unlink(missing_ok=True)
