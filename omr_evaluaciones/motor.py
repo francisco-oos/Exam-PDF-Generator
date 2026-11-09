@@ -891,6 +891,16 @@ def _decode_qr(gray, *, allow_full=True):
                 return item.data.decode('utf-8','strict')
     except (ImportError,OSError,UnicodeDecodeError):
         pass
+    # ZXing-C++ es OPCIONAL. Solo entra cuando OpenCV y pyzbar no
+    # consiguieron leer el QR. La firma HMAC se comprueba después.
+    try:
+        import zxingcpp
+        for barcode in zxingcpp.read_barcodes(roi):
+            payload=str(getattr(barcode,'text',''))
+            if payload:
+                return payload
+    except (ImportError,OSError,RuntimeError,ValueError):
+        pass
     return None
 
 
