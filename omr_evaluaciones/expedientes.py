@@ -426,6 +426,37 @@ def create_organized_pdf(src:Path,dest:Path,page_order,rotations=None):
     return dest
 
 
+def normalize_pdf_copy(source:Path,destination:Path):
+    """Reescribe una COPIA para normalizar estructura, no garantiza reparar todo.
+
+    Utiliza pikepdf/qpdf si está instalado; en su ausencia, reserializa con
+    pypdf las páginas legibles. Los PDF ilegibles deben conservarse y
+    diagnosticarse, jamás reemplazarse en el archivo original.
+    """
+    src,dst=Path(source),Path(destination)
+    if src.resolve()==dst.resolve():
+        raise ValueError("No se permite sobrescribir el PDF original.")
+    try:
+        import pikepdf
+    except ImportError:
+        from pypdf import PdfReader
+        reader=PdfReader(str(src),strict=False)
+        if reader.is_encrypted:
+            raise ValueError("PDF cifrado; no puede normalizarse.")
+        return create_organized_pdf(src,dst,list(range(len(reader.pages))))
+    if not src.is_file() or src.stat().st_size>MAX_PDF_SIZE:
+        raise ValueError("PDF inválido o demasiado grande.")
+    dst.parent.mkdir(parents=True,exist_ok=True)
+    temporary=dst.with_name("."+dst.name+"."+uuid4().hex+".tmp")
+    try:
+        with pikepdf.open(src) as pdf:
+            pdf.save(temporary)
+        os.replace(temporary,dst)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return dst
+
+
 def combine_pdfs(inputs,output):
     """Combina dos o más PDF archivados en una COPIA, sin tocar metadatos OMR.
 
