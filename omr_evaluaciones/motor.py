@@ -218,6 +218,34 @@ class OMRStore:
         with self.connect() as db:
             existing=db.execute('SELECT id FROM hojas WHERE sesion_id=? AND archivo_sha=? AND pagina=?',(sid,source_sha,page_idx)).fetchone()
             if existing:
+                # Relectura controlada tras mejorar el algoritmo: una hoja
+                # antigua SIN_IDENTIFICAR puede repararse por HMAC sin importar
+                # el PDF como otra hoja. Las decisiones humanas nunca se pisan.
+                old=db.execute('SELECT * FROM hojas WHERE id=?',(existing['id'],)).fetchone()
+                reviewed=db.execute('SELECT COUNT(*) FROM revisiones WHERE hoja_id=?',
+                                    (existing['id'],)).fetchone()[0]
+                if (old['estado']=='sin_identificar' and old['token'] is None
+                        and token is not None and state in ('validada','revisar')
+                        and reviewed==0):
+                    other=db.execute("""
+                        SELECT COUNT(*) FROM hojas WHERE sesion_id=? AND token=?
+                        AND id<>? AND estado NOT IN ('descartada','duplicado')
+                    """,(sid,token,existing['id'])).fetchone()[0]
+                    status='duplicado' if other else state
+                    db.execute("""
+                        UPDATE hojas SET token=?,imagen=?,respuestas_json=?,
+                        dudas_json=?,estado=? WHERE id=?
+                    """,(token,str(target),compact_json(answers),
+                         compact_json(uncertain),status,existing['id']))
+                    db.execute("""
+                        INSERT INTO revisiones(hoja_id,pregunta,decision,motivo,revisor,fecha)
+                        VALUES(?,?,?,?,?,?)
+                    """,(existing['id'],None,'RELECTURA_AUTOMATICA',
+                         'QR/HMAC recuperado al reimportar original; evidencia original conservada',
+                         'Motor OMR',utcnow()))
+                    # El PDF original archivado se conserva, así como el
+                    # PNG previo; su ruta antigua ya no es la imagen activa.
+                    return existing['id'],'reprocesada_'+status
                 target.unlink(missing_ok=True)
                 return existing['id'],'repetida'
             if token and db.execute("SELECT COUNT(*) FROM hojas WHERE sesion_id=? AND token=? AND estado NOT IN ('duplicado','descartada')",(sid,token)).fetchone()[0]>0:
@@ -560,37 +588,48 @@ def create_generic_acetato_pdf(questions, paper, target, *, color='#167341'):
 
 
 def _find_four_markers(gray, paper, factor):
-    """Identifica centros negros de las esquinas y devuelve homografía al diseño PDF."""
-    h,w=gray.shape[:2]
-    _,mask=cv2.threshold(gray,85,255,cv2.THRESH_BINARY_INV)
-    contours,_=cv2.findContours(mask,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
-    candidates=[]
-    target_side=12*factor
-    for c in contours:
-        x,y,bw,bh=cv2.boundingRect(c)
-        if not .53*target_side<=bw<=2.2*target_side or not .53*target_side<=bh<=2.2*target_side:continue
-        if not .7<bw/max(bh,1)<1.3:continue
-        if cv2.contourArea(c)<.42*bw*bh:continue
-        cx,cy=x+bw/2,y+bh/2
-        candidates.append((cx,cy,bw*bh))
-    expected=[(32*factor,32*factor),(PAPERS[paper][0]*factor-32*factor,32*factor),
-              (PAPERS[paper][0]*factor-32*factor,PAPERS[paper][1]*factor-32*factor),
-              (32*factor,PAPERS[paper][1]*factor-32*factor)]
-    # Localización relativa: tolera márgenes de escáner y cierto desplazamiento.
-    expected_norm=[(u/(PAPERS[paper][0]*factor),v/(PAPERS[paper][1]*factor)) for u,v in expected]
-    points=[]
-    for ex,ey in expected_norm:
-        x0,y0=ex*w,ey*h
-        near=sorted(candidates,key=lambda z:(z[0]-x0)**2+(z[1]-y0)**2)
-        if not near or ((near[0][0]-x0)/w)**2+((near[0][1]-y0)/h)**2>.017:
-            return None
-        points.append(near[0][:2])
-    if len(set(points))!=4:return None
-    # Rechaza cuadrados repetidos o distribuciones casi colapsadas.
-    points=np.float32(points)
-    if np.linalg.norm(points[0]-points[1])<.55*w or np.linalg.norm(points[0]-points[3])<.55*h:return None
-    return points
+    """Localiza cuatro cuadrados incluso cuando un escáner los vuelve grises.
 
+    La Xerox puede entregar marcas negras con gris ~110-130. El umbral
+    histórico de 85 las descartaba, dejando las hojas SIN_IDENTIFICAR.
+    Se prueban umbrales de forma ascendente y se valida la geometría.
+    """
+    h,w=gray.shape[:2]
+    tw,th=PAPERS[paper]
+    target_side=12*factor
+    expected=np.float32([
+        (32/tw*w,32/th*h),((tw-32)/tw*w,32/th*h),
+        ((tw-32)/tw*w,(th-32)/th*h),(32/tw*w,(th-32)/th*h),
+    ])
+    for threshold in (85,120,150,185,220):
+        _,mask=cv2.threshold(gray,threshold,255,cv2.THRESH_BINARY_INV)
+        contours,_=cv2.findContours(mask,cv2.RETR_LIST,cv2.CHAIN_APPROX_SIMPLE)
+        candidates=[]
+        for c in contours:
+            x,y,bw,bh=cv2.boundingRect(c)
+            if not .53*target_side<=bw<=2.2*target_side:continue
+            if not .53*target_side<=bh<=2.2*target_side:continue
+            if not .7<bw/max(bh,1)<1.3:continue
+            if cv2.contourArea(c)<.42*bw*bh:continue
+            candidates.append((x+bw/2,y+bh/2,bw*bh))
+        if len(candidates)<4:continue
+        points=[]
+        for ex,ey in expected:
+            nearest=min(candidates,key=lambda z:(z[0]-ex)**2+(z[1]-ey)**2)
+            dx=(nearest[0]-ex)/w;dy=(nearest[1]-ey)/h
+            if dx*dx+dy*dy>.017:
+                break
+            points.append(nearest[:2])
+        if len(points)!=4 or len(set(points))!=4:continue
+        points=np.float32(points)
+        if (np.linalg.norm(points[0]-points[1])<.55*w or
+                np.linalg.norm(points[0]-points[3])<.55*h):continue
+        # Rechazar cuadrados mal ordenados o lados invertidos.
+        if not (points[0,0]<points[1,0] and points[3,0]<points[2,0] and
+                points[0,1]<points[3,1] and points[1,1]<points[2,1]):
+            continue
+        return points
+    return None
 
 def _rectify(gray,paper):
     scale=RENDER_DPI/72.0
@@ -607,26 +646,39 @@ def _rectify(gray,paper):
         yield result
 
 def _decode_qr(gray):
-    '''Lee un QR y comprueba que está en el encabezado, no invertido en el pie.'''
-    detector=cv2.QRCodeDetector()
-    text,points,_=detector.detectAndDecode(gray)
-    if not text or points is None:
-        # Pyzbar/zbar es opcional: segunda lectura de QR difíciles, sin OCR de nombres.
-        # El recorte superior derecho no puede corresponder a un QR girado 180°.
-        try:
-            from pyzbar.pyzbar import decode
-            height,width=gray.shape[:2]
-            region=gray[int(.06*height):int(.29*height),int(.70*width):int(.97*width)]
-            found=decode(Image.fromarray(region))
-            if found:
-                return found[0].data.decode('utf-8','strict')
-        except (ImportError,OSError,UnicodeDecodeError):pass
-        return None
-    cx,cy=points.reshape(-1,2).mean(axis=0)
-    height,width=gray.shape[:2]
-    if not (.70*width<cx<.97*width and .06*height<cy<.29*height):return None
-    return text
+    """Lee QR del encabezado, tolerando poca resolución y papel escaneado.
 
+    Primero intenta el documento; si falla, recorta SOLO el encabezado
+    superior derecho y reintenta ampliado (150% y 200%), sin OCR.
+    El QR nunca es válido sin la posterior comprobación HMAC/sesión.
+    """
+    detector=cv2.QRCodeDetector()
+    height,width=gray.shape[:2]
+    text,points,_=detector.detectAndDecode(gray)
+    if text and points is not None:
+        cx,cy=points.reshape(-1,2).mean(axis=0)
+        if .68*width<cx<.985*width and .055*height<cy<.31*height:
+            return text
+    # Subregión: mejora lectura de QR reducidos sin interpolar toda la página.
+    x0,x1=int(.66*width),int(.99*width)
+    y0,y1=int(.055*height),int(.33*height)
+    roi=gray[y0:y1,x0:x1]
+    if roi.size==0:return None
+    for image in (roi,
+                  cv2.resize(roi,None,fx=1.5,fy=1.5,interpolation=cv2.INTER_CUBIC),
+                  cv2.resize(roi,None,fx=2.0,fy=2.0,interpolation=cv2.INTER_CUBIC)):
+        text,points,_=detector.detectAndDecode(image)
+        if text and points is not None:
+            return text
+    # pyzbar es una segunda alternativa opcional para imágenes difíciles.
+    try:
+        from pyzbar.pyzbar import decode
+        for item in decode(Image.fromarray(roi)):
+            if item.type=='QRCODE':
+                return item.data.decode('utf-8','strict')
+    except (ImportError,OSError,UnicodeDecodeError):
+        pass
+    return None
 
 def _recognize(gray,paper,questions_count):
     """Mide tinta en el núcleo de cada círculo, evitando los contornos impresos."""
@@ -678,7 +730,8 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path):
     archived=folder/(fingerprint+'.pdf')
     if not archived.exists():shutil.copy2(path,archived)
     by_token={p['token']:p for p in s['personal']}
-    report={'leidas':0,'validadas':0,'revisar':0,'sin_identificar':0,'duplicadas':0,'repetidas':0,'detalles':[]}
+    report={'leidas':0,'validadas':0,'revisar':0,'sin_identificar':0,
+            'duplicadas':0,'repetidas':0,'reprocesadas':0,'detalles':[]}
     doc=pdfium.PdfDocument(str(archived))
     try:
         if len(doc)>MAX_PARTICIPANTS*3 or len(doc)>1500:raise ValueError('PDF con demasiadas páginas.')
@@ -695,31 +748,66 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path):
             original=cv2.cvtColor(np.asarray(image),cv2.COLOR_RGB2BGR)
             gray=cv2.cvtColor(original,cv2.COLOR_BGR2GRAY)
             best=None
+            fallback=None
+            scan_diagnosis='No se encontraron cuatro marcas de registro.'
+            different_session=None
             for rectified in _rectify(gray,s['papel']):
-                # El código QR se busca tanto en el encabezado como en toda la página.
+                if fallback is None:
+                    fallback=rectified
+                    scan_diagnosis='Marcas alineadas, pero no se pudo validar QR.'
                 qrtext=_decode_qr(rectified)
                 if not qrtext:continue
                 match=QR_RE.fullmatch(qrtext)
-                if not match:continue
+                if not match:
+                    scan_diagnosis='QR detectado con formato incompatible.'
+                    continue
                 found_sid,token,page_num,mac=match.groups()
-                if found_sid!=sid or token not in by_token or page_num!='1':continue
-                if not hmac.compare_digest(_qr_data(sid,token,1,s['clave_hmac']),qrtext):continue
+                if found_sid!=sid:
+                    different_session=found_sid
+                    scan_diagnosis='El QR pertenece a otra sesión de evaluación.'
+                    continue
+                if token not in by_token or page_num!='1':
+                    scan_diagnosis='QR con token o número de página ajeno a esta sesión.'
+                    continue
+                if not hmac.compare_digest(_qr_data(sid,token,1,s['clave_hmac']),qrtext):
+                    scan_diagnosis='Firma HMAC del QR no válida.'
+                    continue
                 best=(rectified,token)
                 break
             if best is None:
-                uid,st=store.register_page(sid,fingerprint,idx,original,None,[None]*len(s['preguntas']),
-                    [{'pregunta':None,'razon':'QR o marcas de alineación no reconocidos'}],'sin_identificar')
+                # Si hay marcas pero no QR, guardar la hoja RECTIFICADA para
+                # poder sobreponer el acetato digital y capturarla manualmente.
+                evidence=(cv2.cvtColor(fallback,cv2.COLOR_GRAY2BGR)
+                          if fallback is not None else original)
+                uid,st=store.register_page(
+                    sid,fingerprint,idx,evidence,None,
+                    [None]*len(s['preguntas']),
+                    [{'pregunta':None,'razon':scan_diagnosis}],
+                    'sin_identificar',
+                )
             else:
                 rectified,token=best
-                answers,issues,levels=_recognize(rectified,s['papel'],len(s['preguntas']))
+                answers,issues,levels=_recognize(
+                    rectified,s['papel'],len(s['preguntas']))
                 state='revisar' if issues else 'validada'
-                image_bgr=cv2.cvtColor(rectified,cv2.COLOR_GRAY2BGR)
-                uid,st=store.register_page(sid,fingerprint,idx,image_bgr,token,answers,issues,state)
+                uid,st=store.register_page(
+                    sid,fingerprint,idx,cv2.cvtColor(rectified,cv2.COLOR_GRAY2BGR),
+                    token,answers,issues,state)
             report['leidas']+=1
             key={'validada':'validadas','revisar':'revisar','sin_identificar':'sin_identificar',
                  'duplicado':'duplicadas','repetida':'repetidas'}.get(st,'revisar')
-            report[key]+=1
-            report['detalles'].append({'pagina':idx+1,'id':uid,'estado':st})
+            if st.startswith('reprocesada_'):
+                report['reprocesadas']+=1
+                restored=st.removeprefix('reprocesada_')
+                report[{'validada':'validadas','revisar':'revisar',
+                        'duplicado':'duplicadas'}[restored]]+=1
+            else:
+                report[key]+=1
+            report['detalles'].append({
+                'pagina':idx+1,'id':uid,'estado':st,
+                'diagnostico':scan_diagnosis if best is None else 'QR y alineación verificados',
+                'sesion_detectada':different_session if best is None else None,
+            })
     finally:doc.close()
     return report
 
