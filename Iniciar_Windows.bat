@@ -29,7 +29,8 @@ if not exist ".venv\Scripts\python.exe" (
         exit /b 1
     )
 )
-".venv\Scripts\python.exe" -c "import importlib.metadata as m; assert m.version('openpyxl') == '3.1.5'; assert m.version('reportlab') == '5.1.0'" >nul 2>&1
+REM Validar tambien PDFium para actualizar un .venv ya creado en versiones previas.
+".venv\Scripts\python.exe" -c "import importlib.metadata as m; assert m.version('openpyxl') == '3.1.5'; assert m.version('reportlab') == '5.1.0'; assert m.version('pypdfium2') == '5.15.1'" >nul 2>&1
 if errorlevel 1 (
     echo [2/3] Instalando las dependencias solo en este entorno...
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt
@@ -50,7 +51,7 @@ if not exist "ejemplos\Plantilla_20_preguntas.xlsx" (
 )
 if /I "%~1"=="--verificar" (
     echo [3/3] Verificando generacion de PDF sin abrir la ventana...
-    ".venv\Scripts\python.exe" generar.py --entrada "ejemplos\Plantilla_20_preguntas.xlsx" --salida "salidas" --titulo "Prueba de arranque en Windows"
+    ".venv\Scripts\python.exe" generar.py --entrada "ejemplos\Plantilla_20_preguntas.xlsx" --salida "salidas" --titulo "Prueba de arranque en Windows" --reutilizable --tamano-papel Carta
     if errorlevel 1 (
         echo No se pudo generar el examen de prueba.
         exit /b 1

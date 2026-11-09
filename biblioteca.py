@@ -18,10 +18,11 @@ import sqlite3
 
 from openpyxl import Workbook
 
-from src.evaluaciones.core import ExamError, Question, _safe_image, read_questions
+from src.evaluaciones.core import ExamError, Question, _safe_image, read_questions, paper_dimensions, validated_font_size
 
 DEFAULT_COLOR_TITLE = '#213A4C'
 DEFAULT_COLOR_SUBTITLE = '#5E7180'
+DEFAULT_COLOR_ANSWERS = '#213A4C'
 COLOR_RE = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 
@@ -32,6 +33,7 @@ def hex_color(value: str, label: str = 'Color') -> str:
 
 
 def db_connect(db_path: Path) -> sqlite3.Connection:
+    """Abre SQLite con claves foráneas y migra sin borrar registros existentes."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=10)
@@ -66,6 +68,17 @@ def db_connect(db_path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_cuestionarios_actualizado
             ON cuestionarios(actualizado_en DESC);
     ''')
+    # Migración aditiva: no borra bibliotecas existentes ni sus recursos.
+    existing={r['name'] for r in conn.execute('PRAGMA table_info(cuestionarios)')}
+    additions={
+        'tamano_papel': "TEXT NOT NULL DEFAULT 'A4'",
+        'letra': 'REAL NOT NULL DEFAULT 9.0',
+        'reutilizable': 'INTEGER NOT NULL DEFAULT 0',
+        'color_respuestas': "TEXT NOT NULL DEFAULT '#213A4C'",
+    }
+    for name,definition in additions.items():
+        if name not in existing:
+            conn.execute(f'ALTER TABLE cuestionarios ADD COLUMN {name} {definition}')
     return conn
 
 
@@ -83,6 +96,10 @@ class StoredExam:
     questions: tuple[Question, ...]
     logo: Path | None
     revision: int
+    tamano_papel: str = 'A4'
+    letra: float = 9.0
+    reutilizable: bool = False
+    color_respuestas: str = DEFAULT_COLOR_ANSWERS
 
 
 def _check_questions(questions: list[Question] | tuple[Question, ...]):
@@ -118,10 +135,18 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
               subtitulo: str, instrucciones: str, questions: list[Question] | tuple[Question,...],
               color_titulo: str = DEFAULT_COLOR_TITLE,
               color_subtitulo: str = DEFAULT_COLOR_SUBTITLE,
-              logo: Path | None = None, exam_id: str | None = None) -> str:
+              logo: Path | None = None, exam_id: str | None = None,
+              tamano_papel: str = 'A4', letra: float = 9.0,
+              reutilizable: bool = False,
+              color_respuestas: str = DEFAULT_COLOR_ANSWERS) -> str:
     """Guarda o actualiza por ID, conservando la misma identidad y aumentando revisión."""
     color_titulo, color_subtitulo = _metadata(nombre,titulo,empresa,grupo,subtitulo,
                                                 instrucciones,color_titulo,color_subtitulo)
+    paper_dimensions(tamano_papel)
+    letra=validated_font_size(letra)
+    if not isinstance(reutilizable,bool):
+        raise ExamError('La opción reutilizable debe ser verdadera o falsa.')
+    color_respuestas=hex_color(color_respuestas, 'Color de respuestas')
     questions=tuple(questions)
     _check_questions(questions)
     if exam_id is not None and not re.fullmatch(r'[0-9a-f]{32}',exam_id):
@@ -150,17 +175,20 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
         created=old['creado_en'] if old else now
         conn.execute('''INSERT INTO cuestionarios
           (id,nombre,empresa,grupo,titulo,subtitulo,instrucciones,color_titulo,color_subtitulo,
-           preguntas_json,logo_archivo,creado_en,actualizado_en,revision)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           preguntas_json,logo_archivo,creado_en,actualizado_en,revision,
+           tamano_papel,letra,reutilizable,color_respuestas)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET
           nombre=excluded.nombre,empresa=excluded.empresa,grupo=excluded.grupo,
           titulo=excluded.titulo,subtitulo=excluded.subtitulo,instrucciones=excluded.instrucciones,
           color_titulo=excluded.color_titulo,color_subtitulo=excluded.color_subtitulo,
           preguntas_json=excluded.preguntas_json,logo_archivo=excluded.logo_archivo,
-          actualizado_en=excluded.actualizado_en,revision=excluded.revision''',
+          actualizado_en=excluded.actualizado_en,revision=excluded.revision,
+          tamano_papel=excluded.tamano_papel,letra=excluded.letra,
+          reutilizable=excluded.reutilizable,color_respuestas=excluded.color_respuestas''',
             (exam_id,nombre.strip(),empresa.strip(),grupo.strip(),titulo.strip(),subtitulo.strip(),
              instrucciones.strip(),color_titulo,color_subtitulo,json.dumps(serial,ensure_ascii=False),
-             logo_name,created,now,version))
+             logo_name,created,now,version,tamano_papel,letra,int(reutilizable),color_respuestas))
         conn.execute('DELETE FROM recursos WHERE cuestionario_id=?',(exam_id,))
         conn.executemany('INSERT INTO recursos(cuestionario_id,nombre,contenido,sha256) VALUES (?,?,?,?)',
               [(exam_id,name,blob,sha256(blob).hexdigest()) for name,blob in resources.items()])
@@ -168,6 +196,7 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
 
 
 def list_exams(db_path: Path) -> list[dict]:
+    """Obtiene el índice de bancos de preguntas, sin cargar BLOB de imagen."""
     with db_connect(db_path) as conn:
         rows=conn.execute('''SELECT id,nombre,grupo,titulo,actualizado_en,revision,
                               json_array_length(preguntas_json) AS total
@@ -176,6 +205,7 @@ def list_exams(db_path: Path) -> list[dict]:
 
 
 def delete_exam(db_path: Path, exam_id: str):
+    """Elimina un cuestionario identificado, respetando cascada de recursos."""
     with db_connect(db_path) as conn:
         conn.execute('DELETE FROM cuestionarios WHERE id=?',(exam_id,))
 
@@ -216,7 +246,9 @@ def load_exam(db_path: Path, exam_id: str, workdir: Path) -> StoredExam:
     return StoredExam(id=row['id'],nombre=row['nombre'],empresa=row['empresa'],grupo=row['grupo'],
        titulo=row['titulo'],subtitulo=row['subtitulo'],instrucciones=row['instrucciones'],
        color_titulo=row['color_titulo'],color_subtitulo=row['color_subtitulo'],
-       questions=tuple(questions),logo=logo,revision=row['revision'])
+       questions=tuple(questions),logo=logo,revision=row['revision'],
+       tamano_papel=row['tamano_papel'],letra=row['letra'],
+       reutilizable=bool(row['reutilizable']),color_respuestas=row['color_respuestas'])
 
 
 def export_workbook(questions: list[Question] | tuple[Question,...], target: Path) -> Path:

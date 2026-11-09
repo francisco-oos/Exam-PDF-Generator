@@ -25,7 +25,7 @@ from openpyxl import load_workbook
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, KeepTogether, PageBreak, Image as PdfImage, Table, TableStyle
@@ -45,6 +45,27 @@ PAGE_W, PAGE_H = A4
 TINT = colors.HexColor('#213a4c')
 MUTED = colors.HexColor('#5e7180')
 RADIUS = 8.6
+# Oficio mexicano: 8.5 x 13 pulgadas. No confundir con Legal (8.5 x 14).
+PAPER_SIZES = {'A4': A4, 'Carta': letter, 'Oficio': (612.0, 936.0)}
+DEFAULT_ANSWER_COLOR = '#213A4C'
+
+
+def paper_dimensions(name: str) -> tuple[float, float]:
+    """Única autoridad de medidas: cuadernillo, hoja, acetato y vista previa."""
+    if name not in PAPER_SIZES:
+        raise ExamError('Tamaño de página inválido; utiliza Carta, A4 u Oficio.')
+    return PAPER_SIZES[name]
+
+
+def validated_font_size(value: float) -> float:
+    """Mantiene las opciones legibles; medias unidades para controlar paginación."""
+    try:
+        size = float(value)
+    except (ValueError, TypeError) as exc:
+        raise ExamError('Tamaño de letra inválido.') from exc
+    if not math.isfinite(size) or not (8.0 <= size <= 12.0) or size * 2 % 1:
+        raise ExamError('Tamaño de letra: 8 a 12 puntos, en intervalos de 0.5.')
+    return size
 
 
 class ExamError(ValueError):
@@ -61,6 +82,7 @@ class Question:
 
 
 def _font():
+    """Busca fuentes legibles locales; no descarga fuentes ni expone archivos externos."""
     regular = None
     bold = None
     candidates = [
@@ -99,6 +121,7 @@ def _text(value: object, *, label: str, limit: int) -> str:
 
 
 def _inspect_archive(path: Path) -> None:
+    """Rechaza ZIP XLSX peligrosos, vínculos externos y datos descomprimidos excesivos."""
     try:
         with ZipFile(path, 'r') as archive:
             files = archive.infolist()
@@ -168,6 +191,7 @@ def _pdf_image(path: Path, max_width: float, max_height: float) -> PdfImage:
 
 
 def read_questions(path: Path) -> list[Question]:
+    """Solo lee Preguntas: nunca interpreta fórmulas como respuestas correctas."""
     path = Path(path).expanduser()
     if path.is_symlink():
         raise ExamError('No se permite una plantilla que sea un enlace simbólico.')
@@ -231,97 +255,124 @@ def read_questions(path: Path) -> list[Question]:
 
 
 def _slug(text: str) -> str:
+    """Construye nombres de carpeta conservadores para el sistema de archivos."""
     value = unicodedata.normalize('NFKD', text)
     value = ''.join(c for c in value if not unicodedata.combining(c))
     value = re.sub(r'[^A-Za-z0-9_-]+','-',value).strip('-').lower()
     return value[:36] or 'examen'
 
 
-def _canvas_header(c: Canvas, title: str, subtitle: str, label: str, normal: str, bold: str, *, title_color=TINT, subtitle_color=MUTED):
-    c.setFillColor(TINT)
-    c.setFont(bold,13)
-    c.drawCentredString(PAGE_W/2,PAGE_H-74,label)
-    c.setFont(normal,9)
+def _canvas_header(c: Canvas, title: str, subtitle: str, label: str,
+                   normal: str, bold: str, *, size=A4, ink=TINT,
+                   title_color=TINT, subtitle_color=MUTED):
+    """Encabezado sin datos personales; solo la hoja recibe campos personales."""
+    w, h = size
+    c.setFillColor(ink)
+    c.setFont(bold, 13)
+    c.drawCentredString(w / 2, h - 74, label)
+    c.setFont(normal, 9)
     c.setFillColor(title_color)
-    c.drawCentredString(PAGE_W/2,PAGE_H-93,title[:66])
+    c.drawCentredString(w / 2, h - 93, title[:66])
     c.setFillColor(subtitle_color)
-    c.drawCentredString(PAGE_W/2,PAGE_H-108,subtitle[:74])
+    c.drawCentredString(w / 2, h - 108, subtitle[:74])
 
 
-def _alignment(c: Canvas):
+def _alignment(c: Canvas, *, size=A4, ink=TINT):
+    """Mismas marcas impresas en papel y acetato: alineación física al 100 %."""
+    w, h = size
     c.setLineWidth(.75)
-    c.setStrokeColor(TINT)
-    for x,y in ((37,PAGE_H-38),(PAGE_W-37,PAGE_H-38),(37,37),(PAGE_W-37,37)):
+    c.setStrokeColor(ink)
+    for x,y in ((37,h-38),(w-37,h-38),(37,37),(w-37,37)):
         c.line(x-6,y,x+6,y)
         c.line(x,y-6,x,y+6)
 
 
-def _bubbles(questions: list[Question]):
-    """Yield (page index, question number, [(x,y),...]) for BOTH sheets."""
+def _bubbles(questions: list[Question], page_size=A4):
+    """Genera las coordenadas compartidas sin depender del tipo de impresora."""
+    w, h = page_size
     rows = 10 if len(questions) <= 20 else 20
-    per_page = 2*rows
-    row_height = 36 if rows==10 else 23
-    for index, q in enumerate(questions):
+    per_page = 2 * rows
+    # Garantiza margen inferior incluso en Carta con 20 filas por columna.
+    row_height = min(36 if rows == 10 else 26, (h-235-115)/(rows-1))
+    for index, _q in enumerate(questions):
         offset = index % per_page
-        col, row = divmod(offset,rows)
-        start = 53 if col==0 else 312
-        y = PAGE_H-235-row*row_height
-        yield index//per_page, index+1, [(start+69+j*29,y) for j in range(4)]
+        col, row = divmod(offset, rows)
+        first = (53 if col == 0 else 312) + (w - A4[0]) / 2
+        y = h - 235 - row * row_height
+        yield index // per_page, index + 1, [(first + 69 + j * 29, y) for j in range(4)]
 
 
-def _answer_sheet(path: Path, questions: list[Question], title: str, subtitle: str, *, acetate: bool, normal: str, bold: str, title_color=TINT, subtitle_color=MUTED):
-    c = Canvas(str(path), pagesize=A4,pageCompression=1)
+def _answer_sheet(path: Path | BytesIO, questions: list[Question], title: str, subtitle: str,
+                  *, acetate: bool, normal: str, bold: str,
+                  title_color=TINT, subtitle_color=MUTED,
+                  size=A4, answer_color=TINT):
+    """Hoja y acetato comparten tamaño, numeración y posición de círculos."""
+    w, h = size
+    c = Canvas(path if isinstance(path, BytesIO) else str(path), pagesize=size,pageCompression=1)
     c.setTitle('Acetato de clave' if acetate else 'Hoja de respuestas')
-    slots = list(_bubbles(questions))
-    pages = math.ceil(len(questions)/(20 if len(questions)<=20 else 40))
+    slots = list(_bubbles(questions, size))
+    pages = 1 + max((p for p, _, _ in slots), default=0)
     for page in range(pages):
         if not acetate:
-            _canvas_header(c,title,subtitle,'HOJA DE RESPUESTAS',normal,bold,title_color=title_color,subtitle_color=subtitle_color)
-            c.setFont(normal,9.3);c.drawString(49,PAGE_H-142,'Nombre: ___________________________________________')
-            c.drawString(49,PAGE_H-162,'Fecha: _______________    Grupo / área: _______________')
-            c.setFont(normal,8);c.setFillColor(MUTED)
-            c.drawString(50,PAGE_H-192,'Marca una sola respuesta (A, B, C o D) en cada pregunta.')
+            _canvas_header(c,title,subtitle,'HOJA DE RESPUESTAS',normal,bold,
+                           size=size,ink=answer_color,title_color=title_color,subtitle_color=subtitle_color)
+            c.setFillColor(answer_color)
+            c.setFont(normal,9.3)
+            c.drawString(49,h-142,'Nombre: ___________________________________________')
+            c.drawString(49,h-162,'Fecha: _______________    Grupo / área: _______________')
+            c.setFont(normal,8)
+            c.drawString(50,h-192,'Marca una sola respuesta (A, B, C o D) en cada pregunta.')
         for current, number, coords in slots:
-            if current!=page:continue
-            y=coords[0][1]
+            if current != page:
+                continue
+            y = coords[0][1]
             if not acetate:
-                c.setFillColor(TINT);c.setFont(bold,9);c.drawRightString(coords[0][0]-22,y-3,str(number)+'.')
+                c.setFillColor(answer_color)
+                c.setFont(bold,9)
+                c.drawRightString(coords[0][0]-22,y-3,str(number)+'.')
                 for k,(x,yy) in enumerate(coords):
-                    c.setStrokeColor(TINT);c.setLineWidth(1.1)
+                    c.setStrokeColor(answer_color)
+                    c.setLineWidth(1.1)
                     c.circle(x,yy,RADIUS,stroke=1,fill=0)
-                    c.setFont(normal,7.4);c.drawCentredString(x,yy-RADIUS-12,'ABCD'[k])
+                    c.setFont(normal,7.4)
+                    c.drawCentredString(x,yy-RADIUS-12,'ABCD'[k])
             else:
-                k=questions[number-1].correct;x,yy=coords[k]
-                # Relleno semitransparente sobre el acetato: ayuda a contar,
-                # pero permite ver la marca del participante debajo.
+                k=questions[number-1].correct
+                x,yy=coords[k]
+                # Respuesta coloreada, pero translúcida: se sigue viendo la marca.
                 c.saveState()
-                c.setStrokeColor(colors.HexColor('#167341'));c.setLineWidth(2.2)
+                c.setStrokeColor(colors.HexColor('#167341'))
+                c.setLineWidth(2.2)
                 c.setFillColor(colors.HexColor('#53BD8C'))
-                c.setFillAlpha(0.26)
+                c.setFillAlpha(.26)
                 c.circle(x,yy,RADIUS+4.0,stroke=1,fill=1)
                 c.restoreState()
-        _alignment(c)
+        _alignment(c,size=size,ink=TINT if acetate else answer_color)
         c.setFont(normal,7.2)
-        c.setFillColor(MUTED if not acetate else TINT)
-        c.drawCentredString(PAGE_W/2,22,
-           ('CLAVE PARA ACETATO - SUPERPONER AL 100 % / SIN AJUSTAR' if acetate
-            else 'Imprimir al 100 % / sin ajustar al papel')+f'  ·  Página {page+1}/{pages}')
+        c.setFillColor(TINT if acetate else answer_color)
+        c.drawCentredString(w/2,22,
+            ('CLAVE PARA ACETATO - SUPERPONER AL 100 % / SIN AJUSTAR' if acetate
+             else 'Imprimir al 100 % / sin ajustar al papel')+f'  ·  Página {page+1}/{pages}')
         c.showPage()
     c.save()
+
 
 
 def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
               normal: str,bold: str, *, empresa: str = '', puesto: str = '',
               instrucciones: str = '', logo: Path | None = None,
-              color_titulo=TINT, color_subtitulo=MUTED):
-    paper_width = PAGE_W - 94
+              color_titulo=TINT, color_subtitulo=MUTED,
+              size=A4, font_size: float = 9.0, reusable: bool = False):
+    # KeepTogether mantiene juntas las opciones; ReportLab pagina automáticamente.
+    page_w, page_h = size
+    paper_width = page_w - 94
     styles = {
         'eyebrow':ParagraphStyle('Eyebrow',fontName=bold,fontSize=8.7,leading=12,textColor=TINT,spaceAfter=5),
         'title':ParagraphStyle('ExTitle',fontName=bold,fontSize=17,leading=22,spaceAfter=4,textColor=color_titulo),
         'subtitle':ParagraphStyle('ExSub',fontName=normal,fontSize=10,leading=14,spaceAfter=7,textColor=color_subtitulo),
-        'section':ParagraphStyle('ExSect',fontName=bold,fontSize=10,leading=14,spaceBefore=14,spaceAfter=6,textColor=TINT,keepWithNext=True),
-        'question':ParagraphStyle('ExQuestion',fontName=bold,fontSize=10,leading=14,spaceBefore=8,spaceAfter=5,textColor=TINT),
-        'answer':ParagraphStyle('ExAnswer',fontName=normal,fontSize=9.2,leading=13,leftIndent=17,spaceAfter=3),
+        'section':ParagraphStyle('ExSect',fontName=bold,fontSize=font_size+1,leading=font_size+5,spaceBefore=14,spaceAfter=6,textColor=TINT,keepWithNext=True),
+        'question':ParagraphStyle('ExQuestion',fontName=bold,fontSize=font_size+.8,leading=font_size+4.8,spaceBefore=8,spaceAfter=5,textColor=TINT),
+        'answer':ParagraphStyle('ExAnswer',fontName=normal,fontSize=font_size,leading=font_size+3.8,leftIndent=17,spaceAfter=3),
         'small':ParagraphStyle('ExSmall',fontName=normal,fontSize=8.5,leading=12,spaceAfter=6,textColor=MUTED),
         'instructions':ParagraphStyle('Instr',fontName=normal,fontSize=9,leading=13,spaceAfter=7,textColor=TINT),
     }
@@ -344,9 +395,11 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
         ('LEFTPADDING',(0,0),(-1,-1),0),
         ('RIGHTPADDING',(0,0),(-1,-1),6),
     ]))
-    story=[header_table,Spacer(1,13),
-           Paragraph('Nombre: _________________________________________   Fecha: __________________',styles['small']),
-           Paragraph('Número / folio: __________________________   Grupo / turno: __________________',styles['small'])]
+    # La modalidad ecológica no imprime identidad en el cuadernillo.
+    story=[header_table,Spacer(1,13)]
+    if not reusable:
+        story.extend([Paragraph('Nombre: _________________________________________   Fecha: __________________',styles['small']),
+                      Paragraph('Número / folio: __________________________   Grupo / turno: __________________',styles['small'])])
     if not instrucciones:
         instrucciones='Lee cada reactivo. Marca UNA respuesta en la hoja separada. No escribas tus respuestas en el cuadernillo.'
     # Sin interpretación HTML del usuario; se aceptan instrucciones en texto plano.
@@ -367,18 +420,29 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
         story.append(KeepTogether(block))
     def footer(c: Canvas, doc):
         c.saveState()
+        if reusable:
+            # Canvas de plantilla: se dibuja antes del contenido (marca de agua debajo).
+            c.saveState()
+            c.translate(page_w/2,page_h/2)
+            c.rotate(34)
+            c.setFillColor(colors.HexColor('#6B7780'))
+            c.setFillAlpha(.13)
+            c.setFont(bold, min(43,page_w/12.8))
+            c.drawCentredString(0,0,'NO RAYAR NI MANCHAR')
+            c.restoreState()
         c.setStrokeColor(colors.HexColor('#CEDDE4'));c.setLineWidth(.65)
-        c.line(47,42,PAGE_W-47,42)
+        c.line(47,42,page_w-47,42)
         c.setFillColor(MUTED);c.setFont(normal,7)
         c.drawString(47,29,(empresa[:55] if empresa else 'Evaluación de conocimientos'))
-        c.drawRightString(PAGE_W-47,29,f'Cuadernillo · Página {doc.page} · Responder en hoja aparte')
+        c.drawRightString(page_w-47,29,f'Cuadernillo · Página {doc.page} · Responder en hoja aparte')
         c.restoreState()
-    SimpleDocTemplate(str(path),pagesize=A4,leftMargin=47,rightMargin=47,topMargin=42,bottomMargin=56,
+    SimpleDocTemplate(path if isinstance(path, BytesIO) else str(path),pagesize=size,leftMargin=47,rightMargin=47,topMargin=42,bottomMargin=56,
                       title=title,author=(empresa or 'Generador local de exámenes')).build(
                       story,onFirstPage=footer,onLaterPages=footer)
 
 
-def _key_pdf(path:Path,questions:list[Question],title:str,normal:str,bold:str, *, empresa:str='',puesto:str=''):
+def _key_pdf(path:Path,questions:list[Question],title:str,normal:str,bold:str, *, empresa:str='',puesto:str='',size=A4):
+    # Clave exclusiva del evaluador. Mantener fuera del paquete del alumno.
     styles={
         't':ParagraphStyle('KeyT',fontName=bold,fontSize=14,leading=18,spaceAfter=12),
         'k':ParagraphStyle('KeyQ',fontName=normal,fontSize=9.4,leading=15,spaceAfter=5),
@@ -391,16 +455,25 @@ def _key_pdf(path:Path,questions:list[Question],title:str,normal:str,bold:str, *
         letter='ABCD'[q.correct]
         story.append(Paragraph(f'<b>{i:02d}. {letter}</b> — {escape(q.prompt)}',styles['k']))
         story.append(Paragraph('Correcta: '+escape(q.options[q.correct]),styles['c']))
-    SimpleDocTemplate(str(path),pagesize=A4,leftMargin=52,rightMargin=52,topMargin=45,bottomMargin=45).build(story)
+    SimpleDocTemplate(str(path),pagesize=size,leftMargin=52,rightMargin=52,topMargin=45,bottomMargin=45).build(story)
 
 
 def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
              *, empresa: str = '', puesto: str = '', instrucciones: str = '',
              logo: Path | None = None,
-             color_titulo: str = '#213A4C', color_subtitulo: str = '#5E7180') -> Path:
+             color_titulo: str = '#213A4C', color_subtitulo: str = '#5E7180',
+             color_respuestas: str = DEFAULT_ANSWER_COLOR,
+             tamano_papel: str = 'A4', letra: float = 9.0,
+             reutilizable: bool = False) -> Path:
+    # Validar ANTES de crear archivos evita carpetas incompletas y tintas inválidas.
     from biblioteca import hex_color
     color_titulo=hex_color(color_titulo,'Color del título')
     color_subtitulo=hex_color(color_subtitulo,'Color del subtítulo')
+    color_respuestas=hex_color(color_respuestas,'Color de la hoja de respuestas')
+    size=paper_dimensions(tamano_papel)
+    letra=validated_font_size(letra)
+    if not isinstance(reutilizable,bool):
+        raise ExamError('Modalidad reutilizable inválida.')
     titulo=_text(titulo,label='Título',limit=90)
     subtitulo=_text(subtitulo,label='Subtítulo',limit=90)
     empresa=_text(empresa,label='Empresa',limit=100) if empresa.strip() else ''
@@ -412,6 +485,7 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
     normal,bold=_font()
     rgb_titulo=colors.HexColor(color_titulo)
     rgb_subtitulo=colors.HexColor(color_subtitulo)
+    rgb_respuestas=colors.HexColor(color_respuestas)
     root=Path(salida).expanduser().resolve()
     root.mkdir(parents=True,exist_ok=True)
     if not root.is_dir():
@@ -424,10 +498,11 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
         files={
            'Cuadernillo.pdf':lambda p:_exam_pdf(p,questions,titulo,subtitulo,normal,bold,
                     empresa=empresa,puesto=puesto,instrucciones=instrucciones,logo=safe_logo,
-                    color_titulo=rgb_titulo,color_subtitulo=rgb_subtitulo),
-           'Hoja_respuestas.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=False,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo),
-           'Acetato_clave.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=True,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo),
-           'Clave_docente.pdf':lambda p:_key_pdf(p,questions,titulo,normal,bold,empresa=empresa,puesto=puesto),
+                    color_titulo=rgb_titulo,color_subtitulo=rgb_subtitulo,
+                    size=size,font_size=letra,reusable=reutilizable),
+           'Hoja_respuestas.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=False,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas),
+           'Acetato_clave.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=True,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas),
+           'Clave_docente.pdf':lambda p:_key_pdf(p,questions,titulo,normal,bold,empresa=empresa,puesto=puesto,size=size),
         }
         for name,action in files.items():
             action(folder/name)
@@ -444,8 +519,10 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
         manifest={'titulo':titulo,'subtitulo':subtitulo,'empresa':empresa,'puesto':puesto,'grupo':puesto,
                   'instrucciones':instrucciones,'preguntas':len(questions),
                   'color_titulo':color_titulo,'color_subtitulo':color_subtitulo,
+                  'color_respuestas':color_respuestas,'tamano_papel':tamano_papel,
+                  'letra':letra,'reutilizable':reutilizable,
                   'fecha_generacion':datetime.now().astimezone().isoformat(),
-                  'formato':'A4; clave y hoja comparten coordenadas; impresión al 100%',
+                  'formato':f'{tamano_papel}; clave y hoja comparten coordenadas; impresión al 100%',
                   'archivo_origen':str(entrada.name),'archivos_sha256':hashes}
         (folder/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
     except Exception:

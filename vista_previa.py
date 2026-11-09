@@ -12,7 +12,7 @@ from pathlib import Path
 import os
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-from src.evaluaciones.core import Question, _bubbles, _safe_image, PAGE_W, PAGE_H, RADIUS
+from src.evaluaciones.core import Question, _bubbles, _safe_image, PAPER_SIZES, PAGE_W, PAGE_H, RADIUS
 
 INK = '#213a4c'
 DARK = '#132d41'
@@ -34,6 +34,10 @@ class PreviewData:
     logo: Path | None = None
     color_titulo: str = '#213A4C'
     color_subtitulo: str = '#5E7180'
+    color_respuestas: str = '#213A4C'
+    tamano_papel: str = 'A4'
+    letra: float = 9.0
+    reutilizable: bool = False
 
 
 def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -126,9 +130,14 @@ def _cover_page(d: PreviewData) -> Image.Image:
     dr.line((52,header_bottom,542,header_bottom),fill=TEAL,width=3)
 
     y=header_bottom+23
-    dr.text((52,y),'Nombre: ______________________________________',font=_font(11),fill=INK)
-    dr.text((52,y+26),'Fecha: ____________     Folio: __________________',font=_font(11),fill=INK)
-    y+=70
+    if not d.reutilizable:
+        dr.text((52,y),'Nombre: ______________________________________',font=_font(11),fill=INK)
+        dr.text((52,y+26),'Fecha: ____________     Folio: __________________',font=_font(11),fill=INK)
+        y+=70
+    else:
+        # Marca discreta y fuera del texto principal. La vista exacta renderiza el PDF.
+        dr.text((68,805),'NO RAYAR NI MANCHAR · CUADERNILLO REUTILIZABLE',
+                font=_font(8,bold=True),fill='#9AA6AE')
     dr.text((52,y),'INSTRUCCIONES',font=_font(12,bold=True),fill=TEAL)
     y=_write(dr,(52,y+23), d.instrucciones or 'Lee cada pregunta y marca una opción en la hoja separada.',
              _font(11),INK,490,4,6)
@@ -170,20 +179,20 @@ def _sheet_page(d: PreviewData, *, acetate: bool) -> Image.Image:
     im=Image.new('RGB',SIZE,'white')
     dr=ImageDraw.Draw(im)
     if not acetate:
-        dr.text((210,61),'HOJA DE RESPUESTAS',font=_font(14,bold=True),fill=INK)
+        dr.text((210,61),'HOJA DE RESPUESTAS',font=_font(14,bold=True),fill=d.color_respuestas)
         _write(dr,(145,85),d.titulo,_font(11),d.color_titulo,340,1)
         _write(dr,(145,101),d.subtitulo,_font(10),d.color_subtitulo,340,1)
-        dr.text((49,141),'Nombre: ___________________________________________',font=_font(10),fill=INK)
-        dr.text((49,161),'Fecha: _______________   Grupo / área: _______________',font=_font(10),fill=INK)
-        dr.text((50,192),'Marca una sola respuesta (A, B, C o D) por pregunta.',font=_font(9),fill=MUTED)
+        dr.text((49,141),'Nombre: ___________________________________________',font=_font(10),fill=d.color_respuestas)
+        dr.text((49,161),'Fecha: _______________   Grupo / área: _______________',font=_font(10),fill=d.color_respuestas)
+        dr.text((50,192),'Marca una sola respuesta (A, B, C o D) por pregunta.',font=_font(9),fill=d.color_respuestas)
     for page,no,pts in _bubbles(list(d.questions)):
         if page!=0:continue
         if not acetate:
             dr.text((pts[0][0]-38,int(PAGE_H-pts[0][1]-7)),f'{no}.',font=_font(10,bold=True),fill=INK)
             for letter,(x,y) in zip('ABCD',pts):
                 dr.ellipse((int(x-RADIUS),int(PAGE_H-y-RADIUS),int(x+RADIUS),int(PAGE_H-y+RADIUS)),
-                           outline=INK,width=2)
-                dr.text((x-4,int(PAGE_H-y+RADIUS+5)),letter,font=_font(8),fill=INK)
+                           outline=d.color_respuestas,width=2)
+                dr.text((x-4,int(PAGE_H-y+RADIUS+5)),letter,font=_font(8),fill=d.color_respuestas)
         else:
             correct=d.questions[no-1].correct
             x,y=pts[correct]

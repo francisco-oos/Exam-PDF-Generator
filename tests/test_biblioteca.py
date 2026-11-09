@@ -73,7 +73,7 @@ def test_template_is_blank_and_has_guide():
     s=w['Preguntas']
     assert [s.cell(1,col).value for col in range(1,9)]==['Tema','Pregunta','A','B','C','D','Correcta','Imagen']
     assert s['B2'].value is None
-    assert w['Ejemplo']['G2'].value=='B'
+    assert w['Ejemplo']['G2'].value=='C'
 
 
 def test_transparent_filled_acetate_and_colors(tmp_path):

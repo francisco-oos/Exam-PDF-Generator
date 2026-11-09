@@ -123,6 +123,14 @@ def _form() -> bytes:
       <div><label>Color del título (RGB)</label><input type="color" name="color_titulo" value="#213A4C"></div>
       <div><label>Color del subtítulo (RGB)</label><input type="color" name="color_subtitulo" value="#5E7180"></div>
     </div>
+    <div class="grid">
+      <div><label>Papel</label><select name="tamano_papel"><option>A4</option><option>Carta</option><option>Oficio</option></select></div>
+      <div><label>Letra de preguntas y opciones</label><select name="letra">{''.join(f'<option value="{i/2:.1f}"'+(' selected' if i==18 else '')+f'>{i/2:.1f} pt</option>' for i in range(16,25))}</select></div>
+    </div>
+    <label><input style="display:inline;width:auto" type="checkbox" name="reutilizable" value="1" checked>
+      Cuadernillo reutilizable · Sin datos personales y con marca de agua NO RAYAR NI MANCHAR</label>
+    <label>Color de la hoja de respuestas (tintas y círculos)</label>
+    <input type="color" name="color_respuestas" value="#213A4C">
     <label>Excel de preguntas</label><select name="archivo">{_options(files)}</select>
     <p class="hint"><a href="/plantilla">Descargar plantilla XLSX con guía y ejemplos</a></p>
     <label>Logotipo (opcional)</label><select name="logo">{_options(logos)}</select>
@@ -227,7 +235,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             fields = parse_qs(self.rfile.read(length).decode('utf-8'), keep_blank_values=True,
-                              strict_parsing=True, max_num_fields=14)
+                              strict_parsing=True, max_num_fields=21)
             def field(name):
                 vals = fields.get(name, [''])
                 if len(vals) != 1:
@@ -250,12 +258,18 @@ class Handler(BaseHTTPRequestHandler):
             titulo, subtitulo = field('titulo'), field('subtitulo')
             empresa, puesto, instrucciones = field('empresa'), field('puesto'), field('instrucciones')
             color_titulo, color_subtitulo = field('color_titulo') or '#213A4C',field('color_subtitulo') or '#5E7180'
+            color_respuestas = field('color_respuestas') or '#213A4C'
+            tamano_papel=field('tamano_papel') or 'A4'
+            letra=field('letra') or '9.0'
+            reutilizable=field('reutilizable') == '1' 
             if max(map(len, (titulo, subtitulo, empresa, puesto, instrucciones))) > 650:
                 raise ValueError('Texto demasiado largo.')
             OUTPUTS.mkdir(parents=True, exist_ok=True)
             folder = generate(exam, OUTPUTS, titulo, subtitulo, empresa=empresa,
                               puesto=puesto, instrucciones=instrucciones, logo=logo,
-                              color_titulo=color_titulo,color_subtitulo=color_subtitulo)
+                              color_titulo=color_titulo,color_subtitulo=color_subtitulo,
+                              tamano_papel=tamano_papel,letra=letra,
+                              reutilizable=reutilizable,color_respuestas=color_respuestas)
             self._respond(HTTPStatus.OK, _result(folder))
         except (ExamError, OSError, ValueError, UnicodeError) as exc:
             msg = escape(str(exc))
