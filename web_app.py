@@ -285,7 +285,7 @@ def main():
         raise SystemExit('Puerto inválido')
     INPUTS.mkdir(parents=True, exist_ok=True)
     OUTPUTS.mkdir(parents=True, exist_ok=True)
-    server = ThreadingHTTPServer(('0.0.0.0', PORT), Handler)
+    server = ThreadingHTTPServer((os.environ.get('EXAM_BIND', '127.0.0.1'), PORT), Handler)
     print(f'Generador local listo: http://localhost:{PORT}', flush=True)
     try:
         server.serve_forever()

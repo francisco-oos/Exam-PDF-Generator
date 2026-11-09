@@ -12,7 +12,7 @@ from tkinter import ttk, colorchooser
 from PIL import ImageTk
 
 from biblioteca import hex_color
-from preview_pdf import render_document_preview
+from preview_worker import PreviewWorker
 
 NAVY = '#142e40'
 DARK = '#213d50'
@@ -23,7 +23,8 @@ LABEL = '#607487'
 
 
 def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
-                       editar_preguntas=None, guardar=None, generar=None):
+                       editar_preguntas=None, guardar=None, generar=None,
+                       importar=None, biblioteca=None, plantilla=None, estado=None):
     """Crea el diseñador de dos paneles y devuelve la ventana (útil para pruebas).
 
     ``variables`` contiene StringVar/BooleanVar ya utilizadas por la ventana
@@ -32,8 +33,8 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     """
     window = tk.Toplevel(parent)
     window.title('Editar diseño · Documento PDF real')
-    window.geometry('1460x900')
-    window.minsize(1030, 650)
+    window.geometry(f'{min(1400, parent.winfo_screenwidth()-60)}x{min(860, parent.winfo_screenheight()-90)}')
+    window.minsize(820, 560)
     window.configure(bg=BG)
 
     # Estado de vista: la página es 1-based en la interfaz y 0-based en PDFium.
@@ -46,6 +47,10 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     scheduled = [None]
     traces = []
     closed = [False]
+    worker = PreviewWorker()
+    revision = [0]
+    pending = [None]
+    polling = [None]
 
     header = tk.Frame(window, bg=NAVY, padx=19, pady=12)
     header.pack(fill='x')
@@ -60,7 +65,7 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     settings = tk.Frame(container, bg=WHITE, width=352)
     result = tk.Frame(container, bg=BG)
     container.add(settings, minsize=292, width=354)
-    container.add(result, minsize=550, stretch='always')
+    container.add(result, minsize=420, stretch='always')
 
     settings_canvas = tk.Canvas(settings, bg=WHITE, highlightthickness=0, bd=0)
     settings_bar = ttk.Scrollbar(settings, orient='vertical', command=settings_canvas.yview)
@@ -86,11 +91,19 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
                  font=('Segoe UI', 9)).grid(sticky='w', columnspan=2, pady=(4, 2))
         ttk.Entry(settings_inner, textvariable=var).grid(sticky='ew', columnspan=2, pady=(0, 6))
 
+    for title, action in [('Importar XLSX', importar), ('Abrir biblioteca y papelera', biblioteca), ('Descargar plantilla', plantilla)]:
+        if action:
+            ttk.Button(settings_inner, text=title, command=action).grid(sticky='ew', columnspan=2, pady=3)
+
     section('01 · Texto de portada', 'Cambia el título y observa el encabezado del cuadernillo.')
     field('Título de la evaluación', variables['titulo'])
     field('Subtítulo', variables['subtitulo'])
     field('Empresa / institución', variables['empresa'])
     field('Área o público', variables['grupo'])
+    if 'instrucciones' in variables:
+        field('Instrucciones del participante', variables['instrucciones'])
+    if 'logotipo' in variables:
+        field('Ruta del logotipo (PNG/JPG)', variables['logotipo'])
 
     section('02 · Página y tipografía', 'Ajusta la composición; no modifica las preguntas originales.')
     tk.Label(settings_inner, text='Formato de papel', bg=WHITE, fg=NAVY).grid(sticky='w', columnspan=2)
@@ -129,6 +142,7 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     color_input('Título', 'color_titulo')
     color_input('Subtítulo', 'color_subtitulo')
     color_input('Hoja de respuestas', 'color_respuestas')
+    color_input('Acetato', 'color_acetato')
 
     section('04 · Preguntas y biblioteca', 'Se edita la fuente del examen; el PDF se regenera al cambiarla.')
     tk.Button(settings_inner, text='Editar preguntas y opciones', command=editar_preguntas,
@@ -169,48 +183,71 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
         page.set(max(1, min(full_pages[0], page.get() + delta)))
         queue_render()
 
-    def refresh():
-        scheduled[0]=None
-        if closed[0] or not window.winfo_exists():return
+    def receive():
+        """Publica solo la última revisión; todas las llamadas Tk ocurren aquí."""
+        polling[0] = None
+        if closed[0]:
+            return
         try:
-            data=datos_fn()
-            if zoom.get() == 'Ajustar':
-                # La página cabe a lo ancho si el espacio disponible lo permite.
-                width=max(360, min(1500, canvas.winfo_width()-52))
-            else:
-                from src.evaluaciones.core import paper_dimensions
-                paper_width=paper_dimensions(data.tamano_papel)[0]
-                width=max(340, min(2200, int(paper_width*float(zoom.get().rstrip('%'))/72*96)))
-            image,pages=render_document_preview(data, selected.get(), max(0, page.get()-1), width)
-            if page.get() > pages:
-                page.set(pages)
-                image,pages=render_document_preview(data, selected.get(), pages-1, width)
-            full_pages[0]=pages
-            pic=ImageTk.PhotoImage(image, master=window)
-            preview_photo[0]=pic
-            canvas.delete('all')
-            x=max(14, (canvas.winfo_width()-image.width)//2)
-            canvas.create_image(x, 14, anchor='nw', image=pic)
-            canvas.configure(scrollregion=(0,0,max(canvas.winfo_width(),x+image.width+15),image.height+30))
-            progress.set(f'Página {page.get()} / {pages} · {data.tamano_papel}')
-            for key, swatch in swatches.items():
-                try:swatch.configure(bg=hex_color(variables[key].get()))
-                except ValueError:swatch.configure(bg='#d3e4eb')
+            result = worker.poll()
+            if result is not None:
+                token, image, pages, error = result
+                if token == revision[0]:
+                    if error:
+                        progress.set('Vista no disponible: ' + error[:95])
+                    else:
+                        full_pages[0] = pages
+                        page.set(min(page.get(), pages))
+                        pic = ImageTk.PhotoImage(image, master=window)
+                        preview_photo[0] = pic
+                        canvas.delete('all')
+                        x = max(14, (canvas.winfo_width()-image.width)//2)
+                        canvas.create_image(x, 14, anchor='nw', image=pic)
+                        canvas.configure(scrollregion=(0, 0, max(canvas.winfo_width(), x+image.width+15), image.height+30))
+                        progress.set(f'Página {page.get()} / {pages}')
+            if pending[0] is not None and not worker.busy:
+                request = pending[0]
+                pending[0] = None
+                worker.submit(*request)
         except Exception as exc:
-            progress.set('Vista no disponible: '+str(exc)[:95])
+            progress.set('Vista no disponible: ' + str(exc)[:95])
+        polling[0] = window.after(50, receive)
+
+    def refresh():
+        scheduled[0] = None
+        if closed[0]:
+            return
+        try:
+            data = datos_fn()
+            from src.evaluaciones.core import paper_dimensions
+            paper_width, paper_height = paper_dimensions(data.tamano_papel)
+            for key, swatch in swatches.items():
+                swatch.configure(bg=hex_color(variables[key].get()))
+            if zoom.get() == 'Ajustar':
+                width = max(300, min(1500, canvas.winfo_width()-40,
+                                    int((canvas.winfo_height()-32)*paper_width/paper_height)))
+            else:
+                width = max(300, min(2200, int(paper_width*float(zoom.get().rstrip('%'))/72*96)))
+            pending[0] = (revision[0], data, selected.get(), max(0, page.get()-1), width)
+            progress.set('Actualizando PDF…')
+        except Exception as exc:
+            progress.set('Revisa los ajustes: ' + str(exc)[:95])
 
     def queue_render(*_):
-        if closed[0] or not window.winfo_exists():return
+        if closed[0]:
+            return
+        revision[0] += 1
+        pending[0] = None
         if scheduled[0] is not None:
             window.after_cancel(scheduled[0])
-        scheduled[0]=window.after(330, refresh)
+        scheduled[0] = window.after(330, refresh)
 
     def new_document(*_):
         page.set(1)
         queue_render()
 
-    selected.trace_add('write', new_document)
-    zoom.trace_add('write', queue_render)
+    traces.append((selected, selected.trace_add('write', new_document)))
+    traces.append((zoom, zoom.trace_add('write', queue_render)))
     canvas.bind('<Configure>', queue_render)
     for variable in variables.values():
         ident=variable.trace_add('write', queue_render)
@@ -218,20 +255,40 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
 
     footer=tk.Frame(window, bg=BG, pady=8, padx=12)
     footer.pack(fill='x')
-    tk.Label(footer, text='Los ajustes son compartidos con la ventana principal. Guarda el cuestionario '
-             'para conservarlos en SQLite.', bg=BG, fg=LABEL,
+    if estado is not None:
+        tk.Label(footer, textvariable=estado, bg=BG, fg=NAVY).pack(side='left', padx=8)
+    tk.Label(footer, text='Esc: volver · Guarda para conservar los cambios.', bg=BG, fg=LABEL,
              font=('Segoe UI', 9)).pack(side='left')
     tk.Button(footer, text='Volver al generador', command=lambda:close(),
               bg=NAVY, fg=WHITE, bd=0, padx=13, pady=8).pack(side='right')
 
-    def close():
-        closed[0]=True
-        if scheduled[0] is not None:
-            window.after_cancel(scheduled[0]);scheduled[0]=None
+    def cleanup(event=None):
+        """Libera procesos, callbacks y traces incluso al destruir la ventana padre."""
+        if event is not None and event.widget is not window:
+            return
+        if closed[0]:
+            return
+        closed[0] = True
+        for timer in (scheduled, polling):
+            if timer[0] is not None:
+                window.after_cancel(timer[0])
+                timer[0] = None
         for variable, ident in traces:
-            try:variable.trace_remove('write', ident)
-            except tk.TclError:pass
+            try:
+                variable.trace_remove('write', ident)
+            except tk.TclError:
+                pass
+        preview_photo[0] = None
+        pending[0] = None
+        worker.close()
+
+    def close():
+        cleanup()
         window.destroy()
+
     window.protocol('WM_DELETE_WINDOW', close)
-    window.after(140, queue_render)
+    window.bind('<Escape>', lambda event: close())
+    window.bind('<Destroy>', cleanup, add='+')
+    queue_render()
+    polling[0] = window.after(50, receive)
     return window
