@@ -33,8 +33,10 @@ def test_transferir_examen_y_regresar_al_diseno():
         from src.evaluaciones.core import Question
         from omr_evaluaciones.interfaz import launch
         questions = [Question("Seguridad", "Pregunta 1", ("A", "B", "C", "D"), 2)]
+        regresos = []
         app = launch(parent, questions=questions, title="Evaluación de prueba",
-                     paper="Oficio", source="Cuestionario abierto")
+                     paper="Oficio", source="Cuestionario abierto",
+                     on_return=lambda: regresos.append("editor"))
         assert app.questions[0] == {"tema":"Seguridad", "pregunta":"Pregunta 1", "correcta":"C"}
         assert app.paper.get() == "Oficio"
         assert app.title.get() == "Evaluación de prueba"
@@ -45,6 +47,7 @@ def test_transferir_examen_y_regresar_al_diseno():
         app.return_to_generator()
         assert parent.winfo_exists()
         assert not app.window.winfo_exists()
+        assert regresos == ["editor"]
     finally:
         try:
             parent.destroy()
