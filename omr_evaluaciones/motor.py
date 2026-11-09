@@ -818,6 +818,61 @@ def render_review_with_acetato(original_bgr, paper, questions, *,
     return Image.alpha_composite(background,overlay).convert('RGB')
 
 
+def resolve_pdf_session(store:OMRStore,pdf_path:Path,*,max_pages=5):
+    """Identifica la aplicación por QR firmado, sin confiar en títulos repetidos.
+
+    Inspecciona algunas páginas, valida HMAC/token/ID contra la BD local.
+    No vincula la sesión por nombre, posición en el historial ni por OCR.
+    Si el PDF contiene folios válidos de dos sesiones, rechaza la atribución.
+    """
+    path=Path(pdf_path)
+    if (not path.is_file() or path.suffix.lower()!='.pdf' or
+            path.stat().st_size>MAX_PDF_SIZE):
+        raise ValueError('Selecciona un PDF válido de hasta 100 MB.')
+    pdf=pdfium.PdfDocument(str(path))
+    found=set()
+    try:
+        for index in range(min(len(pdf),max_pages)):
+            page=pdf[index]
+            try:
+                width,height=page.get_size()
+                if not 100<=width<=1500 or not 100<=height<=2000:
+                    raise ValueError('Dimensiones de escaneo fuera de rango.')
+                rgb=np.asarray(
+                    page.render(scale=RENDER_DPI/72).to_pil().convert('RGB'))
+            finally:
+                page.close()
+            gray=cv2.cvtColor(rgb,cv2.COLOR_RGB2GRAY)
+            rotations=(gray,cv2.rotate(gray,cv2.ROTATE_180),
+                       cv2.rotate(gray,cv2.ROTATE_90_CLOCKWISE),
+                       cv2.rotate(gray,cv2.ROTATE_90_COUNTERCLOCKWISE))
+            for rotated in rotations:
+                decoded=_decode_qr(rotated)
+                match=QR_RE.fullmatch(decoded or '')
+                if match is None:
+                    continue
+                sid,token,page_number,tag=match.groups()
+                if page_number!='1':continue
+                try:
+                    s=store.session(sid)
+                except ValueError:
+                    continue
+                if token not in {p['token'] for p in s['personal']}:
+                    continue
+                if not hmac.compare_digest(
+                    _qr_data(sid,token,1,s['clave_hmac']),decoded):
+                    continue
+                found.add(sid)
+                break
+            if len(found)>1:
+                raise ValueError(
+                    'El PDF mezcla QR válidos de evaluaciones diferentes; '
+                    'separa los lotes antes de calificar.')
+    finally:
+        pdf.close()
+    return next(iter(found)) if found else None
+
+
 def _recognize(gray,paper,questions_count):
     """Mide tinta en el núcleo de cada círculo, evitando los contornos impresos."""
     scale=RENDER_DPI/72.0
