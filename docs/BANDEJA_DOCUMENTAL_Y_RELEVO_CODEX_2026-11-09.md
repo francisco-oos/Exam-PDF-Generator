@@ -343,3 +343,39 @@ Resultado final local de esta tanda (Python 3.13.4): **161 aprobadas,
 3 omitidas**, 73.45 s, ejecutando `pytest -q` con
 `PytestUnraisableExceptionWarning` tratado como error. Logs/XML en
 `salidas/pytest-final.log` y `salidas/pytest-final.xml`.
+
+### Tanda 4: muestra física y restauración aislada del respaldo suministrado
+
+El operador entregó el respaldo local de datos de la instalación anterior.
+Se copió fuera del control de versiones, verificando los 10 archivos, y se
+creó snapshot consistente de las dos bases mediante SQLite backup.
+`PRAGMA integrity_check` de OMR: **ok**. Las rutas de imágenes históricas se
+reubicaron solamente en la copia. Las sesiones (incluidas claves/folios)
+permanecieron sin cambios tras la migración; nunca se regeneraron.
+
+Resultados anonimizados del escaneo aportado:
+
+- 3 páginas conservadas en un original; 2 QR con firma verificada para la
+  evaluación del paquete. La sesión declarada por la tercera página no
+  existe en este respaldo: se conserva pendiente, sin asignar otra clave.
+- El sistema no declara dos grupos verificados: `mezclado=False` significa
+  aquí un solo grupo verificable y una hoja pendiente, no que las tres
+  hojas pertenezcan a la misma evaluación.
+- Ya existían 2 hojas históricas. Una tiene decisiones humanas que se
+  preservaron íntegramente; la segunda se releyó automáticamente al mejorar
+  las dudas, conservando evidencia anterior. Ambas siguen en revisión.
+- Diagnóstico independiente, sin guardar respuestas ni sustituir revisión:
+  la lectura actual señala 7 marcas tenues en la primera hoja y 2 en la
+  segunda. No se alteraron umbrales globales ni se inventaron notas.
+- Reimportación: 2 hojas repetidas, ninguna hoja/nota adicional ni cambio
+  de respuestas; 2 ingresos documentales registrados. Las 4 entradas de
+  revisión humana coinciden exactamente con el respaldo.
+- Hashes de todos los archivos fuente y del PDF archivado intactos al
+  terminar. Cero calificaciones definitivas emitidas.
+
+Esto comprueba conservación, continuidad histórica y rechazo de identidad
+no verificable sobre la muestra física disponible; NO cierra toda la matriz
+F01–F16. Falta el respaldo de la sesión de la tercera hoja para verificarla,
+y cotejar/capturar las dudas y revisiones con el operador. Los reportes,
+PDF, imágenes y bases permanecen exclusivamente locales. No hay cambios
+funcionales en esta tanda; se publica solo este resumen sin datos personales.
