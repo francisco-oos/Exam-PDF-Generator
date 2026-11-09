@@ -11,7 +11,9 @@ from queue import Queue, Empty
 from threading import Thread
 from PIL import Image,ImageTk,ImageDraw
 
-from .motor import OMRStore,read_roster,create_forms_pdf,scan_document,export_report,PAPERS,bubble_positions,RENDER_DPI
+from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
+                    export_report,PAPERS,bubble_positions,RENDER_DPI,
+                    render_review_with_acetato)
 from .demo import create_synthetic_scan
 
 NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
@@ -339,7 +341,8 @@ class OMRApp:
         summary=(f'PDF: {source} · Páginas: {report["leidas"]} · '
             f'Validadas: {report["validadas"]} · Pendientes: {report["revisar"]} · '
             f'Sin identificar: {report["sin_identificar"]} · Duplicadas: {report["duplicadas"]} · '
-            f'Reimportadas: {report["repetidas"]}')
+            f'Reimportadas: {report["repetidas"]} · '
+            f'Reprocesadas: {report.get("reprocesadas",0)}')
         self.feedback.set(summary)
         self.navigate('Revisión')
 
@@ -357,11 +360,16 @@ class OMRApp:
         return tree
 
     def _review(self):
-        self._heading('Revisión humana','Selecciona una hoja dudosa; a la derecha se visualiza el escaneo original y se resalta el reactivo.')
+        self._heading('Revisión y captura con acetato digital',
+                      'Navega entre todas las hojas, superpone la clave sobre '
+                      'las marcas y captura respuestas manualmente si hace falta.')
         if not self._session_required():return
         pages=self.store.pages(self.session_id)
         people={p['token']:p for p in self.store.session(self.session_id)['personal']}
-        suspects=[x for x in pages if x['estado']!='validada']
+        # Incluir también hojas ya validadas: facilita comprobar el acetato,
+        # cambiar de página y verificar las respuestas antes de la entrega.
+        suspects=sorted(pages,key=lambda item:(item['estado']=='validada',
+                                               item['pagina']))
         self._note('Resultados definitivos bloqueados si hay hojas sin identificar, ambiguas o duplicadas. Las correcciones quedan firmadas en la bitácora.')
         content=tk.Frame(self.stage,bg=LIGHT);content.pack(fill='both',expand=True)
         left=tk.Frame(content,bg=LIGHT,width=450);left.pack(side='left',fill='both',expand=False)
@@ -378,10 +386,16 @@ class OMRApp:
         tk.Label(right,text='Hoja escaneada · evidencia',bg=WHITE,fg=NAVY,font=('Segoe UI',11,'bold')).pack(anchor='w')
         show_overlay=tk.BooleanVar(value=True)
         zoom_issue=tk.BooleanVar(value=False)
-        tk.Checkbutton(right,text='Resaltar marcas dudosas (sin modificar original)',variable=show_overlay,
-                       bg=WHITE,fg=INK,command=lambda:redraw()).pack(anchor='w')
-        tk.Checkbutton(right,text='Acercar reactivo seleccionado',variable=zoom_issue,
-                       bg=WHITE,fg=INK,command=lambda:redraw()).pack(anchor='w')
+        show_acetato=tk.BooleanVar(value=True)
+        tk.Checkbutton(right,text='Superponer acetato digital (verde = clave correcta)',
+                       variable=show_acetato,bg=WHITE,fg=INK,
+                       command=lambda:redraw()).pack(anchor='w')
+        tk.Checkbutton(right,text='Resaltar dudas (naranja, sin cambiar el original)',
+                       variable=show_overlay,bg=WHITE,fg=INK,
+                       command=lambda:redraw()).pack(anchor='w')
+        tk.Checkbutton(right,text='Acercar reactivo seleccionado',
+                       variable=zoom_issue,bg=WHITE,fg=INK,
+                       command=lambda:redraw()).pack(anchor='w')
         image_label=tk.Label(right,bg=WHITE)
         image_label.pack(fill='both',expand=True)
         detail=tk.StringVar(value='Selecciona una hoja para verla.')
@@ -404,30 +418,39 @@ class OMRApp:
             if p['dudas'] and p['dudas'][0].get('pregunta'):
                 question.set(str(p['dudas'][0]['pregunta']))
             try:
-                img=Image.open(p['imagen']).convert('RGB')
-                # Resaltar círculos problemáticos SIN modificar el archivo de evidencia.
-                if p['token'] and p['dudas'] and show_overlay.get():
-                    paper=self.store.session(self.session_id)['papel'];h=PAPERS[paper][1]
-                    draw=ImageDraw.Draw(img)
-                    for issue in p['dudas']:
-                        qid=issue.get('pregunta')
-                        if not isinstance(qid,int):continue
-                        pts=bubble_positions(paper,len(self.store.session(self.session_id)['preguntas']))[qid-1]
-                        centers=[(x*RENDER_DPI/72,(h-y)*RENDER_DPI/72) for x,y in pts]
-                        draw.rectangle((min(x for x,y in centers)-26,min(y for x,y in centers)-22,
-                                        max(x for x,y in centers)+26,max(y for x,y in centers)+22),
-                                       outline='#DD902C',width=8)
-                if zoom_issue.get() and p['token']:
+                # El archivo PNG archivado y el PDF original jamás se editan.
+                # La hoja se rectifica EN MEMORIA a partir de las cuatro marcas.
+                import cv2
+                original=cv2.imread(str(p['imagen']))
+                if original is None:
+                    raise OSError('No se encontró la evidencia archivada.')
+                session=self.store.session(self.session_id)
+                try:
+                    img=render_review_with_acetato(
+                        original,session['papel'],session['preguntas'],
+                        show_acetato=show_acetato.get(),
+                        issue_numbers=(
+                            [i.get('pregunta') for i in p['dudas']]
+                            if show_overlay.get() else []
+                        ),
+                    )
+                except ValueError as alignment_error:
+                    # No falsificar coincidencia del acetato sin cuatro marcas.
+                    img=Image.open(p['imagen']).convert('RGB')
+                    detail.set(detail.get()+' · SIN ACETATO: '+str(alignment_error))
+                if zoom_issue.get():
                     try:
                         qid=int(question.get())
-                        dots=bubble_positions(self.store.session(self.session_id)['papel'],
-                            len(self.store.session(self.session_id)['preguntas']))[qid-1]
-                        paper=self.store.session(self.session_id)['papel'];h=PAPERS[paper][1]
+                        dots=bubble_positions(session['papel'],
+                                               len(session['preguntas']))[qid-1]
+                        height=PAPERS[session['papel']][1]
                         xx=[round(x*RENDER_DPI/72) for x,y in dots]
-                        yy=[round((h-y)*RENDER_DPI/72) for x,y in dots]
+                        yy=[round((height-y)*RENDER_DPI/72) for x,y in dots]
                         img=img.crop((max(0,min(xx)-120),max(0,min(yy)-85),
-                                    min(img.width,max(xx)+115),min(img.height,max(yy)+90)))
-                    except (ValueError,IndexError):pass
+                                    min(img.width,max(xx)+115),
+                                    min(img.height,max(yy)+90)))
+                    except (ValueError,IndexError):
+                        pass
                 # Aprovechar el espacio de revisión maximizado sin forzar
                 # reescalado hacia arriba ni alterar el escaneo original.
                 area_width = max(520, min(1150, self.window.winfo_width() - 790))
@@ -459,9 +482,110 @@ class OMRApp:
                 self.navigate('Revisión')
             except Exception as exc:messagebox.showerror('No se identificó la hoja',str(exc),parent=self.window)
         self._btn(form,'Vincular por ID y folio (sin calificar)',assign)
-        if not suspects:self._note('No hay hojas dudosas en esta sesión.')
+        def next_sheet():
+            if not suspects:return
+            current=tree.selection()
+            ids=[p['id'] for p in suspects]
+            pos=ids.index(current[0]) if current and current[0] in ids else -1
+            nxt=ids[(pos+1)%len(ids)]
+            tree.selection_set(nxt)
+            tree.see(nxt)
+            redraw()
+
+        def manual_entry():
+            if selected['id'] is None:return
+            sheet=lookup[selected['id']]
+            if sheet['token'] is None:
+                messagebox.showwarning(
+                    'Primero identificar hoja',
+                    'Vincula la hoja por ID y folio, o reimporta el PDF con el '
+                    'nuevo lector. No se guardan notas de personas desconocidas.',
+                    parent=self.window)
+                return
+            if sheet['estado'] in ('descartada','duplicado'):
+                messagebox.showwarning(
+                    'Hoja no disponible',
+                    'Resuelve primero el duplicado o la hoja descartada.',
+                    parent=self.window)
+                return
+            session=self.store.session(self.session_id)
+            questions=session['preguntas']
+            dlg=tk.Toplevel(self.window)
+            dlg.title('Captura manual · hoja '+str(sheet['pagina']+1))
+            dlg.geometry('650x730')
+            dlg.minsize(480,430)
+            dlg.transient(self.window)
+            dlg.grab_set()
+            tk.Label(dlg,
+                text='Captura íntegra con acetato digital',
+                font=('Segoe UI',15,'bold'),fg=NAVY,pady=9).pack(anchor='w',padx=15)
+            tk.Label(dlg,
+                text='Verifica cada círculo. BLANCO indica que no contestó; '
+                     'SIN REVISAR impide guardar.',
+                fg=INK,wraplength=600,justify='left').pack(anchor='w',padx=15)
+            wrapper=tk.Frame(dlg)
+            wrapper.pack(fill='both',expand=True,padx=15,pady=(8,4))
+            sc=tk.Canvas(wrapper,highlightthickness=0)
+            sb=ttk.Scrollbar(wrapper,orient='vertical',command=sc.yview)
+            sc.configure(yscrollcommand=sb.set)
+            sb.pack(side='right',fill='y')
+            sc.pack(side='left',fill='both',expand=True)
+            inner=tk.Frame(sc)
+            wnd=sc.create_window((0,0),window=inner,anchor='nw')
+            inner.bind('<Configure>',lambda e:sc.configure(scrollregion=sc.bbox('all')))
+            sc.bind('<Configure>',lambda e:sc.itemconfigure(wnd,width=e.width))
+            selections=[]
+            for number,item in enumerate(questions,1):
+                row=tk.Frame(inner,pady=4)
+                row.pack(fill='x')
+                txt=str(item['pregunta']).replace('\n',' ')
+                tk.Label(row,text=f'{number:02d}  {txt[:65]}',
+                         anchor='w',width=67).pack(side='left',fill='x',expand=True)
+                old=(sheet['respuestas'][number-1]
+                     if number<=len(sheet['respuestas']) else None)
+                current=tk.StringVar(value=old if old else 'SIN REVISAR')
+                selections.append(current)
+                ttk.Combobox(row,textvariable=current,values=(
+                    'SIN REVISAR','A','B','C','D','BLANCO'),
+                    width=12,state='readonly').pack(side='right')
+            footer=tk.Frame(dlg,padx=15,pady=10)
+            footer.pack(fill='x')
+            tk.Label(footer,text='Revisor: '+reviewer.get(),
+                     fg=INK).pack(anchor='w')
+            def save_all():
+                responses=[v.get() for v in selections]
+                try:
+                    count=self.store.capture_manual_sheet(
+                        selected['id'],responses,reason.get(),reviewer.get())
+                except (ValueError,OSError) as exc:
+                    messagebox.showerror('Captura incompleta',
+                                         str(exc),parent=dlg)
+                    return
+                ids=[p['id'] for p in suspects]
+                self.review_focus_id=(
+                    ids[(ids.index(selected['id'])+1)%len(ids)]
+                    if len(ids)>1 else selected['id'])
+                dlg.destroy()
+                self.feedback.set(
+                    f'{count} respuestas verificadas y guardadas con auditoría.')
+                self.navigate('Revisión')
+            ttk.Button(footer,text='Guardar TODAS las respuestas',
+                       command=save_all).pack(side='left')
+            ttk.Button(footer,text='Cancelar',
+                       command=dlg.destroy).pack(side='right')
+
+        self._btn(form,'Capturar hoja completa',manual_entry,True)
+        self._btn(form,'Siguiente hoja',next_sheet)
+        if not suspects:
+            self._note('Todavía no hay hojas escaneadas para esta sesión.')
         else:
-            tree.selection_set(suspects[0]['id'])
+            focus=getattr(self,'review_focus_id',None)
+            ids=[p['id'] for p in suspects]
+            first=focus if focus in ids else next(
+                (p['id'] for p in suspects if p['estado']!='validada'),
+                suspects[0]['id'])
+            tree.selection_set(first)
+            tree.see(first)
             redraw()
 
     def _results(self):
