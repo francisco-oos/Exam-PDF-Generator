@@ -12,7 +12,7 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 - **Tamaño de impresión:** A4 (210 × 297 mm), Carta (8.5 × 11 pulgadas) u Oficio mexicano (8.5 × 13 pulgadas). No mezcles acetatos y hojas de distintos tamaños o generaciones.
 - **Letra de opciones y preguntas:** 8–12 puntos en intervalos de 0.5; podrás revisar la cantidad REAL de páginas sin imprimir.
 - **Vista ampliada · PDF exacto:** abre una ventana independiente, con navegación de páginas y zoom, que renderiza el PDF completo en memoria mediante PDFium. La vista pequeña al costado sigue siendo orientativa.
-- **Color RGB de la hoja de respuestas:** tinta para encabezados y círculos; el papel sigue blanco para gastar menos tinta. La plantilla de acetato continúa verde translúcida.
+- **Color RGB de la hoja de respuestas:** tinta para encabezados y círculos; el papel sigue blanco para gastar menos tinta. La clave para acetato usa un color RGB configurable; su valor inicial sigue siendo verde translúcido.
 - Estas opciones también quedan guardadas en cada cuestionario SQLite y se restauran al reabrirlo, con migración no destructiva para bibliotecas anteriores.
 - El ejemplo predeterminado contiene **20 preguntas generales** de matemáticas, lenguaje, ciencia y lógica, sin nombres ni procesos de empresas.
 
@@ -27,9 +27,19 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar documentos**, el examen se guarda también en la biblioteca.
 6. La biblioteca permanece en **`datos/biblioteca.sqlite3`** dentro de la carpeta del proyecto; está excluida de Git y no se sube a Internet. Haz copias de seguridad de ese archivo cuando el programa esté cerrado. **La base no está cifrada:** cualquier persona con acceso a ella puede leer las respuestas correctas; protege el equipo y las copias de respaldo.
 
-El acetato ahora imprime cada respuesta correcta como **círculo verde con relleno semitransparente** para facilitar el conteo. Su transparencia real depende del material e impresora: prueba papel y acetato superpuestos **al mismo tamaño y al 100 %**, sin ajuste de escala, antes de uso oficial.
+El acetato imprime cada respuesta correcta como **círculo del color RGB elegido con relleno semitransparente** para facilitar el conteo. Su transparencia real depende del material e impresora: prueba papel y acetato superpuestos **al mismo tamaño y al 100 %**, sin ajuste de escala, antes de uso oficial.
 
 **Nota de modalidades:** la biblioteca editable y el editor de preguntas están en el escritorio Tkinter. La interfaz web Docker ofrece la descarga de plantilla y los colores RGB, pero todavía no incluye el administrador de cuestionarios SQLite.
+
+## Editor visual, exportación y acetato RGB
+
+El editor de diseño permite recorrer el **PDF generado por el mismo motor de impresión**. Para evitar que la ventana se bloquee durante la generación o rasterización del documento, la vista se procesa en un subproceso independiente y descartará versiones de vista previa obsoletas. La exportación de documentos también usa un proceso aparte; la aplicación indica que está trabajando y evita exportaciones duplicadas.
+
+La paleta **Color del acetato** es independiente de las del título, subtítulo y hoja de respuestas. Admite colores `#RRGGBB`, se guarda en `datos/biblioteca.sqlite3`, se recupera al volver a abrir el cuestionario y se aplica al contorno y al sombreado de los círculos de respuesta correcta. Los archivos anteriores usan el verde predeterminado `#167341` hasta que se edite su configuración. **Las coordenadas de las burbujas no cambian por elegir otro color.**
+
+Al abrir un editor existente, usa los botones **Volver al generador**, la **X** de la ventana o **Esc** para salir. Los cambios de texto y color que aún no se hayan guardado se detectan antes de cambiar de cuestionario o cerrar la aplicación. Para conservar la configuración y las claves, pulsa **Guardar cuestionario**. Antes de instalar una actualización, respalda la biblioteca SQLite con la aplicación cerrada; la migración del color del acetato crea además una copia previa `.bak` si la columna no existía.
+
+**Verificación técnica:** en la rama de desarrollo `feature/modernizacion-integral`, la CI para Windows (Python 3.11/3.12/3.13), Ubuntu y Docker concluyó satisfactoriamente en la [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). La automatización no sustituye la prueba del editor con el equipo físico del usuario ni la superposición de hoja y acetato en impresora al 100 %.
 
 ## Características
 
@@ -47,7 +57,7 @@ El acetato ahora imprime cada respuesta correcta como **círculo verde con relle
 **Solo necesitas Git y Docker Desktop/Engine; no se instala Python ni sus dependencias en tu equipo.** La interfaz se abre en **http://localhost:8765** y todos los archivos se conservan en `datos/`.
 
 ```powershell
-git clone --branch feature/docker-interfaz-web --single-branch https://github.com/francisco-oos/Exam-PDF-Generator.git
+git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 docker compose up --build -d
 ```
