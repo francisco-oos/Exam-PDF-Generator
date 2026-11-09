@@ -390,8 +390,11 @@ class OMRApp:
             try:
                 result=inspect_pdf_sessions(
                     self.store,Path(source),
-                    progress=lambda i,n:self.scan_updates.put(
-                        ('progress',source,f'Identificando QR: hoja {i} de {n}…')),
+                    progress=lambda i,n:(
+                        self.scan_updates.put(
+                            ('progress',source,
+                             f'Identificando QR: hoja {i} de {n}…'))
+                        if i==1 or i==n or i%10==0 else None),
                 )
                 self.scan_updates.put(('preflight',source,result))
             except Exception as exc:
@@ -1098,8 +1101,9 @@ class OMRApp:
                 if original:
                     from shutil import copyfile
                     src=self.inbox.original(selected['sha'])
-                    if src.resolve()==Path(output).resolve():
-                        raise ValueError('El original no puede sobrescribirse.')
+                    if Path(output).resolve().is_relative_to(
+                            self.inbox.originals.resolve()):
+                        raise ValueError('No se puede sobrescribir ningún original.')
                     copyfile(src,output)
                 else:
                     entries=([selected['page']] if one else
@@ -1173,9 +1177,7 @@ class OMRApp:
             ttk.Button(choose,text='Vincular sin calificar',
                        command=confirm).pack(pady=12)
 
-        tools=tk.Frame(self.stage,bg=LIGHT)
-        tools.pack(fill='x',pady=5)
-        for label,cmd in [
+        commands=[
             ('Subir página',lambda:rearrange(-1)),
             ('Bajar página',lambda:rearrange(1)),
             ('Girar 90°',lambda:rotate(90)),
@@ -1183,8 +1185,12 @@ class OMRApp:
             ('Exportar PDF ordenado',lambda:save_pdf()),
             ('Copiar original',lambda:save_pdf(original=True)),
             ('Vincular pendiente',associate_pending),
-        ]:
-            self._btn(tools,label,cmd)
+        ]
+        for start in (0,4):
+            toolbar=tk.Frame(self.stage,bg=LIGHT)
+            toolbar.pack(fill='x',pady=1)
+            for label,command in commands[start:start+4]:
+                self._btn(toolbar,label,command)
         doctree.bind('<<TreeviewSelect>>',choose_doc)
         tree.bind('<<TreeviewSelect>>',show_page)
         doctree.selection_set(documents[0]['sha'])
