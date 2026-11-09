@@ -62,6 +62,47 @@ ambas modalidades, tanto con como sin lista.
   Respaldar y no subir a GitHub.
 - No declarar resultados oficiales sin probar impresión y escaneo físicos.
 
+## Recuperación de un escaneo que aparece «SIN IDENTIFICAR»
+
+Si el PDF original procede de la Xerox, no tienes que volver a imprimirlo
+solo porque el lector antiguo no reconociera sus QR.
+
+1. Actualiza la rama y abre **Calificar y entregar → Escanear PDF**.
+2. Selecciona otra vez el **mismo PDF escaneado**. El lector busca QR con
+   varias ampliaciones; tolera las marcas grises que antes quedaban por
+   encima del umbral fijo de 85 y rectifica con cuatro esquinas.
+3. Un QR con firma HMAC válida localiza automáticamente su aplicación,
+   aunque varias evaluaciones compartan el mismo título. Los registros
+   nuevos conservan **nombre de Biblioteca, ID de cuestionario, revisión,
+   modalidad y carpeta del lote**.
+4. Si una hoja antigua estaba **sin identificar** y no tiene correcciones
+   humanas, se **reprocesa sobre el mismo registro** (sin duplicarlo),
+   conservando el PDF original y el PNG de evidencia previa. El historial
+   de relecturas queda auditado. **Nunca sobrescribir decisiones manuales.**
+5. En **Revisión** selecciona la hoja. La superposición de acetato digital
+   verde usa las mismas coordenadas de burbujas del PDF impreso; para las
+   manchas o dobles marcas se resaltan reactivos en naranja. El acetato
+   existe solo en memoria; no dibuja encima del PDF ni de los escaneos
+   archivados.
+6. Si la identificación sigue fallando, verifica en el papel original
+   **ID + folio** y pulsa **Vincular por ID y folio**. La hoja queda
+   en revisión, **nunca calificada automáticamente**. Luego usa
+   **Capturar hoja completa** para escoger A/B/C/D/BLANCO en cada reactivo;
+   se requiere revisor y justificación, quedan auditadas TODAS las
+   decisiones, y puedes pasar a la siguiente hoja.
+7. Si las cuatro marcas no se detectan, el programa **no fuerza**
+   la superposición de acetato; informa que no puede garantizarla.
+   Vuelve a escanear sin cortar márgenes o haz la corrección manual.
+
+**Caso físico de referencia:** dos hojas escaneadas de prueba por una Xerox
+VersaLink C7120 (9 de noviembre de 2026). El problema se reprodujo
+localmente: marcas oscuras impresas con valores de gris aproximados
+110–130 que un umbral fijo de 85 descartaba. El QR de una hoja era legible
+a resolución normal; el de la otra requirió ampliar la zona superior
+derecha. En una hoja, el reactivo 9 queda ambiguo por marcas adicionales.
+Este archivo real se analizó localmente y **no se incorporó al repositorio**.
+La compatibilidad de lectura no equivale a calibración de precisión oficial.
+
 ## Qué significa «promedio» y «desempeño»
 
 - **Aciertos individuales** = cantidad de preguntas donde la marca seleccionada coincide con la clave. **Porcentaje individual** = 100 × aciertos / número total de reactivos (las respuestas en blanco son incorrectas, pero quedan contadas aparte).
