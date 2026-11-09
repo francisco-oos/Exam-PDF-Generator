@@ -354,7 +354,8 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
         tk.Label(footer, textvariable=estado, bg=BG, fg=NAVY).pack(side='left', padx=8)
     tk.Label(footer, text='Esc: cerrar aplicación · Guarda para conservar los cambios.', bg=BG, fg=LABEL,
              font=('Segoe UI', 9)).pack(side='left')
-    tk.Button(footer, text='Cerrar aplicación', command=lambda:close(),
+    tk.Button(footer, text='Cerrar aplicación' if on_close is not None else 'Volver al generador',
+              command=lambda:close(),
               bg=NAVY, fg=WHITE, bd=0, padx=13, pady=8).pack(side='right')
 
     def cleanup(event=None):
