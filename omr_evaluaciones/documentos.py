@@ -239,7 +239,8 @@ class DocumentInbox:
                      WHERE i.sha=d.sha ORDER BY fecha DESC LIMIT 1) AS nombre,
                     (SELECT COUNT(*) FROM paginas_documentos_omr p
                      WHERE p.sha=d.sha AND p.estado IN
-                     ('pendiente','conflicto_identidad','conflicto_duplicado')
+                     ('pendiente','identificada','manual_pendiente',
+                      'conflicto_identidad','conflicto_duplicado')
                     ) AS pendientes,
                     (SELECT COUNT(*) FROM ingresos_documentos_omr i
                      WHERE i.sha=d.sha) AS veces_recibido
@@ -387,6 +388,36 @@ class DocumentInbox:
             finally:
                 tmp.unlink(missing_ok=True)
         return output
+
+    def repair_copy(self, digest, target):
+        """Crear DERIVADO reparado con pikepdf opcional sin tocar originales.
+
+        pikepdf no descifra ni repara hojas a costa de alterar el original.
+        Si no está instalado, se indica cómo instalar extras.
+        """
+        try:
+            import pikepdf
+        except ImportError as exc:
+            raise ValueError(
+                'Instala las funciones opcionales: '
+                'pip install -r requirements-pdf-extra.txt') from exc
+        original=self.original(digest)
+        target=Path(target)
+        if target.suffix.lower()!='.pdf':
+            raise ValueError('La copia reparada debe ser un PDF.')
+        if target.resolve().is_relative_to(self.originals.resolve()):
+            raise ValueError('No se puede sobrescribir un original archivado.')
+        target.parent.mkdir(parents=True,exist_ok=True)
+        with NamedTemporaryFile(dir=target.parent,suffix='.part',
+                                delete=False) as f:
+            temp=Path(f.name)
+        try:
+            with pikepdf.open(original) as document:
+                document.save(temp)
+            os.replace(temp,target)
+        finally:
+            temp.unlink(missing_ok=True)
+        return target
 
     def render_page(self, digest, index, *, scale=0.9, rotate=0):
         """Vista previa ligera; solamente se dibuja la página seleccionada."""
