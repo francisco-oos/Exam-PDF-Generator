@@ -131,6 +131,7 @@ def _form() -> bytes:
       Cuadernillo reutilizable · Sin datos personales y con marca de agua NO RAYAR NI MANCHAR</label>
     <label>Color de la hoja de respuestas (tintas y círculos)</label>
     <input type="color" name="color_respuestas" value="#213A4C">
+    <label>Color del acetato (RGB)</label><input type="color" name="color_acetato" value="#167341">
     <label>Excel de preguntas</label><select name="archivo">{_options(files)}</select>
     <p class="hint"><a href="/plantilla">Descargar plantilla XLSX con guía y ejemplos</a></p>
     <label>Logotipo (opcional)</label><select name="logo">{_options(logos)}</select>
@@ -269,7 +270,8 @@ class Handler(BaseHTTPRequestHandler):
                               puesto=puesto, instrucciones=instrucciones, logo=logo,
                               color_titulo=color_titulo,color_subtitulo=color_subtitulo,
                               tamano_papel=tamano_papel,letra=letra,
-                              reutilizable=reutilizable,color_respuestas=color_respuestas)
+                              reutilizable=reutilizable,color_respuestas=color_respuestas,
+                              color_acetato=field('color_acetato') or '#167341')
             self._respond(HTTPStatus.OK, _result(folder))
         except (ExamError, OSError, ValueError, UnicodeError) as exc:
             msg = escape(str(exc))
@@ -283,7 +285,7 @@ def main():
         raise SystemExit('Puerto inválido')
     INPUTS.mkdir(parents=True, exist_ok=True)
     OUTPUTS.mkdir(parents=True, exist_ok=True)
-    server = ThreadingHTTPServer(('0.0.0.0', PORT), Handler)
+    server = ThreadingHTTPServer((os.environ.get('EXAM_BIND', '127.0.0.1'), PORT), Handler)
     print(f'Generador local listo: http://localhost:{PORT}', flush=True)
     try:
         server.serve_forever()

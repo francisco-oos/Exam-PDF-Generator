@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from PIL import Image, ImageTk, ImageOps
 
 from biblioteca import _check_questions
 from src.evaluaciones.core import Question, ExamError, _safe_image
@@ -11,7 +12,7 @@ from src.evaluaciones.core import Question, ExamError, _safe_image
 
 def edit_questions(parent: tk.Tk, initial: list[Question] | tuple[Question, ...]) -> list[Question] | None:
     """Devuelve edición confirmada o None al cancelar, sin tocar archivos originales."""
-    items=list(initial)
+    items=list(initial) or [Question('Nuevo tema', 'Escribe la nueva pregunta', ('Opción A', 'Opción B', 'Opción C', 'Opción D'), 0)]
     result=[None]
     win=tk.Toplevel(parent)
     win.title('Editar preguntas del cuestionario')
@@ -27,9 +28,17 @@ def edit_questions(parent: tk.Tk, initial: list[Question] | tuple[Question, ...]
     pane=tk.PanedWindow(root,orient='horizontal',sashwidth=5)
     pane.pack(fill='both',expand=True)
     left=tk.Frame(pane)
-    right=tk.Frame(pane,padx=14)
-    pane.add(left,minsize=295)
-    pane.add(right,minsize=400)
+    panel=tk.Frame(pane)
+    pane.add(left,minsize=240)
+    pane.add(panel,minsize=360)
+    canvas=tk.Canvas(panel,highlightthickness=0)
+    bar=ttk.Scrollbar(panel,orient='vertical',command=canvas.yview)
+    canvas.configure(yscrollcommand=bar.set)
+    bar.pack(side='right',fill='y');canvas.pack(fill='both',expand=True)
+    right=tk.Frame(canvas,padx=14)
+    entry=canvas.create_window((0,0),window=right,anchor='nw')
+    right.bind('<Configure>',lambda e:canvas.configure(scrollregion=canvas.bbox('all')))
+    canvas.bind('<Configure>',lambda e:canvas.itemconfigure(entry,width=e.width))
     tree=ttk.Treeview(left,columns=('no','tema','correcta'),show='headings',selectmode='browse')
     tree.heading('no',text='N.º');tree.heading('tema',text='Tema');tree.heading('correcta',text='Clave')
     tree.column('no',width=40,anchor='center',stretch=False)
@@ -57,6 +66,18 @@ def edit_questions(parent: tk.Tk, initial: list[Question] | tuple[Question, ...]
                   filetypes=[('PNG o JPEG','*.png *.jpg *.jpeg')])
         if f:image.set(f)
     ttk.Button(imgbar,text='Examinar',command=image_choose).pack(side='right',padx=(6,0))
+    def preview_image():
+        try:
+            path=_safe_image(Path(image.get()),source='Imagen de la pregunta')
+            with Image.open(path) as source:
+                picture=ImageOps.contain(source.convert('RGB'),(650,500))
+            popup=tk.Toplevel(win);popup.title('Vista de imagen')
+            photo=ImageTk.PhotoImage(picture,master=popup)
+            label=tk.Label(popup,image=photo);label.image=photo;label.pack()
+            ttk.Button(popup,text='Cerrar',command=popup.destroy).pack(pady=8)
+        except (ValueError,OSError) as exc:
+            messagebox.showerror('Imagen no disponible',str(exc),parent=win)
+    ttk.Button(right,text='Ver imagen',command=preview_image).pack(anchor='w',pady=8)
     selected=[0]
     def refresh(select=0):
         tree.delete(*tree.get_children())
@@ -73,9 +94,14 @@ def edit_questions(parent: tk.Tk, initial: list[Question] | tuple[Question, ...]
         correct.set('ABCD'[q.correct]);image.set(str(q.image or ''))
     def selection(_):
         picks=tree.selection()
-        if picks:show(int(picks[0]))
+        if not picks or int(picks[0]) == selected[0]:return
+        index=int(picks[0])
+        if save_item(refresh_ui=False):
+            show(index)
+        else:
+            tree.selection_set(str(selected[0]))
     tree.bind('<<TreeviewSelect>>',selection)
-    def save_item():
+    def save_item(refresh_ui=True):
         if not items:return False
         photo=Path(image.get()) if image.get().strip() else None
         try:
@@ -89,10 +115,12 @@ def edit_questions(parent: tk.Tk, initial: list[Question] | tuple[Question, ...]
                 raise
         except (ExamError,ValueError,OSError) as e:
             messagebox.showerror('Corrige la pregunta',str(e),parent=win);return False
-        refresh(selected[0]);return True
+        if refresh_ui:refresh(selected[0])
+        return True
     buttons=tk.Frame(root,pady=9);buttons.pack(fill='x')
     ttk.Button(buttons,text='Guardar cambio en pregunta',command=save_item).pack(side='left')
     def add():
+        if not save_item():return
         if len(items)>=100:
             messagebox.showwarning('Límite','Máximo 100 preguntas.',parent=win);return
         items.append(Question('Nuevo tema','Escribe la nueva pregunta',('Opción A','Opción B','Opción C','Opción D'),0,None))

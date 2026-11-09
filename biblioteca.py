@@ -26,7 +26,18 @@ DEFAULT_COLOR_ANSWERS = '#213A4C'
 COLOR_RE = re.compile(r'^#[0-9A-Fa-f]{6}$')
 
 
+class LibraryConnection(sqlite3.Connection):
+    """Cierra el descriptor al salir del contexto, también tras rollback."""
+
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
+
 def hex_color(value: str, label: str = 'Color') -> str:
+    """Valida un RGB completo y devuelve su representación normalizada."""
     if not isinstance(value, str) or not COLOR_RE.fullmatch(value):
         raise ExamError(f'{label}: usa un color RGB hexadecimal como #123ABC.')
     return value.upper()
@@ -36,10 +47,21 @@ def db_connect(db_path: Path) -> sqlite3.Connection:
     """Abre SQLite con claves foráneas y migra sin borrar registros existentes."""
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=10)
+    conn = sqlite3.connect(db_path, timeout=10, factory=LibraryConnection)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA foreign_keys=ON')
     conn.execute('PRAGMA busy_timeout=10000')
+    previous = {r['name'] for r in conn.execute('PRAGMA table_info(cuestionarios)')}
+    if previous and 'color_acetato' not in previous:
+        # La API de backup incluye transacciones confirmadas del WAL. Nunca
+        # copiar a mano una base abierta ni sobrescribir un respaldo anterior.
+        backup = db_path.with_name(db_path.name + '.antes-migracion-' + uuid4().hex + '.bak')
+        try:
+            with sqlite3.connect(backup, factory=LibraryConnection) as destination:
+                conn.backup(destination)
+        except Exception:
+            conn.close()
+            raise
     conn.executescript('''
         CREATE TABLE IF NOT EXISTS cuestionarios (
             id TEXT PRIMARY KEY,
@@ -75,6 +97,7 @@ def db_connect(db_path: Path) -> sqlite3.Connection:
         'letra': 'REAL NOT NULL DEFAULT 9.0',
         'reutilizable': 'INTEGER NOT NULL DEFAULT 0',
         'color_respuestas': "TEXT NOT NULL DEFAULT '#213A4C'",
+        'color_acetato': "TEXT NOT NULL DEFAULT '#167341'",
         # Papelera: sólo oculta cuestionarios, conserva íntegros sus BLOB.
         'eliminado_en': 'TEXT',
     }
@@ -102,6 +125,7 @@ class StoredExam:
     letra: float = 9.0
     reutilizable: bool = False
     color_respuestas: str = DEFAULT_COLOR_ANSWERS
+    color_acetato: str = '#167341'
 
 
 def _check_questions(questions: list[Question] | tuple[Question, ...]):
@@ -140,7 +164,8 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
               logo: Path | None = None, exam_id: str | None = None,
               tamano_papel: str = 'A4', letra: float = 9.0,
               reutilizable: bool = False,
-              color_respuestas: str = DEFAULT_COLOR_ANSWERS) -> str:
+              color_respuestas: str = DEFAULT_COLOR_ANSWERS,
+              color_acetato: str = '#167341') -> str:
     """Guarda o actualiza por ID, conservando la misma identidad y aumentando revisión."""
     color_titulo, color_subtitulo = _metadata(nombre,titulo,empresa,grupo,subtitulo,
                                                 instrucciones,color_titulo,color_subtitulo)
@@ -149,6 +174,7 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
     if not isinstance(reutilizable,bool):
         raise ExamError('La opción reutilizable debe ser verdadera o falsa.')
     color_respuestas=hex_color(color_respuestas, 'Color de respuestas')
+    color_acetato=hex_color(color_acetato, 'Color del acetato')
     questions=tuple(questions)
     _check_questions(questions)
     if exam_id is not None and not re.fullmatch(r'[0-9a-f]{32}',exam_id):
@@ -180,8 +206,8 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
         conn.execute('''INSERT INTO cuestionarios
           (id,nombre,empresa,grupo,titulo,subtitulo,instrucciones,color_titulo,color_subtitulo,
            preguntas_json,logo_archivo,creado_en,actualizado_en,revision,
-           tamano_papel,letra,reutilizable,color_respuestas)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           tamano_papel,letra,reutilizable,color_respuestas,color_acetato)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET
           nombre=excluded.nombre,empresa=excluded.empresa,grupo=excluded.grupo,
           titulo=excluded.titulo,subtitulo=excluded.subtitulo,instrucciones=excluded.instrucciones,
@@ -189,10 +215,11 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
           preguntas_json=excluded.preguntas_json,logo_archivo=excluded.logo_archivo,
           actualizado_en=excluded.actualizado_en,revision=excluded.revision,
           tamano_papel=excluded.tamano_papel,letra=excluded.letra,
-          reutilizable=excluded.reutilizable,color_respuestas=excluded.color_respuestas''',
+          reutilizable=excluded.reutilizable,color_respuestas=excluded.color_respuestas,
+          color_acetato=excluded.color_acetato''',
             (exam_id,nombre.strip(),empresa.strip(),grupo.strip(),titulo.strip(),subtitulo.strip(),
              instrucciones.strip(),color_titulo,color_subtitulo,json.dumps(serial,ensure_ascii=False),
-             logo_name,created,now,version,tamano_papel,letra,int(reutilizable),color_respuestas))
+             logo_name,created,now,version,tamano_papel,letra,int(reutilizable),color_respuestas,color_acetato))
         conn.execute('DELETE FROM recursos WHERE cuestionario_id=?',(exam_id,))
         conn.executemany('INSERT INTO recursos(cuestionario_id,nombre,contenido,sha256) VALUES (?,?,?,?)',
               [(exam_id,name,blob,sha256(blob).hexdigest()) for name,blob in resources.items()])
@@ -266,7 +293,7 @@ def load_exam(db_path: Path, exam_id: str, workdir: Path) -> StoredExam:
             raise ExamError('No se encontró el cuestionario guardado.')
         items=json.loads(row['preguntas_json'])
         resources=_resources(conn,exam_id)
-    folder=Path(workdir)/exam_id
+    folder=Path(workdir)/exam_id/uuid4().hex
     folder.mkdir(parents=True,exist_ok=True)
     images_dir=folder/'imagenes'
     images_dir.mkdir(exist_ok=True)
@@ -291,7 +318,7 @@ def load_exam(db_path: Path, exam_id: str, workdir: Path) -> StoredExam:
        color_titulo=row['color_titulo'],color_subtitulo=row['color_subtitulo'],
        questions=tuple(questions),logo=logo,revision=row['revision'],
        tamano_papel=row['tamano_papel'],letra=row['letra'],
-       reutilizable=bool(row['reutilizable']),color_respuestas=row['color_respuestas'])
+       reutilizable=bool(row['reutilizable']),color_respuestas=row['color_respuestas'],color_acetato=row['color_acetato'])
 
 
 def export_workbook(questions: list[Question] | tuple[Question,...], target: Path) -> Path:
@@ -315,6 +342,10 @@ def export_workbook(questions: list[Question] | tuple[Question,...], target: Pat
             if path.resolve()!=copy.resolve():
                 copy.write_bytes(path.read_bytes())
         sheet.append((q.section,q.prompt,*q.options,'ABCD'[q.correct],image_name))
+    for row in sheet.iter_rows():
+        for cell in row:
+            if isinstance(cell.value, str):
+                cell.data_type = 's'
     for col,width in [('A',23),('B',55),('C',30),('D',30),('E',30),('F',30),('G',13),('H',26)]:
         sheet.column_dimensions[col].width=width
     wb.save(target)

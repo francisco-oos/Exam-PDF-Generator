@@ -48,6 +48,7 @@ RADIUS = 8.6
 # Oficio mexicano: 8.5 x 13 pulgadas. No confundir con Legal (8.5 x 14).
 PAPER_SIZES = {'A4': A4, 'Carta': letter, 'Oficio': (612.0, 936.0)}
 DEFAULT_ANSWER_COLOR = '#213A4C'
+DEFAULT_ACETATE_COLOR = '#167341'
 
 
 def paper_dimensions(name: str) -> tuple[float, float]:
@@ -305,7 +306,7 @@ def _bubbles(questions: list[Question], page_size=A4):
 def _answer_sheet(path: Path | BytesIO, questions: list[Question], title: str, subtitle: str,
                   *, acetate: bool, normal: str, bold: str,
                   title_color=TINT, subtitle_color=MUTED,
-                  size=A4, answer_color=TINT):
+                  size=A4, answer_color=TINT, acetate_color=colors.HexColor(DEFAULT_ACETATE_COLOR)):
     """Hoja y acetato comparten tamaño, numeración y posición de círculos."""
     w, h = size
     c = Canvas(path if isinstance(path, BytesIO) else str(path), pagesize=size,pageCompression=1)
@@ -341,9 +342,9 @@ def _answer_sheet(path: Path | BytesIO, questions: list[Question], title: str, s
                 x,yy=coords[k]
                 # Respuesta coloreada, pero translúcida: se sigue viendo la marca.
                 c.saveState()
-                c.setStrokeColor(colors.HexColor('#167341'))
+                c.setStrokeColor(acetate_color)
                 c.setLineWidth(2.2)
-                c.setFillColor(colors.HexColor('#53BD8C'))
+                c.setFillColor(acetate_color)
                 c.setFillAlpha(.26)
                 c.circle(x,yy,RADIUS+4.0,stroke=1,fill=1)
                 c.restoreState()
@@ -463,6 +464,7 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
              logo: Path | None = None,
              color_titulo: str = '#213A4C', color_subtitulo: str = '#5E7180',
              color_respuestas: str = DEFAULT_ANSWER_COLOR,
+             color_acetato: str = DEFAULT_ACETATE_COLOR,
              tamano_papel: str = 'A4', letra: float = 9.0,
              reutilizable: bool = False) -> Path:
     # Validar ANTES de crear archivos evita carpetas incompletas y tintas inválidas.
@@ -470,12 +472,13 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
     color_titulo=hex_color(color_titulo,'Color del título')
     color_subtitulo=hex_color(color_subtitulo,'Color del subtítulo')
     color_respuestas=hex_color(color_respuestas,'Color de la hoja de respuestas')
+    color_acetato=hex_color(color_acetato,'Color del acetato')
     size=paper_dimensions(tamano_papel)
     letra=validated_font_size(letra)
     if not isinstance(reutilizable,bool):
         raise ExamError('Modalidad reutilizable inválida.')
     titulo=_text(titulo,label='Título',limit=90)
-    subtitulo=_text(subtitulo,label='Subtítulo',limit=90)
+    subtitulo=_text(subtitulo,label='Subtítulo',limit=90) if subtitulo.strip() else ''
     empresa=_text(empresa,label='Empresa',limit=100) if empresa.strip() else ''
     puesto=_text(puesto,label='Área / grupo',limit=85) if puesto.strip() else ''
     instrucciones=_text(instrucciones,label='Instrucciones',limit=650) if instrucciones.strip() else ''
@@ -500,8 +503,8 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
                     empresa=empresa,puesto=puesto,instrucciones=instrucciones,logo=safe_logo,
                     color_titulo=rgb_titulo,color_subtitulo=rgb_subtitulo,
                     size=size,font_size=letra,reusable=reutilizable),
-           'Hoja_respuestas.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=False,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas),
-           'Acetato_clave.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=True,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas),
+           'Hoja_respuestas.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=False,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas,acetate_color=colors.HexColor(color_acetato)),
+           'Acetato_clave.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=True,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas,acetate_color=colors.HexColor(color_acetato)),
            'Clave_docente.pdf':lambda p:_key_pdf(p,questions,titulo,normal,bold,empresa=empresa,puesto=puesto,size=size),
         }
         for name,action in files.items():
@@ -519,7 +522,7 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
         manifest={'titulo':titulo,'subtitulo':subtitulo,'empresa':empresa,'puesto':puesto,'grupo':puesto,
                   'instrucciones':instrucciones,'preguntas':len(questions),
                   'color_titulo':color_titulo,'color_subtitulo':color_subtitulo,
-                  'color_respuestas':color_respuestas,'tamano_papel':tamano_papel,
+                  'color_respuestas':color_respuestas,'color_acetato':color_acetato,'tamano_papel':tamano_papel,
                   'letra':letra,'reutilizable':reutilizable,
                   'fecha_generacion':datetime.now().astimezone().isoformat(),
                   'formato':f'{tamano_papel}; clave y hoja comparten coordenadas; impresión al 100%',

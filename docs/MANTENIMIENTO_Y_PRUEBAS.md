@@ -66,3 +66,41 @@ La CI de GitHub prueba Windows/Ubuntu con Python 3.11–3.13 y construcción Doc
 - `biblioteca.db_connect` ejecuta migraciones aditivas para bibliotecas de versiones anteriores; `eliminado_en` permite borrado lógico. `list_exams(trash=True)` muestra papelera. `restore_exam` recupera claves/recursos, y `purge_exam` exige un registro previamente eliminado y lo borra definitivamente en una transacción, aprovechando la clave foránea `ON DELETE CASCADE`.
 - La interfaz no expone directamente el borrado irreversible: solicita confirmación de nombre y la palabra `ELIMINAR`, para prevenir errores de ratón. Los PDF exportados son independientes y no se eliminan.
 - Tests: `python -m pytest -q tests/test_estudio_y_papelera.py`. Para la interfaz se puede usar `xvfb-run` en Linux o probar manualmente en Windows con datos de ejemplo.
+
+
+## PR #8 — Arquitectura de renderizado y cierre del editor
+
+El editor `estudio_diseno.open_design_studio()` muestra páginas del PDF real. El objeto `PreviewWorker` de `preview_worker.py` genera y rasteriza los bytes PDF en un **proceso separado** con inicio `spawn`, sin compartir widgets Tkinter. Cada cambio de configuración incrementa una revisión; el proceso devuelve imagen, total de páginas y posible error, y la interfaz solo publica la última revisión válida. Los cambios pendientes se consolidan antes de enviarlos y el PDF puede reutilizarse si la página o el zoom cambian pero no el contenido.
+
+**Cierre correcto:** `WM_DELETE_WINDOW`, botón Volver, tecla Esc y destrucción de la ventana padre deben cancelar `after` pendientes, remover todos los `trace_add`, liberar imágenes y finalizar el proceso hijo. No mover métodos Tk a procesos/hilos trabajadores. La prueba `tests/test_gui.py` realiza 20 aperturas/cierres y cubre el fallo de render, pero la instalación real en Windows y el escalado DPI siguen necesitando comprobación manual.
+
+`export_worker.export_documents()` genera los cuatro PDF en otro proceso, mientras la ventana principal consulta el canal de resultados con `after`. No iniciar exportaciones duplicadas; si falla el proceso, presentar el error al usuario y restaurar los botones. Si se modifica el proceso, añadir pruebas para cierres, excepciones y ausencia de archivos incompletos.
+
+## PR #8 — Acetato RGB y persistencia
+
+La configuración `color_acetato` usa el mismo contrato hexadecimal `#RRGGBB` de las otras paletas. Se aplica en `src/evaluaciones/core.py::_answer_sheet()` al contorno y relleno semitransparente de las posiciones correctas; **nunca alterar el cálculo compartido de `_bubbles()`** por color. El valor por defecto es `#167341` para bibliotecas anteriores.
+
+`biblioteca.db_connect()` agrega `color_acetato` de forma aditiva y crea un respaldo SQLite `.antes-migracion-<id>.bak` cuando corresponde. El registro no debe sobrescribirse ni perder fotos o claves. Para una prueba controlada:
+1. Cerrar la aplicación y hacer copia de `datos/biblioteca.sqlite3`, fuera del repositorio.
+2. Crear una biblioteca temporal del esquema anterior con preguntas e imagen, abrirla con el código actualizado, comprobar que los recursos siguen intactos y revisar el respaldo.
+3. Guardar y reabrir un cuestionario con color distinto, verificar el color en `Acetato_clave.pdf` y en el manifiesto, y comparar posiciones contra `Hoja_respuestas.pdf`.
+4. Probar A4, Carta y Oficio con 1, 20 y 100 preguntas; las coordenadas de cada número/opción deben coincidir.
+
+## Pruebas de aceptación manual antes de fusionar PR #8
+
+- En el Windows donde se utiliza: abrir, cambiar colores, papel, zoom, introducir/error en Excel, cambiar Cuadernillo/Respuestas/Acetato y cerrar con X, Volver y Esc; repetir 20 ciclos y probar un cuestionario de 100 reactivos.
+- Verificar que la interfaz no queda congelada mientras exporta ni deja procesos Python huérfanos al cerrarse.
+- Abrir la biblioteca anterior, revisar la migración, modificar un registro y comprobar que imágenes, respuestas, claves, papelera y revisiones se conservan; restaurar y purgar solo elementos de prueba.
+- Imprimir hoja y acetato **del mismo examen y revisión** al 100 % de escala y superponer ambos; no imprimir «ajustar a papel» ni mezclar A4/Carta/Oficio.
+- No distribuir exámenes con respuestas, bibliotecas privadas o archivos de producción durante las pruebas. Documentar expresamente cualquier prueba no ejecutada.
+
+### Ejecución automatizada
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q
+.\Iniciar_Windows.bat --verificar
+```
+
+CI aprobada para el commit `dd3b274` en [GitHub Actions 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). Los tests gráficos se omiten si no existe un escritorio disponible; no confundir éxito de CI con pruebas físicas.
+

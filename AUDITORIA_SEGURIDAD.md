@@ -82,3 +82,14 @@ Usar la **adaptación** y mantener el original únicamente como referencia MIT. 
 ## Consolidación de ramas y alcance de pruebas (08/11/2026)
 
 La función de interfaz empresarial y la ejecución con Docker se desarrollaron inicialmente en ramas encadenadas; la segunda incluye la primera. Las 23 pruebas de Python aprobaron en el entorno de desarrollo y GitHub Actions confirmó las cuatro combinaciones Python 3.11/3.12 sobre Windows/Ubuntu, además del smoke test de Docker en Ubuntu (ejecuciones 42532803398 y 42532807871). No se ha probado aquí la impresión real ni Docker Desktop en un equipo Windows físico. La distribución recomendada será la rama principal una vez integrada la versión validada; las ramas de funciones anteriores quedan como historial temporal.
+
+
+## Revisión incremental del PR #8 (08/11/2026)
+
+**Estado:** PR [#8](https://github.com/francisco-oos/Exam-PDF-Generator/pull/8) abierto y sin fusionar durante esta revisión. El commit `dd3b274` pasó la matriz de GitHub Actions [42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303) en Windows/Ubuntu y Docker.
+
+El procesamiento de la vista PDF y de la exportación sale del hilo de Tkinter hacia procesos privados locales; esto reduce el riesgo de bloqueo de la ventana y permite cerrar el editor, pero no elimina todos los riesgos de agotamiento de memoria al renderizar archivos muy grandes. Se añade `color_acetato` a los datos y a la exportación manteniendo el verde anterior por defecto. El subproceso de previsualización no expone servicios por red.
+
+La migración de SQLite genera una copia mediante la API `sqlite3.backup()` antes de agregar el nuevo campo cuando detecta un esquema antiguo; conviene conservar además un respaldo hecho por el usuario con el programa cerrado. La biblioteca sigue sin cifrado y contiene las respuestas correctas; nunca subirla al repositorio. El borrado desde papelera sigue siendo irreversible y se debe probar únicamente con registros ficticios.
+
+**Validaciones pendientes antes de aceptación:** prueba física del acetato a escala 100 %; reproducción del comportamiento de apertura/cierre con el usuario en Windows; comprobación de uso prolongado del renderizador y de migración con una copia real, no con su único archivo de trabajo. La CI verde no demuestra por sí sola ausencia de defectos.

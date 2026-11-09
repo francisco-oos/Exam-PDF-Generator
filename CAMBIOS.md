@@ -1,5 +1,15 @@
 # Historial de cambios
 
+## 2026-11-08 · Modernización integral y acetato RGB (PR #8, en revisión)
+
+- Incorporada la paleta RGB del acetato, independiente de la hoja de respuestas, en Tkinter, vista PDF, generación y SQLite; el valor previo verde conserva su compatibilidad.
+- Migración aditiva de `color_acetato` que preserva registros y recursos y crea una copia de seguridad de la biblioteca previa cuando corresponde.
+- PDFium y ReportLab para la vista exacta se ejecutan en un proceso de renderizado independiente; se aprovecha la reutilización del PDF cuando solo cambia el zoom o la página, y se cancela el proceso al cerrar.
+- La exportación de PDF se ejecuta en un proceso separado para mantener la interfaz disponible; se impiden exportaciones simultáneas.
+- El subtítulo realmente es opcional, como muestra la interfaz. Mejoras de búsqueda de cuestionarios, avisos de cambios pendientes y controles de edición.
+- Pruebas automatizadas de ciclo de vida de Tk, renderizado, migración, acetato y nueve combinaciones de tamaños y número de reactivos; CI aprobada en Windows 3.11/3.12/3.13, Ubuntu y Docker: [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303).
+- **Pendientes de aceptación:** probar manualmente el editor en el Windows del usuario, impresión hoja + acetato al 100 % y verificación de accesibilidad/DPI. No considerar el PR aceptado solo porque las pruebas automáticas estén verdes.
+
 ## 2026-11-08 · Interfaz empresarial (rama de revisión)
 
 - Publicación propuesta en `francisco-oos/Exam-PDF-Generator`, rama `work/chatgpt/2026-11-08-interfaz-profesional`.

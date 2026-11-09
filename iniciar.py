@@ -41,12 +41,12 @@ def open_folder(path: Path):
         subprocess.Popen(['xdg-open', str(path)])
 
 
-def build_ui():
+def build_ui(*, open_editor=False):
     """Construir la ventana sin entrar al ciclo de eventos (permite smoke tests)."""
     root = tk.Tk()
     root.title('Generador de evaluaciones | Diseño empresarial')
     root.geometry('1340x818')
-    root.minsize(1120, 720)
+    root.minsize(900, 600)
     root.configure(bg=BG)
 
     style = ttk.Style(root)
@@ -66,9 +66,12 @@ def build_ui():
     color_title = tk.StringVar(value=DEFAULT_COLOR_TITLE)
     color_subtitle = tk.StringVar(value=DEFAULT_COLOR_SUBTITLE)
     color_answers = tk.StringVar(value='#213A4C')
+    color_acetate = tk.StringVar(value='#167341')
     paper_choice = tk.StringVar(value='A4')
     body_font = tk.StringVar(value='9.0')
     reuse_booklet = tk.BooleanVar(value=True)
+    instructions_var = tk.StringVar(value='Lee cada pregunta y elige una respuesta. Marca tus respuestas únicamente en la hoja separada.')
+    dirty = tk.StringVar(value='Sin guardar en biblioteca')
     large_preview: list[dict | None] = [None]
 
     lib_name = tk.StringVar(value='')
@@ -164,6 +167,8 @@ def build_ui():
     ttk.Entry(row_xlsx,textvariable=file_var,style='Modern.TEntry').grid(row=0,column=0,sticky='ew')
 
     def choose_xlsx():
+        if not confirm_replace():
+            return
         chosen=filedialog.askopenfilename(title='Seleccionar Excel de preguntas',
                     filetypes=[('Libro de Excel','*.xlsx')],parent=root)
         if chosen:
@@ -194,7 +199,20 @@ def build_ui():
                         bg='#f9fbfc',relief='flat',highlightthickness=1,
                         highlightbackground='#dce5ea',padx=10,pady=8)
     instruction.grid(row=12,column=0,columnspan=2,sticky='ew',padx=17,pady=(1,8))
-    instruction.insert('1.0','Lee cada pregunta y elige una respuesta. Marca tus respuestas únicamente en la hoja separada.')
+    instruction.insert('1.0', instructions_var.get())
+    def sync_instruction(*_):
+        value = instructions_var.get()
+        if instruction.get('1.0', 'end-1c') != value:
+            instruction.delete('1.0', 'end')
+            instruction.insert('1.0', value)
+    instructions_var.trace_add('write', sync_instruction)
+    def text_changed(event=None):
+        if instruction.edit_modified():
+            value = instruction.get('1.0', 'end-1c')
+            if instructions_var.get() != value:
+                instructions_var.set(value)
+            instruction.edit_modified(False)
+    instruction.bind('<<Modified>>', text_changed)
     label('Colores del documento (RGB)',14)
     colorsrow=tk.Frame(content,bg=WHITE)
     colorsrow.grid(row=15,column=0,columnspan=2,sticky='ew',padx=17,pady=(2,13))
@@ -238,6 +256,8 @@ def build_ui():
         bg='#e4edf1',bd=0,padx=8,pady=7,cursor='hand2').pack(side='left')
     tk.Label(ans_row,text='Cambia tintas y círculos, no el fondo blanco.',bg=WHITE,
         fg=GRAY,font=('Segoe UI',8)).pack(side='left',padx=(9,0))
+    label('Color del acetato (RGB)',27)
+    field(color_acetate,28)
     label('Nombre en mi biblioteca (opcional)',24)
     field(lib_name,25)
     tk.Label(content,text='El campo de grupo admite cualquier texto: colaboradores, alumnos, proveedores, turno o área.',
@@ -279,14 +299,14 @@ def build_ui():
         questions=load_questions()
         logo=Path(logo_var.get().strip()) if logo_var.get().strip() else None
         def safe_color(var,default):
-            try:return hex_color(var.get())
-            except ExamError:return default
+            return hex_color(var.get())
         return PreviewData(empresa=company_var.get().strip(),grupo=group_var.get().strip(),
              titulo=title_var.get().strip(),subtitulo=subtitle_var.get().strip(),
              instrucciones=instruction.get('1.0','end-1c').strip(),questions=questions,logo=logo,
              color_titulo=safe_color(color_title,DEFAULT_COLOR_TITLE),
              color_subtitulo=safe_color(color_subtitle,DEFAULT_COLOR_SUBTITLE),
              color_respuestas=safe_color(color_answers,'#213A4C'),
+             color_acetato=hex_color(color_acetate.get(), 'Color del acetato'),
              tamano_papel=paper_choice.get(),letra=float(body_font.get()),
              reutilizable=bool(reuse_booklet.get()))
 
@@ -310,9 +330,11 @@ def build_ui():
             'papel': paper_choice, 'letra': body_font,
             'reutilizable': reuse_booklet, 'color_titulo': color_title,
             'color_subtitulo': color_subtitle, 'color_respuestas': color_answers,
+            'color_acetato': color_acetate, 'instrucciones': instructions_var,
         }
         editor=open_design_studio(root,datos_fn=preview_data,variables=vars_studio,
-            editar_preguntas=edit_current,guardar=save_in_library,generar=run)
+            editar_preguntas=edit_current,guardar=save_in_library,generar=run,
+            importar=choose_xlsx,biblioteca=open_library,plantilla=template_download,estado=dirty)
         large_preview[0]={'win':editor}
         def clear_state(event):
             if event.widget is editor:
@@ -321,9 +343,9 @@ def build_ui():
 
     def render():
         scheduled[0]=None
-        data=preview_data()
-        questions=data.questions
         try:
+            data=preview_data()
+            questions=data.questions
             preview_width=max(245,min(370,int((right.winfo_height()-158)*0.707)))
             pic=render_preview(data,current_view.get(),width=preview_width)
             photo=ImageTk.PhotoImage(pic,master=root)
@@ -359,8 +381,9 @@ def build_ui():
         tab_buttons[name]=b
     mode('Cuadernillo')
 
-    for var in (file_var,logo_var,company_var,group_var,title_var,subtitle_var,color_title,color_subtitle,color_answers,paper_choice,body_font,reuse_booklet):
+    for var in (file_var,logo_var,company_var,group_var,title_var,subtitle_var,color_title,color_subtitle,color_answers,color_acetate,paper_choice,body_font,reuse_booklet,instructions_var):
         var.trace_add('write',schedule)
+        var.trace_add('write',lambda *_: dirty.set('Cambios pendientes de guardar'))
     right.bind('<Configure>',schedule)
     instruction.bind('<KeyRelease>',schedule)
     instruction.bind('<<Paste>>',lambda event:root.after(100,schedule))
@@ -388,10 +411,11 @@ def build_ui():
                 subtitulo=subtitle_var.get(),instrucciones=instruction.get('1.0','end-1c'),
                 questions=questions,logo=Path(logo_var.get()) if logo_var.get().strip() else None,
                 color_titulo=color_title.get(),color_subtitulo=color_subtitle.get(),
-                color_respuestas=color_answers.get(),tamano_papel=paper_choice.get(),
+                color_respuestas=color_answers.get(),color_acetato=color_acetate.get(),tamano_papel=paper_choice.get(),
                 letra=float(body_font.get()),reutilizable=bool(reuse_booklet.get()),exam_id=active_id[0])
             active_id[0]=key
             if not lib_name.get().strip():lib_name.set(title_var.get())
+            dirty.set('Guardado en biblioteca')
             status.set('Cuestionario guardado en biblioteca local SQLite')
             if not silent:
                 messagebox.showinfo('Biblioteca','Cuestionario, respuestas, imágenes y datos guardados. Puedes abrirlo o editarlo después.',parent=root)
@@ -400,11 +424,19 @@ def build_ui():
             if not silent:messagebox.showerror('No se guardó',str(exc),parent=root)
             return None
 
+    def confirm_replace():
+        """Protege las ediciones en memoria antes de cambiar de fuente o salir."""
+        if dirty.get() != 'Cambios pendientes de guardar':
+            return True
+        answer = messagebox.askyesnocancel('Cambios pendientes',
+            '¿Guardar el cuestionario antes de continuar?\n'
+            'Sí: guardar en biblioteca. No: continuar sin guardar. Cancelar: seguir editando.', parent=root)
+        if answer is None:
+            return False
+        return not answer or save_in_library(silent=True) is not None
+
     def edit_current():
         questions=load_questions()
-        if not questions:
-            messagebox.showerror('Faltan preguntas',cache['error'] or 'Selecciona primero un Excel válido.',parent=root)
-            return
         edited=edit_questions(root,questions)
         if edited is None:return
         new_path=BASE/'datos'/'ediciones'/uuid4().hex/'Preguntas.xlsx'
@@ -427,6 +459,10 @@ def build_ui():
         trashed=tk.BooleanVar(master=win,value=False)
         tk.Checkbutton(options,text='Mostrar papelera (cuestionarios eliminados)',
             variable=trashed,command=lambda:refresh(),font=('Segoe UI',10)).pack(side='left')
+        search=tk.StringVar(master=win)
+        ttk.Label(options,text='Buscar:').pack(side='left',padx=(16,5))
+        ttk.Entry(options,textvariable=search).pack(side='left',fill='x',expand=True)
+        search.trace_add('write',lambda *_:refresh())
         frame=tk.Frame(win,padx=18,pady=8);frame.pack(fill='both',expand=True)
         tree=ttk.Treeview(frame,columns=('nombre','grupo','preguntas','revision','fecha'),
                           show='headings',selectmode='browse')
@@ -447,6 +483,8 @@ def build_ui():
         def refresh():
             tree.delete(*tree.get_children())
             for item in list_exams(db_path,trash=trashed.get()):
+                if search.get().casefold() not in (item['nombre']+' '+item['grupo']+' '+item['titulo']).casefold():
+                    continue
                 tree.insert('','end',iid=item['id'],values=(item['nombre'],item['grupo'],
                     item['total'],item['revision'],item['actualizado_en'][:19].replace('T',' ')))
             deleted=trashed.get()
@@ -460,6 +498,7 @@ def build_ui():
             if trashed.get():return
             item=pick()
             if not item:return
+            if not confirm_replace():return
             try:
                 exam=load_exam(db_path,item,BASE/'datos'/'biblioteca_cache')
                 workbook=export_workbook(exam.questions,BASE/'datos'/'biblioteca_cache'/exam.id/'Preguntas.xlsx')
@@ -469,12 +508,14 @@ def build_ui():
             lib_name.set(exam.nombre);company_var.set(exam.empresa);group_var.set(exam.grupo)
             title_var.set(exam.titulo);subtitle_var.set(exam.subtitulo)
             color_title.set(exam.color_titulo);color_subtitle.set(exam.color_subtitulo)
+            color_acetate.set(exam.color_acetato)
             color_answers.set(exam.color_respuestas);paper_choice.set(exam.tamano_papel)
             body_font.set(f'{exam.letra:.1f}');reuse_booklet.set(exam.reutilizable)
-            instruction.delete('1.0','end');instruction.insert('1.0',exam.instrucciones)
+            instructions_var.set(exam.instrucciones)
             logo_var.set(str(exam.logo) if exam.logo else '')
             file_var.set(str(workbook));cache['key']=None
             status.set(f'Cuestionario cargado · revisión {exam.revision}. Puedes editarlo y diseñarlo.')
+            dirty.set('Guardado en biblioteca')
             win.destroy();schedule()
         def delete_selected():
             item=pick()
@@ -537,35 +578,63 @@ def build_ui():
     tk.Button(toolbar,text='Guardar cuestionario',command=save_in_library,
         bg=TEAL,fg=WHITE,bd=0,padx=9,pady=9,cursor='hand2').pack(side='left')
 
+    exporting = [False]
+
     def run():
-        btn.config(state='disabled',text='Generando…')
-        root.update_idletasks()
+        """Toma una instantánea en Tk y exporta fuera del ciclo de eventos."""
+        if exporting[0]:
+            return
+        from multiprocessing import get_context
+        from export_worker import export_documents
         try:
-            folder=generate(Path(file_var.get()),BASE/'salidas',title_var.get(),subtitle_var.get(),
-                empresa=company_var.get(),puesto=group_var.get(),
-                instrucciones=instruction.get('1.0','end-1c'),
+            options = dict(empresa=company_var.get(), puesto=group_var.get(),
+                instrucciones=instructions_var.get(),
                 logo=Path(logo_var.get()) if logo_var.get().strip() else None,
-                color_titulo=color_title.get(),color_subtitulo=color_subtitle.get(),
-                color_respuestas=color_answers.get(),tamano_papel=paper_choice.get(),
-                letra=float(body_font.get()),reutilizable=bool(reuse_booklet.get()))
-        except (ExamError,OSError,ValueError) as exc:
-            status.set('Revisa los datos · no se crearon los documentos.')
-            messagebox.showerror('No se pudo generar la evaluación',str(exc),parent=root)
-        except Exception as exc:
-            status.set('Error al generar los documentos.')
-            messagebox.showerror('Error inesperado',str(exc),parent=root)
-        else:
-            last_output[0]=folder
-            # Las evaluaciones generadas también se conservan para reabrirlas.
-            saved=save_in_library(silent=True)
+                color_titulo=color_title.get(), color_subtitulo=color_subtitle.get(),
+                color_respuestas=color_answers.get(), color_acetato=color_acetate.get(),
+                tamano_papel=paper_choice.get(), letra=float(body_font.get()),
+                reutilizable=bool(reuse_booklet.get()))
+            source, title, subtitle = Path(file_var.get()), title_var.get(), subtitle_var.get()
+        except (ValueError, OSError) as exc:
+            messagebox.showerror('Revisa los ajustes', str(exc), parent=root)
+            return
+        # Guardar ahora evita asociar los cambios posteriores con esta exportación.
+        saved = save_in_library(silent=True)
+        exporting[0] = True
+        btn.config(state='disabled', text='Generando…')
+        status.set('Generando documentos; puedes seguir consultando la vista previa.')
+        context = get_context('spawn')
+        results, child_results = context.Pipe(duplex=False)
+        process = context.Process(target=export_documents,
+            args=(child_results, source, BASE/'salidas', title, subtitle, options), daemon=True)
+        process.start()
+        child_results.close()
+        def receive_export():
+            try:
+                if not results.poll():
+                    raise BlockingIOError()
+                folder, error = results.recv()
+            except (BlockingIOError, EOFError):
+                if process.is_alive():
+                    root.after(80, receive_export)
+                    return
+                folder, error = None, 'El proceso de exportación terminó inesperadamente.'
+            process.join(timeout=.2)
+            results.close()
+            exporting[0] = False
+            btn.config(state='normal', text='Generar documentos')
+            if error:
+                status.set('No se completó la exportación. Revisa los datos e inténtalo de nuevo.')
+                messagebox.showerror('No se pudo generar la evaluación', error, parent=root)
+                return
+            last_output[0] = folder
             status.set('Documentos generados: '+folder.name)
             openbtn.configure(state='normal')
             messagebox.showinfo('Evaluación generada',
-               'Se generaron los cuatro PDF, una copia de las preguntas y se guardó en la biblioteca' +
-               (' local.' if saved else ' (revisa la biblioteca para guardarlo).') + '\n\n'+str(folder)+
-               '\n\nImprime la hoja y el acetato a escala 100 %.',parent=root)
-        finally:
-            btn.config(state='normal',text='Generar documentos')
+                'Se generaron cuatro PDF, copia de preguntas, recursos y manifiesto SHA-256.' +
+                (' La configuración se guardó en biblioteca.' if saved else ' La biblioteca no se pudo guardar; usa Guardar cuestionario.') +
+                '\n\n'+str(folder)+'\n\nImprime hoja y acetato a escala 100 %.', parent=root)
+        root.after(80, receive_export)
 
     btn=tk.Button(bottom,text='Generar documentos',command=run,fg=WHITE,bg=TEAL,
         activebackground='#096272',activeforeground=WHITE,
@@ -583,11 +652,20 @@ def build_ui():
     openbtn.config(state='disabled')
     openbtn.pack(side='right',padx=(0,10))
     root.after(50,render)
+    if open_editor:
+        root.after(100,open_large_preview)
+    def close_application():
+        if exporting[0]:
+            messagebox.showinfo('Exportación en curso', 'Espera a que termine la exportación antes de cerrar.', parent=root)
+            return
+        if confirm_replace():
+            root.destroy()
+    root.protocol('WM_DELETE_WINDOW', close_application)
     return root
 
 
 def main():
-    root=build_ui()
+    root=build_ui(open_editor=True)
     root.mainloop()
 
 

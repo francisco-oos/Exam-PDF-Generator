@@ -23,6 +23,7 @@ def main(argv=None):
                         help='Quitar datos personales del cuadernillo e imprimir marca de agua')
     parser.add_argument('--color-respuestas', default='#213A4C',
                         help='Color hexadecimal de encabezados y círculos de la hoja')
+    parser.add_argument('--color-acetato', default='#167341', help='Color RGB del acetato #RRGGBB')
     parser.add_argument('--color-titulo', default='#213A4C')
     parser.add_argument('--color-subtitulo', default='#5E7180')
     args = parser.parse_args(argv)
@@ -32,6 +33,7 @@ def main(argv=None):
                              instrucciones=args.instrucciones,logo=args.logo,
                              tamano_papel=args.tamano_papel,letra=args.letra,
                              reutilizable=args.reutilizable,color_respuestas=args.color_respuestas,
+                             color_acetato=args.color_acetato,
                              color_titulo=args.color_titulo,color_subtitulo=args.color_subtitulo)
     except (ExamError,OSError,ValueError) as exc:
         print('ERROR: '+str(exc),file=sys.stderr)

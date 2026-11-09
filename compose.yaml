@@ -13,6 +13,7 @@ services:
     environment:
       EXAM_DATA_DIR: /datos
       EXAM_PORT: "8765"
+      EXAM_BIND: "0.0.0.0"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
