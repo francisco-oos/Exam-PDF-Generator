@@ -13,7 +13,7 @@ from PIL import Image,ImageTk,ImageDraw
 
 from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
                     export_report,PAPERS,bubble_positions,RENDER_DPI,
-                    render_review_with_acetato,resolve_pdf_session)
+                    render_review_with_acetato,inspect_pdf_sessions)
 from .demo import create_synthetic_scan
 
 NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
@@ -38,6 +38,37 @@ def selected_question_number(selection, choices):
         return choices.index(selection)+1
     except ValueError as exc:
         raise ValueError('Selecciona una pregunta del examen en la lista.') from exc
+
+
+def describe_scan_inspection(inspection, current_sid=None):
+    """Resumen legible del cotejo previo, sin suponer identidades por título."""
+    def pages_label(values):
+        numbers=list(values)
+        first=', '.join(map(str,numbers[:16]))
+        if len(numbers)>16:
+            first+=f', … (+{len(numbers)-16})'
+        return first or '—'
+    groups=inspection['grupos']
+    unknown=inspection['no_identificadas']
+    lines=[f'PDF de {inspection["total_paginas"]} páginas.',
+           f'Evaluaciones verificadas por QR firmado: {len(groups)}.']
+    for group in groups:
+        suffix=(' · OTRA EVALUACIÓN ABIERTA'
+                if current_sid and group['sesion_id']!=current_sid else '')
+        lines.append(
+            f'• {group["evaluacion"]} ({group["sesion_id"]}): '
+            f'{len(group["paginas"])} hoja(s) · página(s) '
+            f'{pages_label(group["paginas"])}{suffix}'
+        )
+    if unknown:
+        lines.append(
+            f'• SIN IDENTIFICAR: {len(unknown)} hoja(s) · páginas '
+            f'{pages_label(x["pagina"] for x in unknown)}.'
+        )
+        lines.append(
+            'Las hojas sin QR verificable NO se calificarán automáticamente.'
+        )
+    return '\n'.join(lines)
 
 
 class OMRApp:
@@ -200,7 +231,6 @@ class OMRApp:
         self._field(b,'Cuestionario XLSX',self.file_questions,True)
         controls=tk.Frame(b,bg=WHITE);controls.pack(fill='x')
         self._btn(controls,'Importar preguntas',self.choose_questions)
-        self._btn(controls,'Cargar ejemplo ficticio',self.load_example)
         if self.questions:
             tk.Label(b,text=f'{len(self.questions)} preguntas · {len(set(q["tema"] for q in self.questions))} temas',bg=WHITE,fg=TEAL).pack(anchor='w')
         c2=self._card()
@@ -241,7 +271,6 @@ class OMRApp:
         c=self._card();self._field(c,'Archivo de personal',self.file_roster,True)
         controls=tk.Frame(c,bg=WHITE);controls.pack(fill='x')
         self._btn(controls,'Cargar lista',self.choose_roster,True)
-        self._btn(controls,'Usar 8 personas ficticias',self.sample_roster)
         if self.session_id:self._note('La lista queda fijada en la sesión ya creada. Para cambiarla, crea una sesión nueva desde Inicio.')
         self._table(['ID','Nombre','Área','Grupo'],[(p['id'],p['nombre'],p.get('area',''),p.get('grupo','')) for p in self.people])
 
@@ -323,10 +352,10 @@ class OMRApp:
                        'selecciona la sesión manualmente desde Historial.')
         c=self._card()
         self._btn(c,'Cargar PDF escaneado',self.load_scanned,True)
-        if self.session_id:
-            self._btn(c,'Simular lectura OMR real con hojas sintéticas',
-                      self.simulate_scanned)
-        self._note('La simulación sí utiliza el mismo motor de reconocimiento y compara píxeles de hojas marcadas, pero las marcas se generan digitalmente. No demuestra precisión en la Xerox física.')
+        self._note('Antes de calificar, se verifican los QR de TODAS las páginas. '
+                   'Si hay hojas de diferentes evaluaciones, se mostrarán '
+                   'las páginas de cada una y podrás confirmar su separación. '
+                   'Las hojas sin QR firmado no recibirán una calificación automática.')
         self._scan_status=tk.Text(self.stage,height=8,wrap='word',bg=WHITE,fg=INK,font=('Consolas',10))
         self._scan_status.pack(fill='x',pady=10)
 
@@ -343,73 +372,130 @@ class OMRApp:
         if f:self._run_scan(Path(f))
 
     def _run_scan(self,source):
-        """Nunca procesa píxeles en Tk: un hilo hace el trabajo y entrega resultado por Queue."""
+        """Primero inspecciona TODAS las páginas sin escribir calificaciones."""
         if self.scanning:
-            messagebox.showinfo('Lectura en proceso','Ya hay un lote en procesamiento.',parent=self.window)
+            messagebox.showinfo('Lectura en proceso',
+                                'Ya hay un lote en procesamiento.',parent=self.window)
             return
         self.scanning=True
-        original_session=self.session_id
-        self.feedback.set('Localizando folios y leyendo PDF en segundo plano…')
-        def work():
+        self.feedback.set('Verificando los QR de todas las hojas y sus evaluaciones…')
+        def inspect():
             try:
-                detected=resolve_pdf_session(self.store,Path(source))
-                sid=detected or original_session
-                if not sid:
-                    raise ValueError(
-                        'No se reconoció ningún QR válido. Selecciona desde '
-                        'Historial la evaluación correspondiente y vuelve a importar.')
-                result=scan_document(self.store,sid,Path(source))
-                self.scan_updates.put(('ok',source,{
-                    'report':result,'sid':sid,
-                    'automatic':bool(detected and detected!=original_session),
-                }))
+                result=inspect_pdf_sessions(self.store,Path(source))
+                self.scan_updates.put(('preflight',source,result))
             except Exception as exc:
                 self.scan_updates.put(('error',source,str(exc)))
+        Thread(target=inspect,daemon=True).start()
+        self.window.after(120,self._finish_scan)
+
+    def _process_verified_groups(self,source,inspection,original_session):
+        """Una sesión y una clave por grupo de páginas, después de aprobación."""
+        def work():
+            processed=[]
+            try:
+                for group in inspection['grupos']:
+                    sid=group['sesion_id']
+                    # Convertir páginas visibles (1-based) a índices PDF (0-based).
+                    indices=[number-1 for number in group['paginas']]
+                    report=scan_document(
+                        self.store,sid,Path(source),page_indices=indices)
+                    processed.append({'sid':sid,'evaluacion':group['evaluacion'],
+                                      'paginas':group['paginas'],'report':report})
+                self.scan_updates.put(('ok',source,{
+                    'processed':processed,'inspection':inspection,
+                    'original_session':original_session,
+                }))
+            except Exception as exc:
+                detail=(f'Ya se registraron {len(processed)} aplicaciones. '
+                        'Puedes reimportar sin duplicar hojas. '
+                        if processed else '')
+                self.scan_updates.put(('error',source,detail+str(exc)))
         Thread(target=work,daemon=True).start()
         self.window.after(120,self._finish_scan)
 
     def _finish_scan(self):
-        try:status,source,payload=self.scan_updates.get_nowait()
+        try:
+            status,source,payload=self.scan_updates.get_nowait()
         except Empty:
-            if self.window.winfo_exists():self.window.after(120,self._finish_scan)
+            if self.window.winfo_exists():
+                self.window.after(120,self._finish_scan)
             return
-        self.scanning=False
+
         if status=='error':
-            self.feedback.set('No se completó la lectura.')
+            self.scanning=False
+            self.feedback.set('No se completó la lectura: '+str(payload))
             messagebox.showerror('No se pudo leer PDF',payload,parent=self.window)
             return
-        report=payload['report']
-        self.session_id=payload['sid']
-        if payload['automatic']:
-            session=self.store.session(self.session_id)
-            self.mode.set(session['modo'])
-            self.paper.set(session['papel'])
-            self.title.set(session['titulo'])
-            self.questions=session['preguntas']
-            self.people=session['personal']
-        auto=(' · Sesión reconocida por QR: '+self.session_id
-              if payload['automatic'] else '')
-        summary=(f'PDF: {source}'+auto+f' · Páginas: {report["leidas"]} · '
-            f'Validadas: {report["validadas"]} · Pendientes: {report["revisar"]} · '
-            f'Sin identificar: {report["sin_identificar"]} · Duplicadas: {report["duplicadas"]} · '
-            f'Reimportadas: {report["repetidas"]} · '
-            f'Reprocesadas: {report.get("reprocesadas",0)}')
-        problems=[d for d in report.get('detalles',[])
-                  if d.get('diagnostico') and d.get('estado')=='sin_identificar']
-        if problems:
-            reasons=sorted({d['diagnostico'] for d in problems})
-            summary+=' · Diagnóstico: '+'; '.join(reasons)
+
+        if status=='preflight':
+            inspection=payload
+            groups=inspection['grupos']
+            summary=describe_scan_inspection(inspection,self.session_id)
+            if not groups:
+                self.scanning=False
+                self.feedback.set('Sin evaluaciones verificadas. Ninguna hoja fue calificada.')
+                messagebox.showwarning(
+                    'No se pudo identificar la evaluación',
+                    summary+'\n\nRevisa los QR o selecciona y verifica la evaluación '
+                    'de cada hoja antes de una captura manual.',
+                    parent=self.window)
+                return
+            foreign=bool(self.session_id and any(
+                group['sesion_id']!=self.session_id for group in groups))
+            mixed=(inspection['mezclado'] or foreign or
+                   bool(inspection['no_identificadas']))
+            if mixed:
+                approved=messagebox.askyesno(
+                    'Atención: hojas de distintas evaluaciones',
+                    summary+'\n\n¿Procesar ÚNICAMENTE las hojas con QR '
+                    'verificable, cada una con la clave de su propia evaluación?'
+                    '\n\nLas demás no se calificarán. Pulsa No para cancelar '
+                    'sin modificar resultados.',
+                    parent=self.window)
+                if not approved:
+                    self.scanning=False
+                    self.feedback.set('Lectura cancelada: no se calificó ninguna hoja.')
+                    return
+            self.feedback.set('Procesando hojas por evaluación y clave verificada…')
+            self._process_verified_groups(source,inspection,self.session_id)
+            return
+
+        self.scanning=False
+        processed=payload['processed']
+        inspection=payload['inspection']
+        original_session=payload['original_session']
+        # Priorizar la sesión que el operador ya estaba revisando, si figura
+        # en el lote. Las demás estarán en Historial con su propio resultado.
+        first=next(
+            (group for group in processed if group['sid']==original_session),
+            processed[0])
+        self.session_id=first['sid']
+        session=self.store.session(self.session_id)
+        self.mode.set(session['modo'])
+        self.paper.set(session['papel'])
+        self.title.set(session['titulo'])
+        self.questions=session['preguntas']
+        self.people=session['personal']
+        n=sum(group['report']['leidas'] for group in processed)
+        valid=sum(group['report']['validadas'] for group in processed)
+        pending=sum(group['report']['revisar'] for group in processed)
+        repeated=sum(group['report']['repetidas'] for group in processed)
+        unrecognized=len(inspection['no_identificadas'])
+        summary=(f'PDF: {source} · Aplicaciones: {len(processed)} · '
+                 f'Hojas procesadas: {n} · Validadas: {valid} · '
+                 f'Por revisar: {pending} · Reimportadas: {repeated} · '
+                 f'Sin asignar: {unrecognized}')
         self.feedback.set(summary)
         self.navigate('Revisión')
-        different=sorted({d['sesion_detectada'] for d in problems
-                          if d.get('sesion_detectada')})
-        if different:
+        if len(processed)>1 or unrecognized or (
+                original_session and original_session!=self.session_id):
+            detail=describe_scan_inspection(inspection,original_session)
             messagebox.showwarning(
-                'Hojas de otra evaluación',
-                'El QR corresponde a una sesión diferente: '+
-                ', '.join(different)+
-                '. Abre esa evaluación desde Historial antes de volver a importar. '
-                'No se asignaron notas a otra persona.',
+                'Resultado: lote con evaluaciones mezcladas',
+                detail+'\n\nCada evaluación se calificó por separado, con su '
+                'propia clave. Abre las demás desde Historial para revisar '
+                'sus notas y entregables. Las hojas no verificadas siguen '
+                'sin calificación automática.',
                 parent=self.window)
 
     def _table(self,columns,rows,on_select=None):
