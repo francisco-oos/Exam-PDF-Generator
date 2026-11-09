@@ -21,6 +21,42 @@ def show_bandeja(app):
         "Selecciona una página, gírala o cambia el orden para exportar una COPIA. "
         "El original y las calificaciones no se alteran."
     )
+    # La migración histórica es explícita y no bloquea la interfaz al abrir.
+    legacy=tk.Frame(app.stage,bg="#eff4f6")
+    legacy.pack(fill="x",pady=(4,9))
+    legacy_state=tk.StringVar(
+        value="Los PDF de sesiones anteriores pueden incorporarse sin recalificar.")
+    tk.Label(legacy,textvariable=legacy_state,bg="#eff4f6",
+             fg="#405d68").pack(side="left",padx=(0,12))
+    def import_old():
+        btn_legacy.configure(state="disabled")
+        queue=Queue()
+        def task():
+            try:
+                queue.put((True,app.evidence.migrate_legacy()))
+            except Exception as exc:
+                queue.put((False,str(exc)))
+        Thread(target=task,daemon=True).start()
+        def poll():
+            try:
+                ok,value=queue.get_nowait()
+            except Empty:
+                if app.window.winfo_exists():
+                    app.window.after(130,poll)
+                return
+            if ok:
+                app.feedback.set(
+                    f'Migración completa: {value["hojas_vinculadas"]} hojas '
+                    'históricas vinculadas, sin recalificar.')
+                app.navigate("Bandeja PDF")
+            else:
+                btn_legacy.configure(state="normal")
+                messagebox.showerror("Migración histórica",value,
+                                     parent=app.window)
+        app.window.after(130,poll)
+    btn_legacy=ttk.Button(
+        legacy,text="Incorporar escaneos anteriores",command=import_old)
+    btn_legacy.pack(side="right")
     docs=app.evidence.documents()
     if not docs:
         app._note("La bandeja está vacía. Importa un PDF desde Escanear PDF. "
@@ -85,6 +121,8 @@ def show_bandeja(app):
     bar.pack(fill="x",padx=10,pady=5)
     actions=tk.Frame(right,bg="#ffffff")
     actions.pack(fill="x",padx=10,pady=(0,8))
+    actions_extra=tk.Frame(right,bg="#ffffff")
+    actions_extra.pack(fill="x",padx=10,pady=(0,8))
 
     def current_page():
         selected=pages.selection()
@@ -346,10 +384,13 @@ def show_bandeja(app):
         ("Exportar copia organizada",lambda:export_copy(False),True),
         ("Extraer seleccionadas",lambda:export_copy(True),False),
         ("Separar por evaluación",split_evaluations,False),
-        ("Identificar hoja",manual_link,False),
-        ("Retomar escaneo",reprocess,False),
     ]:
         app._btn(actions,label,handler,primary)
+    for label,handler in [
+        ("Identificar hoja",manual_link),
+        ("Retomar escaneo",reprocess),
+    ]:
+        app._btn(actions_extra,label,handler)
 
     pages.bind("<<TreeviewSelect>>",preview)
     files.bind("<<TreeviewSelect>>",choose_document)
