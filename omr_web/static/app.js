@@ -185,7 +185,18 @@
     }
     const opts=state.apps.map(x=>({id:x.id,nombre:x.nombre_evaluacion||x.titulo}));
     content.innerHTML+='<div class="panel"><label>Evaluación<select id="reviewApp">'+
-      optionList(opts)+'</select></label><div id="queueArea"></div></div><div id="sheetArea"></div>';
+      optionList(opts)+'</select></label><div class="actions"><button class="primary" id="claimNext">Tomar siguiente hoja disponible</button></div>'+
+      '<div id="queueArea"></div></div><div id="sheetArea"></div>';
+    byId("claimNext").onclick=async()=>{
+      try{
+        const claim=await api("/applications/"+state.sid+"/claim-next",{method:"POST"});
+        state.lease=claim.lease;state.revision=claim.revision;
+        state.sheet=await api("/sheets/"+claim.hoja_id);
+        const first=state.sheet.dudas.find(x=>typeof x.pregunta==="number");
+        state.question=first?.pregunta||1;
+        await renderSheet();await queueTable();
+      }catch(err){alertBox(err.message,true);}
+    };
     byId("reviewApp").onchange=async e=>{
       state.sid=e.target.value;state.sheet=null;state.lease=null;await reviewQueue();
     };
