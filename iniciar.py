@@ -44,6 +44,10 @@ def open_folder(path: Path):
 def build_ui(*, open_editor=False):
     """Construir la ventana sin entrar al ciclo de eventos (permite smoke tests)."""
     root = tk.Tk()
+    # El diseñador PDF real es el único espacio de trabajo visible al iniciar.
+    # La raíz conserva variables/callbacks de compatibilidad, pero no se muestra.
+    if open_editor:
+        root.withdraw()
     root.title('Generador de evaluaciones | Diseño empresarial')
     root.geometry('1340x818')
     root.minsize(900, 600)
@@ -73,6 +77,17 @@ def build_ui(*, open_editor=False):
     instructions_var = tk.StringVar(value='Lee cada pregunta y elige una respuesta. Marca tus respuestas únicamente en la hoja separada.')
     dirty = tk.StringVar(value='Sin guardar en biblioteca')
     large_preview: list[dict | None] = [None]
+
+    def active_window():
+        """Devuelve la ventana visible para diálogos y controles secundarios."""
+        editor = large_preview[0]
+        if editor is not None:
+            try:
+                if editor['win'].winfo_exists():
+                    return editor['win']
+            except tk.TclError:
+                pass
+        return root
 
     lib_name = tk.StringVar(value='')
     active_id: list[str | None] = [None]
@@ -170,7 +185,7 @@ def build_ui(*, open_editor=False):
         if not confirm_replace():
             return
         chosen=filedialog.askopenfilename(title='Seleccionar Excel de preguntas',
-                    filetypes=[('Libro de Excel','*.xlsx')],parent=root)
+                    filetypes=[('Libro de Excel','*.xlsx')],parent=active_window())
         if chosen:
             active_id[0]=None
             lib_name.set('')
@@ -189,7 +204,7 @@ def build_ui(*, open_editor=False):
 
     def choose_logo():
         chosen=filedialog.askopenfilename(title='Seleccionar logotipo',
-                   filetypes=[('Imágenes PNG/JPEG','*.png *.jpg *.jpeg')],parent=root)
+                   filetypes=[('Imágenes PNG/JPEG','*.png *.jpg *.jpeg')],parent=active_window())
         if chosen:logo_var.set(chosen)
 
     tk.Button(logorow,text='Elegir logo',command=choose_logo,bg='#ecf2f5',fg=NAVY,
@@ -226,7 +241,7 @@ def build_ui(*, open_editor=False):
         try:current=hex_color(var.get())
         except ExamError:current='#213A4C'
         rgb=colorchooser.askcolor(color=current,
-                                  title='Elegir color RGB para '+label,parent=root)
+                                  title='Elegir color RGB para '+label,parent=active_window())
         if rgb and rgb[1]:var.set(rgb[1].upper())
     tk.Button(colorsrow,text='Paleta',command=lambda:choose_color(color_title,'título'),
               bg='#e4edf1',bd=0,padx=8,pady=7,cursor='hand2').grid(row=1,column=1,sticky='w',pady=(5,0))
@@ -318,6 +333,7 @@ def build_ui(*, open_editor=False):
         """
         if large_preview[0] is not None:
             try:
+                large_preview[0]['win'].deiconify()
                 large_preview[0]['win'].lift()
                 large_preview[0]['win'].focus_force()
                 return
@@ -335,7 +351,9 @@ def build_ui(*, open_editor=False):
         editor=open_design_studio(root,datos_fn=preview_data,variables=vars_studio,
             editar_preguntas=edit_current,guardar=save_in_library,generar=run,
             importar=choose_xlsx,biblioteca=open_library,plantilla=template_download,
-            estado=dirty,calificar=abrir_omr)
+            estado=dirty,calificar=abrir_omr,
+            preparar_folios=lambda: abrir_omr(preparar=True),
+            on_close=close_application if open_editor else None)
         large_preview[0]={'win':editor}
         def clear_state(event):
             if event.widget is editor:
@@ -362,6 +380,9 @@ def build_ui(*, open_editor=False):
             preview_info.set(f'{len(questions)} preguntas · {topics} temas · Vista: {current_view.get()}')
 
     def schedule(*_):
+        # No renderizar una segunda miniatura detrás del PDF real.
+        if open_editor:
+            return
         if scheduled[0] is not None:
             root.after_cancel(scheduled[0])
         scheduled[0]=root.after(250,render)
@@ -392,9 +413,9 @@ def build_ui(*, open_editor=False):
     def template_download():
         origin=BASE/'plantillas'/'Plantilla_Cuestionario.xlsx'
         if not origin.is_file():
-            messagebox.showerror('Plantilla no disponible','No se encontró la plantilla incluida en el proyecto.',parent=root)
+            messagebox.showerror('Plantilla no disponible','No se encontró la plantilla incluida en el proyecto.',parent=active_window())
             return
-        target=filedialog.asksaveasfilename(parent=root,defaultextension='.xlsx',
+        target=filedialog.asksaveasfilename(parent=active_window(),defaultextension='.xlsx',
                 initialfile='Plantilla_Cuestionario.xlsx',title='Guardar plantilla para rellenar',
                 filetypes=[('Archivo de Excel','*.xlsx')])
         if not target:return
@@ -402,7 +423,7 @@ def build_ui(*, open_editor=False):
             from shutil import copyfile
             copyfile(origin,target)
             status.set('Plantilla guardada en: '+str(target))
-        except OSError as exc:messagebox.showerror('No se pudo guardar',str(exc),parent=root)
+        except OSError as exc:messagebox.showerror('No se pudo guardar',str(exc),parent=active_window())
 
     def save_in_library(*, silent=False):
         try:
@@ -419,10 +440,10 @@ def build_ui(*, open_editor=False):
             dirty.set('Guardado en biblioteca')
             status.set('Cuestionario guardado en biblioteca local SQLite')
             if not silent:
-                messagebox.showinfo('Biblioteca','Cuestionario, respuestas, imágenes y datos guardados. Puedes abrirlo o editarlo después.',parent=root)
+                messagebox.showinfo('Biblioteca','Cuestionario, respuestas, imágenes y datos guardados. Puedes abrirlo o editarlo después.',parent=active_window())
             return key
         except (ExamError,OSError,ValueError) as exc:
-            if not silent:messagebox.showerror('No se guardó',str(exc),parent=root)
+            if not silent:messagebox.showerror('No se guardó',str(exc),parent=active_window())
             return None
 
     def confirm_replace():
@@ -431,20 +452,20 @@ def build_ui(*, open_editor=False):
             return True
         answer = messagebox.askyesnocancel('Cambios pendientes',
             '¿Guardar el cuestionario antes de continuar?\n'
-            'Sí: guardar en biblioteca. No: continuar sin guardar. Cancelar: seguir editando.', parent=root)
+            'Sí: guardar en biblioteca. No: continuar sin guardar. Cancelar: seguir editando.', parent=active_window())
         if answer is None:
             return False
         return not answer or save_in_library(silent=True) is not None
 
     def edit_current():
         questions=load_questions()
-        edited=edit_questions(root,questions)
+        edited=edit_questions(active_window(),questions)
         if edited is None:return
         new_path=BASE/'datos'/'ediciones'/uuid4().hex/'Preguntas.xlsx'
         try:
             export_workbook(edited,new_path)
         except (ExamError,OSError) as exc:
-            messagebox.showerror('Edición no guardada',str(exc),parent=root);return
+            messagebox.showerror('Edición no guardada',str(exc),parent=active_window());return
         file_var.set(str(new_path))
         cache['key']=None
         schedule()
@@ -452,8 +473,8 @@ def build_ui(*, open_editor=False):
 
     def open_library():
         """Gestiona biblioteca y papelera; no elimina archivos PDF ya exportados."""
-        win=tk.Toplevel(root);win.title('Biblioteca y papelera de cuestionarios')
-        win.geometry('920x560');win.minsize(760,440);win.transient(root);win.grab_set()
+        win=tk.Toplevel(active_window());win.title('Biblioteca y papelera de cuestionarios')
+        win.geometry('920x560');win.minsize(760,440);win.transient(active_window());win.grab_set()
         tk.Label(win,text='Biblioteca de cuestionarios',font=('Segoe UI',17,'bold'),
                  padx=18,pady=12).pack(anchor='w')
         options=tk.Frame(win,padx=18);options.pack(fill='x')
@@ -579,20 +600,39 @@ def build_ui(*, open_editor=False):
     tk.Button(toolbar,text='Guardar cuestionario',command=save_in_library,
         bg=TEAL,fg=WHITE,bd=0,padx=9,pady=9,cursor='hand2').pack(side='left')
 
-    def abrir_omr():
-        """Abre la opción OMR sin afectar el resto del generador."""
+    def volver_al_diseno():
+        """Restaura la misma instancia del diseñador, sin reiniciar el formulario."""
+        editor = large_preview[0]
+        if editor is not None and editor['win'].winfo_exists():
+            editor['win'].deiconify()
+            editor['win'].lift()
+            editor['win'].focus_force()
+        elif open_editor:
+            open_large_preview()
+        else:
+            root.deiconify()
+            root.lift()
+
+    def abrir_omr(*, preparar=False):
+        """Cambia al espacio OMR, ocultando el editor para revisar a pantalla completa.
+
+        Preparar abre la configuración de nuevas hojas con QR; calificar abre el
+        historial para recuperar una sesión y sus resultados sin duplicar vistas.
+        """
+        visible = active_window()
+        visible.withdraw()
         try:
             from omr_evaluaciones.interfaz import launch
-            # Tomar una instantánea del examen abierto; la modalidad OMR no
-            # debe pedir una segunda importación ni perder la revisión actual.
+            # La clave y las preguntas vienen del examen actualmente editado.
             launch(root, questions=load_questions(),
                    title=title_var.get(), paper=paper_choice.get(),
-                   source=file_var.get(), on_return=open_large_preview)
-        except (ImportError, OSError) as exc:
-            messagebox.showerror('Faltan componentes del lector OMR',
-                'Instala los complementos con: ' +
-                '.venv/Scripts/python.exe -m pip install -r requirements-omr.txt' +
-                '\nDetalle: ' + str(exc), parent=root)
+                   source=file_var.get(), on_return=volver_al_diseno,
+                   start_page='Inicio' if preparar else 'Historial')
+        except (ImportError, OSError, tk.TclError) as exc:
+            volver_al_diseno()
+            messagebox.showerror('No se pudo abrir la calificación',
+                'Comprueba las dependencias OMR en requirements-omr.txt.\n' +
+                'Detalle: ' + str(exc), parent=active_window())
 
     tk.Button(toolbar,text='Calificar · QR',command=abrir_omr,
         bg='#DDECF0',fg=NAVY,bd=0,padx=10,pady=9,cursor='hand2',
@@ -616,7 +656,7 @@ def build_ui(*, open_editor=False):
                 reutilizable=bool(reuse_booklet.get()))
             source, title, subtitle = Path(file_var.get()), title_var.get(), subtitle_var.get()
         except (ValueError, OSError) as exc:
-            messagebox.showerror('Revisa los ajustes', str(exc), parent=root)
+            messagebox.showerror('Revisa los ajustes', str(exc), parent=active_window())
             return
         # Guardar ahora evita asociar los cambios posteriores con esta exportación.
         saved = save_in_library(silent=True)
@@ -645,7 +685,7 @@ def build_ui(*, open_editor=False):
             btn.config(state='normal', text='Generar documentos')
             if error:
                 status.set('No se completó la exportación. Revisa los datos e inténtalo de nuevo.')
-                messagebox.showerror('No se pudo generar la evaluación', error, parent=root)
+                messagebox.showerror('No se pudo generar la evaluación', error, parent=active_window())
                 return
             last_output[0] = folder
             status.set('Documentos generados: '+folder.name)
@@ -653,7 +693,7 @@ def build_ui(*, open_editor=False):
             messagebox.showinfo('Evaluación generada',
                 'Se generaron cuatro PDF, copia de preguntas, recursos y manifiesto SHA-256.' +
                 (' La configuración se guardó en biblioteca.' if saved else ' La biblioteca no se pudo guardar; usa Guardar cuestionario.') +
-                '\n\n'+str(folder)+'\n\nImprime hoja y acetato a escala 100 %.', parent=root)
+                '\n\n'+str(folder)+'\n\nImprime hoja y acetato a escala 100 %.', parent=active_window())
         root.after(80, receive_export)
 
     btn=tk.Button(bottom,text='Generar documentos',command=run,fg=WHITE,bg=TEAL,
@@ -665,21 +705,27 @@ def build_ui(*, open_editor=False):
         if last_output[0] is not None:
             try:open_folder(last_output[0])
             except (OSError,FileNotFoundError) as exc:
-                messagebox.showerror('No se puede abrir el resultado',str(exc),parent=root)
+                messagebox.showerror('No se puede abrir el resultado',str(exc),parent=active_window())
 
     openbtn=tk.Button(bottom,text='Abrir resultado',command=open_last,
            fg=NAVY,bg='#e4edf1',padx=13,pady=11,bd=0,cursor='hand2',font=('Segoe UI',9))
     openbtn.config(state='disabled')
     openbtn.pack(side='right',padx=(0,10))
-    root.after(50,render)
+    if not open_editor:
+        root.after(50, render)
     if open_editor:
-        root.after(100,open_large_preview)
+        root.after(100, open_large_preview)
     def close_application():
+        """Cierra toda la aplicación desde la única ventana visible."""
         if exporting[0]:
-            messagebox.showinfo('Exportación en curso', 'Espera a que termine la exportación antes de cerrar.', parent=root)
-            return
-        if confirm_replace():
-            root.destroy()
+            messagebox.showinfo('Exportación en curso',
+                'La exportación está en proceso; vuelve a cerrar al terminar.',
+                parent=active_window())
+            return False
+        if not confirm_replace():
+            return False
+        root.destroy()
+        return True
     root.protocol('WM_DELETE_WINDOW', close_application)
     return root
 
