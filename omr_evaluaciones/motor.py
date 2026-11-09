@@ -924,12 +924,11 @@ def resolve_pdf_session(store:OMRStore,pdf_path:Path,*,max_pages=5):
 
 
 def inspect_pdf_sessions(store: OMRStore, pdf_path: Path):
-    """Clasifica TODAS las páginas antes de calificar un lote escaneado.
+    """Inspecciona TODAS las páginas sin escribir resultados.
 
-    Solo un QR OMR1 con token registrado y firma HMAC válida demuestra qué
-    aplicación debe corregir esa hoja. Nombres impresos, títulos parecidos
-    y posición en el archivo NO prueban identidad. Páginas dudosas quedan
-    fuera de cualquier calificación automática.
+    Únicamente acepta QR OMR con token y HMAC de una sesión de esta
+    instalación. Primero intenta el escaneo directo; la rectificación
+    por marcas se reserva para QR difíciles, para no ralentizar lotes largos.
     """
     path=Path(pdf_path)
     if (not path.is_file() or path.suffix.lower()!='.pdf' or
@@ -956,63 +955,74 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path):
             finally:
                 page.close()
             gray=cv2.cvtColor(rgb,cv2.COLOR_RGB2GRAY)
-            valid={}
             found_qr=False
-            # El código puede quedar de lado o pequeño. La rectificación
-            # reutiliza las mismas cuatro marcas que el lector principal.
+            verified=None
+
+            def check_qr(qr):
+                nonlocal found_qr
+                if not qr:
+                    return None
+                found_qr=True
+                match=QR_RE.fullmatch(qr)
+                if match is None:
+                    return None
+                sid,token,page_num,_mac=match.groups()
+                if sid not in session_cache:
+                    try:
+                        session_cache[sid]=store.session(sid)
+                    except ValueError:
+                        session_cache[sid]=None
+                session=session_cache[sid]
+                if session is None or page_num!='1':
+                    return None
+                person=next((p for p in session['personal']
+                             if p['token']==token),None)
+                if person is None:
+                    return None
+                if not hmac.compare_digest(
+                    _qr_data(sid,token,1,session['clave_hmac']),qr):
+                    return None
+                return {
+                    'pagina':idx+1,'sesion_id':sid,'estado':'verificada',
+                    'evaluacion':session.get('nombre_evaluacion')
+                                 or session['titulo'],
+                    'nombre':person['nombre'],'folio':person['folio'],
+                }
+
             rotations=(gray,cv2.rotate(gray,cv2.ROTATE_180),
                        cv2.rotate(gray,cv2.ROTATE_90_CLOCKWISE),
                        cv2.rotate(gray,cv2.ROTATE_90_COUNTERCLOCKWISE))
+            # Ruta rápida: la gran mayoría de hojas impresas puede leerse
+            # directamente o con una rotación, sin cuatro homografías.
             for rotated in rotations:
-                variants=[rotated]
-                for paper in PAPERS:
-                    variants.extend(_rectify(rotated,paper))
-                for image in variants:
-                    qr=_decode_qr(image)
-                    if not qr:
-                        continue
-                    found_qr=True
-                    match=QR_RE.fullmatch(qr)
-                    if match is None:
-                        continue
-                    sid,token,page_num,_mac=match.groups()
-                    if sid not in session_cache:
-                        try:
-                            session_cache[sid]=store.session(sid)
-                        except ValueError:
-                            session_cache[sid]=None
-                    session=session_cache[sid]
-                    if session is None or page_num!='1':
-                        continue
-                    if token not in {p['token'] for p in session['personal']}:
-                        continue
-                    if not hmac.compare_digest(
-                        _qr_data(sid,token,1,session['clave_hmac']),qr):
-                        continue
-                    person=next(p for p in session['personal']
-                                if p['token']==token)
-                    valid[(sid,token)]={
-                        'pagina':idx+1,'sesion_id':sid,'estado':'verificada',
-                        'evaluacion':session.get('nombre_evaluacion')
-                                     or session['titulo'],
-                        'nombre':person['nombre'],'folio':person['folio'],
-                    }
-            if len(valid)==1:
-                items.append(next(iter(valid.values())))
+                verified=check_qr(_decode_qr(rotated))
+                if verified:
+                    break
+            if not verified:
+                # Ruta robusta: marcas grises, hoja inclinada o QR pequeño.
+                for rotated in rotations:
+                    for paper in PAPERS:
+                        for rectified in _rectify(rotated,paper):
+                            verified=check_qr(_decode_qr(rectified))
+                            if verified:
+                                break
+                        if verified:
+                            break
+                    if verified:
+                        break
+            if verified:
+                items.append(verified)
             else:
-                reason=('Se detectaron identificaciones QR contradictorias.'
-                        if len(valid)>1 else
-                        'QR presente, pero sin firma o sesión verificable.'
-                        if found_qr else
-                        'No se pudo leer ningún QR firmado.')
+                reason=('QR presente, pero sin firma o sesión verificable.'
+                        if found_qr else 'No se pudo leer ningún QR firmado.')
                 items.append({'pagina':idx+1,'sesion_id':None,
                               'estado':'sin_identificar','diagnostico':reason})
     finally:
         doc.close()
     groups={}
     for item in items:
-        if item['sesion_id']:
-            sid=item['sesion_id']
+        sid=item['sesion_id']
+        if sid:
             if sid not in groups:
                 groups[sid]={'sesion_id':sid,'evaluacion':item['evaluacion'],
                              'paginas':[]}
