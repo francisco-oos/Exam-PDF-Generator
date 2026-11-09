@@ -10,7 +10,7 @@ from tkinter import ttk, filedialog, messagebox
 import pypdfium2 as pdfium
 from PIL import ImageTk
 
-from .expedientes import create_organized_pdf
+from .expedientes import create_organized_pdf, combine_pdfs
 
 
 def show_bandeja(app):
@@ -79,7 +79,7 @@ def show_bandeja(app):
              font=("Segoe UI",12,"bold")).pack(anchor="w",padx=12,pady=7)
     file_columns=("Páginas","Sin QR","Con evidencia","Fecha")
     files=ttk.Treeview(left,columns=file_columns,show="tree headings",
-                       selectmode="browse",height=9)
+                       selectmode="extended",height=9)
     files.heading("#0",text="PDF original")
     files.column("#0",width=165,minwidth=100)
     for col,width in zip(file_columns,(60,56,100,115)):
@@ -263,6 +263,34 @@ def show_bandeja(app):
             "Ningún original ni resultado se modificó.",
             parent=app.window)
 
+    def combine_selected():
+        selected=set(files.selection())
+        chosen=[doc for doc in docs if doc["sha"] in selected]
+        if len(chosen)<2:
+            messagebox.showinfo(
+                "Combinar",
+                "Selecciona dos o más PDF en Archivos recibidos "
+                "(Ctrl + clic) para unirlos en una copia.",
+                parent=app.window)
+            return
+        target=filedialog.asksaveasfilename(
+            parent=app.window,defaultextension=".pdf",
+            initialfile="Documentos_combinados.pdf",
+            filetypes=[("PDF","*.pdf")])
+        if not target:return
+        try:
+            combine_pdfs([app.evidence.document(x["sha"])["ruta"]
+                          for x in chosen],target)
+        except (OSError,ValueError,ImportError) as exc:
+            messagebox.showerror("Error al combinar",str(exc),
+                                 parent=app.window)
+            return
+        messagebox.showinfo(
+            "PDF combinado",
+            "Se guardó el archivo derivado. Puedes importarlo desde "
+            "Escanear PDF; la asociación de páginas se hará por QR.",
+            parent=app.window)
+
     def manual_link():
         idx=current_page()
         if idx is None:return
@@ -389,6 +417,7 @@ def show_bandeja(app):
     for label,handler in [
         ("Identificar hoja",manual_link),
         ("Retomar escaneo",reprocess),
+        ("Combinar PDF seleccionados",combine_selected),
     ]:
         app._btn(actions_extra,label,handler)
 
