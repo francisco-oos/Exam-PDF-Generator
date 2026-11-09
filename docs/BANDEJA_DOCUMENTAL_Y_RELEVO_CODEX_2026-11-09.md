@@ -68,7 +68,10 @@ Una carpeta de trabajo exportada NO es un nuevo documento recibido.
 4. Abrir **Bandeja PDF** para ver originales por nombre, SHA, número de
    páginas, ingresos y pendientes. Seleccionar una página para mostrarla.
    **Subir/Bajar/Girar/Extraer/Exportar PDF ordenado** operan sobre una
-   copia, sin tocar resultados. **Copiar original** requiere acción expresa.
+   copia, sin tocar resultados. También se puede **Añadir página al montaje**,
+   abrir otro PDF, añadir páginas y **Exportar PDF combinado**. El montaje
+   nunca modifica archivos originales ni reasigna hojas automáticamente.
+   **Copiar original** requiere acción expresa.
 5. **Vincular pendiente** cuando no se leyó QR: exige seleccionar aplicación,
    ID, folio, revisor y motivo. Crea una hoja **en revisión**, sin nota.
    Después completar manualmente la hoja en **Revisión** con el acetato digital.
@@ -127,7 +130,7 @@ Preparar con datos **ficticios** las siguientes evaluaciones, en Carta:
 | F07 | Escanear aplicación en dos jornadas (2+1) | Sesión única y 3 participantes contabilizados |
 | F08 | QR borrado y vinculación por ID + folio | Evidencia en revisión, captura manual obligatoria |
 | F09 | Acetato digital, marca doble y lápiz n.º 2 | Dudas auténticas pendientes; sin notas inventadas |
-| F10 | Reordenar/girar/extraer PDF | Derivado correcto y SHA de original intacto |
+| F10 | Reordenar/girar/extraer y combinar páginas de dos PDF | Derivado correcto y SHA de ambos originales intacto |
 | F11 | Exportar Cabos de PDF mixto | Sin Checadores en evidencias ni originales adjuntos |
 | F12 | Exportar PDF individual | Solo una persona, sin clave de respuestas |
 | F13 | ZIP interno y manifiesto | SHA verificados; evidencia, XLSX y bitácora |
