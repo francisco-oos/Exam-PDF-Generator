@@ -332,9 +332,9 @@ def _answer_sheet(path: Path | BytesIO, questions: list[Question], title: str, s
                 else:
                     # La identidad se captura una sola vez por la plantilla;
                     # escapar caracteres de control para dibujar texto seguro.
-                    name=str(persona['nombre']).replace('\\n',' ').replace('\\r',' ')[:65]
-                    ident=str(persona['id']).replace('\\n',' ').replace('\\r',' ')[:64]
-                    group=str(persona.get('grupo','')).replace('\\n',' ').replace('\\r',' ')[:48]
+                    name=' '.join(str(persona['nombre']).split())[:65]
+                    ident=' '.join(str(persona['id']).split())[:64]
+                    group=' '.join(str(persona.get('grupo','')).split())[:48]
                     c.drawString(49,h-142,'Nombre: '+name)
                     c.drawString(49,h-162,'ID: '+ident+'    Grupo: '+group)
                 c.setFont(normal,8)
