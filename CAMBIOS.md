@@ -41,3 +41,13 @@
 - Acetato con relleno semitransparente (26 %) y contorno visible, manteniendo centros geométricos exactos.
 - Web local Docker: descargar plantilla y escoger colores; biblioteca SQLite solo disponible en escritorio nativo por ahora.
 - Nuevas pruebas de biblioteca, exportación, integridad de recursos, validación RGB, color PDF y opacidad del acetato.
+
+## 2026-11-08 · Impresión ecológica y formatos adicionales
+
+- Modo opcional de cuadernillo **reutilizable**: omitir identificación personal y poner marca de agua «NO RAYAR NI MANCHAR» detrás de todas las páginas.
+- Tamaños A4/Carta/Oficio (8.5 × 13), con geometría única para hoja/acetato, pruebas de MediaBox y paginación.
+- Escala de letra configurable de 8 a 12 puntos y vista ampliada en PDF real (PDFium) con zoom y navegación.
+- Paleta RGB independiente para tinta de la hoja de respuestas (manteniendo fondo blanco y acetato verde).
+- Migración SQLite sin pérdida de datos: guarda tamaño, letra, modo reutilizable y color de respuestas.
+- Ejemplo de 20 preguntas de cultura general sin referencias a empresas, series o personal; plantilla XLSX descargable con ejemplos neutrales.
+- Documentación y docstrings de mantenimiento. Ver `docs/MANTENIMIENTO_Y_PRUEBAS.md`.

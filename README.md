@@ -6,6 +6,18 @@ Aplicación local para preparar exámenes de opción múltiple: **cuadernillo pr
 
 Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-PDF-Generator), creado por **Uziel Humberto López Meneses** en 2020 bajo licencia **MIT**. Conservamos su atribución y el archivo [`LICENSE`](LICENSE). Esta adaptación es una reimplementación con medidas de seguridad, diseño propio y nuevas funciones, **no es una versión oficial del autor original**.
 
+## Modo ecológico, papel y previsualización exacta
+
+- **Cuadernillo reutilizable** (activado por defecto al diseñar uno nuevo): elimina los campos personales **solo del cuadernillo**; el participante escribe nombre, fecha y grupo en su **hoja de respuestas**. Las páginas del cuadernillo llevan la marca de agua tenue «NO RAYAR NI MANCHAR» detrás del contenido.
+- **Tamaño de impresión:** A4 (210 × 297 mm), Carta (8.5 × 11 pulgadas) u Oficio mexicano (8.5 × 13 pulgadas). No mezcles acetatos y hojas de distintos tamaños o generaciones.
+- **Letra de opciones y preguntas:** 8–12 puntos en intervalos de 0.5; podrás revisar la cantidad REAL de páginas sin imprimir.
+- **Vista ampliada · PDF exacto:** abre una ventana independiente, con navegación de páginas y zoom, que renderiza el PDF completo en memoria mediante PDFium. La vista pequeña al costado sigue siendo orientativa.
+- **Color RGB de la hoja de respuestas:** tinta para encabezados y círculos; el papel sigue blanco para gastar menos tinta. La plantilla de acetato continúa verde translúcida.
+- Estas opciones también quedan guardadas en cada cuestionario SQLite y se restauran al reabrirlo, con migración no destructiva para bibliotecas anteriores.
+- El ejemplo predeterminado contiene **20 preguntas generales** de matemáticas, lenguaje, ciencia y lógica, sin nombres ni procesos de empresas.
+
+[**Guía técnica y de mantenimiento**](docs/MANTENIMIENTO_Y_PRUEBAS.md).
+
 ## Cuestionarios reutilizables, colores y plantilla (interfaz de escritorio)
 
 1. En Windows abre `Iniciar_Windows.bat`, o en Linux `Iniciar_Linux.sh`.
@@ -15,20 +27,20 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar documentos**, el examen se guarda también en la biblioteca.
 6. La biblioteca permanece en **`datos/biblioteca.sqlite3`** dentro de la carpeta del proyecto; está excluida de Git y no se sube a Internet. Haz copias de seguridad de ese archivo cuando el programa esté cerrado. **La base no está cifrada:** cualquier persona con acceso a ella puede leer las respuestas correctas; protege el equipo y las copias de respaldo.
 
-El acetato ahora imprime cada respuesta correcta como **círculo verde con relleno semitransparente** para facilitar el conteo. Su transparencia real depende del material e impresora: prueba papel y acetato superpuestos **A4 al 100 %**, sin ajuste de escala, antes de uso oficial.
+El acetato ahora imprime cada respuesta correcta como **círculo verde con relleno semitransparente** para facilitar el conteo. Su transparencia real depende del material e impresora: prueba papel y acetato superpuestos **al mismo tamaño y al 100 %**, sin ajuste de escala, antes de uso oficial.
 
 **Nota de modalidades:** la biblioteca editable y el editor de preguntas están en el escritorio Tkinter. La interfaz web Docker ofrece la descarga de plantilla y los colores RGB, pero todavía no incluye el administrador de cuestionarios SQLite.
 
 ## Características
 
-- Formato A4 y diseño corporativo con **nombre de empresa, título, subtítulo, puesto/área, instrucciones y logotipo**.
+- Formatos A4, Carta y Oficio, con diseño corporativo con **nombre de empresa, título, subtítulo, puesto/área, instrucciones y logotipo**.
 - Preguntas organizadas por temas, cuatro opciones A–D y **una imagen local opcional por pregunta**.
 - Plantilla XLSX editable en Excel o LibreOffice Calc; hasta 100 preguntas.
 - Hoja y acetato usan el **mismo modelo geométrico de coordenadas** para superposición manual; el acetato tiene un círculo coloreado semitransparente.
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
 - CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
-- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final A4 es la referencia para impresión.
+- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final con el tamaño seleccionado es la referencia para impresión.
 
 ## Iniciar con Docker — recomendado (Windows y Linux)
 
@@ -71,10 +83,11 @@ python3 -m venv .venv
 .venv/bin/python generar.py \
   --entrada ejemplos/Plantilla_20_preguntas.xlsx \
   --salida salidas \
-  --titulo "Evaluación de campo" \
-  --empresa "Empresa de ejemplo" \
-  --puesto "Cabos" \
-  --logo ejemplos/imagenes/logo_ejemplo.png
+  --titulo "Evaluación de cultura general" \
+  --subtitulo "20 preguntas de ejemplo" \
+  --reutilizable \
+  --tamano-papel Carta \
+  --letra 9.5
 ```
 
 ## Cómo preparar las preguntas en Excel
@@ -83,7 +96,7 @@ La hoja debe llamarse **`Preguntas`**, con las columnas en este orden:
 
 | Tema | Pregunta | A | B | C | D | Correcta | Imagen (opcional) |
 |---|---|---|---|---|---|---|---|
-| SERCEL | ¿Qué caracteriza al DFU? | ... | ... | ... | ... | B | conector_ejemplo.png |
+| Matemáticas | ¿Cuánto es 7 + 5? | 10 | 11 | 12 | 13 | C | (vacío) |
 
 - `Correcta`: letra A/B/C/D; no escribas el texto completo de la respuesta.
 - `Imagen`: **solo el nombre de archivo PNG, JPG o JPEG**, por ejemplo `conexion.jpg`. La imagen debe estar en la carpeta **`imagenes` junto al archivo XLSX**. No ingreses URL, rutas absolutas ni referencias a otras carpetas.
@@ -117,7 +130,7 @@ En Windows PowerShell ajusta las rutas de los volúmenes según Docker Desktop. 
 - No borra archivos personales ni sobrescribe exámenes previos; siempre abre una carpeta nueva.
 - Límite de XLSX y de cantidad/longitud de preguntas; se conservan originales y referencias para reproducir la generación.
 - Los logotipos e imágenes se incrustan en el cuadernillo, **no** en el acetato, cuya geometría permanece fija.
-- La instalación usa `openpyxl==3.1.5`, `reportlab==5.1.0`, `Pillow>=12,<13`; no se distribuyen fuentes del sistema.
+- La instalación usa `openpyxl==3.1.5`, `reportlab==5.1.0`, `Pillow>=12,<13`, `pypdfium2==5.15.1` (vista exacta); no se distribuyen fuentes del sistema.
 - Ver [`AUDITORIA_SEGURIDAD.md`](AUDITORIA_SEGURIDAD.md) para hallazgos, mitigaciones y verificaciones pendientes.
 
 ## Pruebas

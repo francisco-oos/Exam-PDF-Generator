@@ -13,6 +13,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, colorchooser
 from PIL import ImageTk
+from preview_pdf import render_document_preview
 
 from src.evaluaciones.core import ExamError, generate, read_questions
 from vista_previa import PreviewData, render_preview
@@ -63,6 +64,12 @@ def build_ui():
     current_view = tk.StringVar(value='Cuadernillo')
     color_title = tk.StringVar(value=DEFAULT_COLOR_TITLE)
     color_subtitle = tk.StringVar(value=DEFAULT_COLOR_SUBTITLE)
+    color_answers = tk.StringVar(value='#213A4C')
+    paper_choice = tk.StringVar(value='A4')
+    body_font = tk.StringVar(value='9.0')
+    reuse_booklet = tk.BooleanVar(value=True)
+    large_preview: list[dict | None] = [None]
+
     lib_name = tk.StringVar(value='')
     active_id: list[str | None] = [None]
     db_path = BASE / 'datos' / 'biblioteca.sqlite3'
@@ -100,7 +107,7 @@ def build_ui():
              font=('Segoe UI',10,'bold')).pack(anchor='w',padx=20,pady=(17,2))
     tk.Label(mainarea,text='Preparar documentos',bg=BG,fg=NAVY,
              font=('Segoe UI',21,'bold')).pack(anchor='w',padx=20)
-    tk.Label(mainarea,text='Configura cualquier empresa, público o proyecto. Los documentos se generan en PDF A4.',
+    tk.Label(mainarea,text='Configura cualquier empresa, público o proyecto. Cuadernillos reutilizables y formatos Carta, A4 u Oficio.',
              bg=BG,fg=GRAY,font=('Segoe UI',9)).pack(anchor='w',padx=20,pady=(3,10))
 
     toolbar=tk.Frame(mainarea,bg=BG)
@@ -206,17 +213,44 @@ def build_ui():
               bg='#e4edf1',bd=0,padx=8,pady=7,cursor='hand2').grid(row=1,column=1,sticky='w',pady=(5,0))
     tk.Button(colorsrow,text='Paleta',command=lambda:choose_color(color_subtitle,'subtítulo'),
               bg='#e4edf1',bd=0,padx=8,pady=7,cursor='hand2').grid(row=1,column=3,sticky='w',pady=(5,0))
-    label('Nombre en mi biblioteca (opcional)',16)
-    field(lib_name,17)
+    # Opciones que gobiernan la paginación real: no son atributos solo visuales.
+    label('Impresión y ahorro de papel',19)
+    setting=tk.Frame(content,bg=WHITE)
+    setting.grid(row=20,column=0,columnspan=2,sticky='ew',padx=17,pady=(4,5))
+    tk.Label(setting,text='Papel',bg=WHITE,fg=NAVY).pack(side='left')
+    paper_box=ttk.Combobox(setting,textvariable=paper_choice,state='readonly',width=12,
+        values=('A4','Carta','Oficio'))
+    paper_box.pack(side='left',padx=(7,14))
+    tk.Label(setting,text='Letra (pt)',bg=WHITE,fg=NAVY).pack(side='left')
+    font_box=ttk.Combobox(setting,textvariable=body_font,state='readonly',width=7,
+        values=tuple(f'{x/2:.1f}' for x in range(16,25)))
+    font_box.pack(side='left',padx=(7,0))
+    tk.Checkbutton(content, text='Cuadernillo reutilizable: sin nombre ni folio, con marca de agua',
+        variable=reuse_booklet,bg=WHITE,fg=NAVY,activebackground=WHITE,
+        anchor='w',wraplength=490).grid(row=21,column=0,columnspan=2,sticky='w',padx=17,pady=(3,7))
+    tk.Label(content,text='Color de impresión: hoja de respuestas (RGB)',bg=WHITE,
+        fg=NAVY,font=('Segoe UI',9)).grid(row=22,column=0,columnspan=2,sticky='w',padx=17,pady=(3,4))
+    ans_row=tk.Frame(content,bg=WHITE)
+    ans_row.grid(row=23,column=0,columnspan=2,sticky='ew',padx=17,pady=(0,10))
+    ttk.Entry(ans_row,textvariable=color_answers,width=15).pack(side='left',padx=(0,8))
+    tk.Button(ans_row,text='Paleta RGB',command=lambda:choose_color(color_answers,'hoja de respuestas'),
+        bg='#e4edf1',bd=0,padx=8,pady=7,cursor='hand2').pack(side='left')
+    tk.Label(ans_row,text='Cambia tintas y círculos, no el fondo blanco.',bg=WHITE,
+        fg=GRAY,font=('Segoe UI',8)).pack(side='left',padx=(9,0))
+    label('Nombre en mi biblioteca (opcional)',24)
+    field(lib_name,25)
     tk.Label(content,text='El campo de grupo admite cualquier texto: colaboradores, alumnos, proveedores, turno o área.',
              bg=WHITE,fg=GRAY,font=('Segoe UI',8),wraplength=480,justify='left').grid(
-             row=18,column=0,columnspan=2,padx=17,pady=(8,15),sticky='w')
+             row=26,column=0,columnspan=2,padx=17,pady=(8,15),sticky='w')
 
     tk.Label(right,text='VISTA PREVIA',bg=WHITE,fg=TEAL,
              font=('Segoe UI',10,'bold')).pack(anchor='w',padx=16,pady=(13,4))
     tabs=tk.Frame(right,bg=WHITE)
     tabs.pack(fill='x',padx=13,pady=(0,5))
     tab_buttons={}
+    tk.Button(right,text='Ampliar · Vista exacta de PDF',command=lambda:open_large_preview(),
+        bg='#e4edf1',fg=NAVY,bd=0,padx=11,pady=7,cursor='hand2',
+        font=('Segoe UI',9,'bold')).pack(anchor='center',pady=(0,7))
     preview_label=tk.Label(right,bg='#edf3f6',bd=0)
     preview_label.pack(anchor='center',pady=(1,5))
     preview_info=tk.StringVar(value='Cargando vista previa…')
@@ -239,15 +273,90 @@ def build_ui():
                 cache['error']=str(exc)
         return cache['questions']
 
-    def render():
-        scheduled[0]=None
+    def preview_data():
+        """Configuración única para ambas vistas; evita divergencias de colores."""
         questions=load_questions()
         logo=Path(logo_var.get().strip()) if logo_var.get().strip() else None
-        data=PreviewData(empresa=company_var.get().strip(),grupo=group_var.get().strip(),
+        def safe_color(var,default):
+            try:return hex_color(var.get())
+            except ExamError:return default
+        return PreviewData(empresa=company_var.get().strip(),grupo=group_var.get().strip(),
              titulo=title_var.get().strip(),subtitulo=subtitle_var.get().strip(),
              instrucciones=instruction.get('1.0','end-1c').strip(),questions=questions,logo=logo,
-             color_titulo=color_title.get() if len(color_title.get())==7 and color_title.get().startswith('#') else DEFAULT_COLOR_TITLE,
-             color_subtitulo=color_subtitle.get() if len(color_subtitle.get())==7 and color_subtitle.get().startswith('#') else DEFAULT_COLOR_SUBTITLE)
+             color_titulo=safe_color(color_title,DEFAULT_COLOR_TITLE),
+             color_subtitulo=safe_color(color_subtitle,DEFAULT_COLOR_SUBTITLE),
+             color_respuestas=safe_color(color_answers,'#213A4C'),
+             tamano_papel=paper_choice.get(),letra=float(body_font.get()),
+             reutilizable=bool(reuse_booklet.get()))
+
+    def open_large_preview():
+        """Ventana aparte: renderiza las páginas REALES en memoria (PDFium)."""
+        if large_preview[0] is not None:
+            try:large_preview[0]['win'].lift();return
+            except tk.TclError:large_preview[0]=None
+        win=tk.Toplevel(root)
+        win.title('Vista ampliada del PDF · ajustar páginas e impresión')
+        win.geometry('1080x830')
+        win.minsize(700,550)
+        head=tk.Frame(win,bg=BG,pady=9,padx=12)
+        head.pack(fill='x')
+        view_var=tk.StringVar(value=current_view.get())
+        page_var=tk.IntVar(value=1)
+        zoom=tk.IntVar(value=100)
+        display=tk.StringVar(value='Preparando páginas…')
+        ttk.Combobox(head,textvariable=view_var,values=('Cuadernillo','Respuestas','Acetato'),
+                     state='readonly',width=16).pack(side='left',padx=(0,10))
+        tk.Button(head,text='◀ Anterior',command=lambda:change_page(-1)).pack(side='left',padx=4)
+        tk.Button(head,text='Siguiente ▶',command=lambda:change_page(1)).pack(side='left',padx=4)
+        tk.Label(head,textvariable=display,bg=BG,fg=NAVY).pack(side='left',padx=10)
+        ttk.Combobox(head,textvariable=zoom,values=(70,85,100,125,150,175,200),
+                     state='readonly',width=5).pack(side='right')
+        tk.Label(head,text='Zoom %',bg=BG,fg=NAVY).pack(side='right',padx=(5,3))
+        wrapper=tk.Frame(win,bg='#dee7ed');wrapper.pack(fill='both',expand=True)
+        canvas=tk.Canvas(wrapper,bg='#dde7ec',highlightthickness=0)
+        sy=ttk.Scrollbar(wrapper,orient='vertical',command=canvas.yview)
+        sx=ttk.Scrollbar(wrapper,orient='horizontal',command=canvas.xview)
+        canvas.configure(yscrollcommand=sy.set,xscrollcommand=sx.set)
+        sy.pack(side='right',fill='y')
+        sx.pack(side='bottom',fill='x')
+        canvas.pack(fill='both',expand=True)
+        state={'win':win,'view':view_var,'page':page_var,'zoom':zoom,'canvas':canvas,
+               'display':display,'total':1,'job':None,'photo':None}
+        large_preview[0]=state
+        def change_page(offset):
+            page_var.set(max(1,min(state['total'],page_var.get()+offset)))
+            refresh()
+        def refresh(*_):
+            if not win.winfo_exists():return
+            try:
+                data=preview_data()
+                width=int(max(460,min(1800,canvas.winfo_width()-32))*zoom.get()/100)
+                image,pages=render_document_preview(data,view_var.get(),page_var.get()-1,width)
+                state['total']=pages
+                page_var.set(min(page_var.get(),pages))
+                photo=ImageTk.PhotoImage(image,master=win)
+                state['photo']=photo
+                canvas.delete('all')
+                canvas.create_image(12,12,anchor='nw',image=photo)
+                canvas.configure(scrollregion=(0,0,image.width+24,image.height+24))
+                display.set(f'Página {page_var.get()} de {pages} · {data.tamano_papel} · {data.letra} pt')
+            except Exception as exc:
+                display.set('Sin vista exacta: '+str(exc)[:85])
+        def queue(*_):
+            if not win.winfo_exists():return
+            if state['job'] is not None:win.after_cancel(state['job'])
+            state['job']=win.after(430,refresh)
+        state['queue']=queue
+        view_var.trace_add('write',lambda *_: (page_var.set(1),queue()))
+        zoom.trace_add('write',queue)
+        canvas.bind('<Configure>',queue)
+        win.protocol('WM_DELETE_WINDOW',lambda: (large_preview.__setitem__(0,None),win.destroy()))
+        win.after(120,refresh)
+
+    def render():
+        scheduled[0]=None
+        data=preview_data()
+        questions=data.questions
         try:
             preview_width=max(245,min(370,int((right.winfo_height()-158)*0.707)))
             pic=render_preview(data,current_view.get(),width=preview_width)
@@ -257,6 +366,9 @@ def build_ui():
         except (OSError,ValueError) as exc:
             preview_info.set('Vista previa no disponible: '+str(exc))
             return
+        if large_preview[0] is not None:
+            try:large_preview[0]['queue']()
+            except tk.TclError:large_preview[0]=None
         if cache['error']:
             preview_info.set('Excel pendiente de revisar: '+cache['error'][:135])
         else:
@@ -284,7 +396,7 @@ def build_ui():
         tab_buttons[name]=b
     mode('Cuadernillo')
 
-    for var in (file_var,logo_var,company_var,group_var,title_var,subtitle_var,color_title,color_subtitle):
+    for var in (file_var,logo_var,company_var,group_var,title_var,subtitle_var,color_title,color_subtitle,color_answers,paper_choice,body_font,reuse_booklet):
         var.trace_add('write',schedule)
     right.bind('<Configure>',schedule)
     instruction.bind('<KeyRelease>',schedule)
@@ -312,7 +424,9 @@ def build_ui():
                 empresa=company_var.get(),grupo=group_var.get(),titulo=title_var.get(),
                 subtitulo=subtitle_var.get(),instrucciones=instruction.get('1.0','end-1c'),
                 questions=questions,logo=Path(logo_var.get()) if logo_var.get().strip() else None,
-                color_titulo=color_title.get(),color_subtitulo=color_subtitle.get(),exam_id=active_id[0])
+                color_titulo=color_title.get(),color_subtitulo=color_subtitle.get(),
+                color_respuestas=color_answers.get(),tamano_papel=paper_choice.get(),
+                letra=float(body_font.get()),reutilizable=bool(reuse_booklet.get()),exam_id=active_id[0])
             active_id[0]=key
             if not lib_name.get().strip():lib_name.set(title_var.get())
             status.set('Cuestionario guardado en biblioteca local SQLite')
@@ -369,6 +483,8 @@ def build_ui():
             lib_name.set(exam.nombre);company_var.set(exam.empresa);group_var.set(exam.grupo)
             title_var.set(exam.titulo);subtitle_var.set(exam.subtitulo)
             color_title.set(exam.color_titulo);color_subtitle.set(exam.color_subtitulo)
+            color_answers.set(exam.color_respuestas);paper_choice.set(exam.tamano_papel)
+            body_font.set(f'{exam.letra:.1f}');reuse_booklet.set(exam.reutilizable)
             instruction.delete('1.0','end');instruction.insert('1.0',exam.instrucciones)
             logo_var.set(str(exam.logo) if exam.logo else '')
             file_var.set(str(workbook));cache['key']=None
@@ -398,7 +514,9 @@ def build_ui():
                 empresa=company_var.get(),puesto=group_var.get(),
                 instrucciones=instruction.get('1.0','end-1c'),
                 logo=Path(logo_var.get()) if logo_var.get().strip() else None,
-                color_titulo=color_title.get(),color_subtitulo=color_subtitle.get())
+                color_titulo=color_title.get(),color_subtitulo=color_subtitle.get(),
+                color_respuestas=color_answers.get(),tamano_papel=paper_choice.get(),
+                letra=float(body_font.get()),reutilizable=bool(reuse_booklet.get()))
         except (ExamError,OSError,ValueError) as exc:
             status.set('Revisa los datos · no se crearon los documentos.')
             messagebox.showerror('No se pudo generar la evaluación',str(exc),parent=root)
