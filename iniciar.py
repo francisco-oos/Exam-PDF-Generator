@@ -334,7 +334,8 @@ def build_ui(*, open_editor=False):
         }
         editor=open_design_studio(root,datos_fn=preview_data,variables=vars_studio,
             editar_preguntas=edit_current,guardar=save_in_library,generar=run,
-            importar=choose_xlsx,biblioteca=open_library,plantilla=template_download,estado=dirty)
+            importar=choose_xlsx,biblioteca=open_library,plantilla=template_download,
+            estado=dirty,calificar=abrir_omr)
         large_preview[0]={'win':editor}
         def clear_state(event):
             if event.widget is editor:
@@ -582,7 +583,11 @@ def build_ui(*, open_editor=False):
         """Abre la opción OMR sin afectar el resto del generador."""
         try:
             from omr_evaluaciones.interfaz import launch
-            launch(root)
+            # Tomar una instantánea del examen abierto; la modalidad OMR no
+            # debe pedir una segunda importación ni perder la revisión actual.
+            launch(root, questions=load_questions(),
+                   title=title_var.get(), paper=paper_choice.get(),
+                   source=file_var.get())
         except (ImportError, OSError) as exc:
             messagebox.showerror('Faltan componentes del lector OMR',
                 'Instala los complementos con: ' +
