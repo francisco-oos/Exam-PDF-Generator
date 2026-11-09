@@ -2,7 +2,8 @@
 
 ## 2026-11-08 · Nuevo módulo OMR QR (rama separada, en revisión)
 
-- Se crea una ventana de calificación independiente con modos tradicional, ecológico y personalizado; navegación adaptada a cada modalidad.
+- La aplicación conserva **un único punto de entrada para el usuario**: `Iniciar_Windows.bat` abre el generador y su editor PDF. El antiguo `calificar_omr.py` abre ahora el generador completo (el modo aislado es `--solo-calificar`).
+- El editor PDF incluye acceso directo a «Calificar · QR / escáner», transfiriendo título, papel y preguntas cargadas; el botón de regreso devuelve al editor. En modalidades tradicional y ecológica se conserva la impresión completa del generador.
 - Importa participantes CSV/XLSX, imprime hojas con QR firmado HMAC, folio visible, marcas de registro y burbujas con geometría única.
 - Lee un PDF multipágina con OpenCV y PDFium; rectifica rotaciones y pequeñas inclinaciones, valida QR, marca dudas y permite revisión con imagen original y zoom de reactivo.
 - Historial y archivo local en SQLite, conservación del PDF original y SHA-256, prevención de duplicados, bitácora de correcciones y Excel oficial/interno.
