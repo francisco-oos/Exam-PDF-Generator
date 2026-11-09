@@ -2,9 +2,9 @@
 
 **Estado:** diseño, sin implementación funcional ni cambios de esquema.  
 **Fecha:** 2026-11-09.  
-**Rama experimental:** \`feature/omr-web-multiusuario\`.  
-**Punto de partida:** commit \`731063865bc47d6043b6db463be836291e0b6129\` de \`feature/bandeja-documental-omr-evidencias\` (PR #13).  
-**Referencia de flujos multiusuario:** \`francisco-oos/EvaluacionPersonal\` v1.2.0; **NO unir sus bases de datos ni importar su formato de evaluación por áreas**.
+**Rama experimental:** `feature/omr-web-multiusuario`.  
+**Punto de partida:** commit `731063865bc47d6043b6db463be836291e0b6129` de `feature/bandeja-documental-omr-evidencias` (PR #13).  
+**Referencia de flujos multiusuario:** `francisco-oos/EvaluacionPersonal` v1.2.0; **NO unir sus bases de datos ni importar su formato de evaluación por áreas**.
 
 ## Objetivo y restricciones
 
@@ -21,15 +21,15 @@ concurrencia, seguridad, migración y restauración completa.
 
 ## Hallazgos reales del repositorio EvaluacionPersonal
 
-- \`main.py\` + \`app/server.py\`: servidor web local con usuarios individuales
+- `main.py` + `app/server.py`: servidor web local con usuarios individuales
   y acceso a través de la IP del equipo en la Wi-Fi.
-- \`app/database.py\`: SQLite central con WAL, \`busy_timeout=30000\`,
-  \`BEGIN IMMEDIATE\`, idempotencia por ID cliente y comprobación de revisión
+- `app/database.py`: SQLite central con WAL, `busy_timeout=30000`,
+  `BEGIN IMMEDIATE`, idempotencia por ID cliente y comprobación de revisión
   optimista para evitar sobrescritura de capturas antiguas.
 - Cuentas y roles por departamento, sesión HttpOnly/SameSite,
   contraseña individual PBKDF2 y trazabilidad de capturista.
-- \`tests/test_database.py\`: prueba de 60 evaluaciones escritas desde
-  2 usuarios con \`ThreadPoolExecutor(max_workers=10)\`.
+- `tests/test_database.py`: prueba de 60 evaluaciones escritas desde
+  2 usuarios con `ThreadPoolExecutor(max_workers=10)`.
 - Exportaciones/respaldos se generan en el servidor.
 - **Diferencia:** las evaluaciones de aquel sistema son capturas manuales
   por departamento/áreas; OMR utiliza cuestionarios, versiones inmutables
@@ -38,11 +38,11 @@ concurrencia, seguridad, migración y restauración completa.
 
 ## Hallazgos del repositorio OMR
 
-- El motor OMR está separado de la UI Tk: \`omr_evaluaciones/motor.py\`,
-  \`documentos.py\` y \`expedientes.py\`. No reescribir el lector ni
-  alterar geometría \`bubble_positions\` durante migración.
-- \`biblioteca.py\` conserva cuestionarios/versiones e imágenes en SQLite.
-- \`web_app.py\` actual solo genera PDF a partir de archivos colocados
+- El motor OMR está separado de la UI Tk: `omr_evaluaciones/motor.py`,
+  `documentos.py` y `expedientes.py`. No reescribir el lector ni
+  alterar geometría `bubble_positions` durante migración.
+- `biblioteca.py` conserva cuestionarios/versiones e imágenes en SQLite.
+- `web_app.py` actual solo genera PDF a partir de archivos colocados
   localmente; no dispone de login, bandeja documental OMR, revisión
   simultánea ni APIs para administrar folios.
 - Dos SQLite actuales: biblioteca y OMR. No apuntar clientes al archivo
@@ -53,7 +53,7 @@ concurrencia, seguridad, migración y restauración completa.
 
 ## Arquitectura candidata
 
-\`\`\`text
+```text
 PC servidor (Windows o Linux, LAN privada)
   ├── Backend Python API (FastAPI + Pydantic)
   │   ├── Autenticación / roles / controles por evaluación
@@ -71,7 +71,7 @@ PC servidor (Windows o Linux, LAN privada)
   ├── Navegador capturista 1 (PC / móvil)
   ├── Navegador capturista 2 (PC / móvil)
   └── Navegador coordinador / auditor
-\`\`\`
+```
 
 **Frontend recomendado:** React + TypeScript + Vite, compilado a archivos
 estáticos que sirve el propio backend; Node solo durante el desarrollo.
@@ -87,7 +87,7 @@ transacciones. No compartir físicamente el .sqlite en SMB.
 Preparar repositorio/adaptador para PostgreSQL cuando haya multi-servidor,
 escritores sostenidos o pruebas de bloqueo que lo justifiquen.
 
-**Tareas:** almacén persistido para \`queued/running/failed/completed\`,
+**Tareas:** almacén persistido para `queued/running/failed/completed`,
 reintentos con idempotencia y recuperación tras reiniciar. API responde
 202 con ID de trabajo; worker renderiza/verifica el PDF, guarda páginas y
 reporta avances. No ejecutar OMR completo dentro de una petición HTTP.
@@ -103,10 +103,10 @@ reporta avances. No ejecutar OMR completo dentro de una petición HTTP.
    tareas solo para marcas múltiples, tenues, conflictos y capturas
    manuales. La clasificación automática NO elimina el original.
 4. Una **cola de revisión** asigna hojas a capturistas según permiso.
-   Reclamar hoja crea un \`lease\` atómico con expiración y \`revision\`.
+   Reclamar hoja crea un `lease` atómico con expiración y `revision`.
    Otros usuarios la ven como **En revisión por otro capturista**;
    no pueden guardar sobre ella sin permiso.
-5. Al guardar, API exige \`expected_revision\` y \`lease_id\`, dentro
+5. Al guardar, API exige `expected_revision` y `lease_id`, dentro
    de una transacción corta; ante colisión devuelve HTTP 409 y no
    sobrescribe cambios. Guardar decisión por reactivo, usuario, momento,
    evidencia y motivo, nunca solo el resultado final.
@@ -120,7 +120,7 @@ reporta avances. No ejecutar OMR completo dentro de una petición HTTP.
    traspapeladas ni crea notas duplicadas.
 
 **Unicidad obligatoria:** una calificación efectiva por
-\`(aplicacion_id, folio)\`; conservar los reescaneos como evidencias y las
+`(aplicacion_id, folio)`; conservar los reescaneos como evidencias y las
 decisiones anteriores como eventos. Un mismo empleado podría tener folios
 distintos en diferentes aplicaciones y NO es duplicado por nombre.
 
@@ -152,18 +152,18 @@ privadas a usuarios no autorizados.
 
 ## Contratos de API propuestos (por definir en OpenAPI)
 
-- \`POST /api/auth/login\`, \`GET /api/auth/me\`, \`POST /api/auth/logout\`.
-- \`GET/POST /api/cuestionarios\`, \`GET/POST /api/aplicaciones\`.
-- \`POST /api/aplicaciones/{id}/generar\` (idempotente, nunca regenera folio sin intención).
-- \`POST /api/escaneos\` (subir PDF), \`GET /api/trabajos/{id}\`.
-- \`GET /api/revision/cola\`, \`POST /api/hojas/{id}/reclamar\`,
-  \`POST /api/hojas/{id}/renovar\`, \`POST /api/hojas/{id}/liberar\`.
-- \`GET /api/hojas/{id}\`, \`PUT /api/hojas/{id}/decisiones\`
-  con \`expected_revision\`, \`lease_id\` e idempotencia.
-- \`POST /api/hojas/{id}/aprobar\` (solo coordinador autorizado).
-- \`GET /api/aplicaciones/{id}/resultados\`,
-  \`POST /api/aplicaciones/{id}/exportar\`.
-- \`GET /api/documentos\`, \`GET /api/documentos/{sha}/paginas/{n}\`
+- `POST /api/auth/login`, `GET /api/auth/me`, `POST /api/auth/logout`.
+- `GET/POST /api/cuestionarios`, `GET/POST /api/aplicaciones`.
+- `POST /api/aplicaciones/{id}/generar` (idempotente, nunca regenera folio sin intención).
+- `POST /api/escaneos` (subir PDF), `GET /api/trabajos/{id}`.
+- `GET /api/revision/cola`, `POST /api/hojas/{id}/reclamar`,
+  `POST /api/hojas/{id}/renovar`, `POST /api/hojas/{id}/liberar`.
+- `GET /api/hojas/{id}`, `PUT /api/hojas/{id}/decisiones`
+  con `expected_revision`, `lease_id` e idempotencia.
+- `POST /api/hojas/{id}/aprobar` (solo coordinador autorizado).
+- `GET /api/aplicaciones/{id}/resultados`,
+  `POST /api/aplicaciones/{id}/exportar`.
+- `GET /api/documentos`, `GET /api/documentos/{sha}/paginas/{n}`
   (sin fuga de páginas ajenas).
 
 ## Plan de implementación por PRs pequeños
