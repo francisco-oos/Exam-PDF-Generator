@@ -73,10 +73,22 @@ No existe un tercer selector «Folio/QR».
 5. **Generar PDF de examen** crea la carpeta del lote y el manifiesto de hashes.
    Solo si se cargó lista registra una sesión OMR con su clave, asociada
    a los folios. El identificador queda en `Sesion_OMR.txt`.
-6. Para hojas con QR impresas, usa **Calificar y entregar** → **Historial**,
-   recupera la sesión, importa el PDF escaneado, revisa dudas y exporta
-   los resultados. También puedes corregir cualquier hoja usando el
-   acetato universal del mismo lote.
+6. Para hojas con QR impresas, usa **Calificar y entregar** →
+   **Escanear PDF**. El lector identifica automáticamente la sesión
+   correcta por **QR firmado**, incluso cuando varios exámenes tienen
+   el mismo título. La vista **Historial** muestra las evaluaciones de
+   Biblioteca junto a sus aplicaciones QR y folios, con nombre elegido,
+   modalidad, participantes, escaneos y pendientes. Si es antigua y no
+   conservó nombre, usa **Renombrar aplicación anterior**.
+7. En **Revisión** puedes superponer el **acetato digital** verde alineado
+   por las cuatro marcas, resaltar dudas y avanzar hoja por hoja. Para
+   cualquier lectura fallida, vuelve a importar el mismo escaneo:
+   las hojas antes «sin identificar» se reevalúan sin duplicarse y
+   **sin sobrescribir correcciones humanas**. Si sigue sin identificar,
+   verifica ID y folio y utiliza **Capturar hoja completa**, seleccionando
+   A/B/C/D/BLANCO con bitácora por reactivo.
+8. **Resultados** y **Excel de entrega** se habilitan tras verificar
+   las hojas; las incidencias se indican **PROVISIONALES**.
 
 Sin lista no hay QR válido ni sesión de calificación automática: se rellenan
 datos a mano y se usa acetato. **No se intentará identificar automáticamente
