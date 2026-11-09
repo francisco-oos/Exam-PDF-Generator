@@ -322,6 +322,12 @@ class OMRApp:
             tree.insert('', 'end',iid=p['id'],values=(who,p['estado'],q))
             lookup[p['id']]=p
         tk.Label(right,text='Hoja escaneada · evidencia',bg=WHITE,fg=NAVY,font=('Segoe UI',11,'bold')).pack(anchor='w')
+        show_overlay=tk.BooleanVar(value=True)
+        zoom_issue=tk.BooleanVar(value=False)
+        tk.Checkbutton(right,text='Resaltar marcas dudosas (sin modificar original)',variable=show_overlay,
+                       bg=WHITE,fg=INK,command=lambda:redraw()).pack(anchor='w')
+        tk.Checkbutton(right,text='Acercar reactivo seleccionado',variable=zoom_issue,
+                       bg=WHITE,fg=INK,command=lambda:redraw()).pack(anchor='w')
         image_label=tk.Label(right,bg=WHITE)
         image_label.pack(fill='both',expand=True)
         detail=tk.StringVar(value='Selecciona una hoja para verla.')
@@ -336,12 +342,6 @@ class OMRApp:
             if vals:ttk.Combobox(form,textvariable=var,values=vals,state='readonly').pack(fill='x')
             else:ttk.Entry(form,textvariable=var).pack(fill='x')
         selected={'id':None}
-        show_overlay=tk.BooleanVar(value=True)
-        zoom_issue=tk.BooleanVar(value=False)
-        tk.Checkbutton(right,text='Resaltar marcas dudosas (sin modificar original)',variable=show_overlay,
-                       bg=WHITE,fg=INK,command=lambda:redraw()).pack(anchor='w')
-        tk.Checkbutton(right,text='Acercar reactivo seleccionado',variable=zoom_issue,
-                       bg=WHITE,fg=INK,command=lambda:redraw()).pack(anchor='w')
         def redraw(*_):
             sel=tree.selection()
             if not sel:return
