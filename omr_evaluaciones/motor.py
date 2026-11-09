@@ -923,6 +923,106 @@ def resolve_pdf_session(store:OMRStore,pdf_path:Path,*,max_pages=5):
     return next(iter(found)) if found else None
 
 
+def inspect_pdf_sessions(store: OMRStore, pdf_path: Path):
+    """Clasifica TODAS las páginas antes de calificar un lote escaneado.
+
+    Solo un QR OMR1 con token registrado y firma HMAC válida demuestra qué
+    aplicación debe corregir esa hoja. Nombres impresos, títulos parecidos
+    y posición en el archivo NO prueban identidad. Páginas dudosas quedan
+    fuera de cualquier calificación automática.
+    """
+    path=Path(pdf_path)
+    if (not path.is_file() or path.suffix.lower()!='.pdf' or
+            path.stat().st_size>MAX_PDF_SIZE):
+        raise ValueError('Selecciona un PDF válido de hasta 100 MB.')
+    with path.open('rb') as source:
+        if source.read(5)!=b'%PDF-':
+            raise ValueError('Archivo PDF inválido.')
+    doc=pdfium.PdfDocument(str(path))
+    session_cache={}
+    items=[]
+    try:
+        if len(doc)>1500:
+            raise ValueError('PDF con demasiadas páginas.')
+        for idx in range(len(doc)):
+            page=doc[idx]
+            try:
+                w,h=page.get_size()
+                if not 100<=w<=1500 or not 100<=h<=2000:
+                    raise ValueError(
+                        f'Página {idx+1}: dimensiones anormales de PDF escaneado.')
+                rgb=np.asarray(
+                    page.render(scale=RENDER_DPI/72).to_pil().convert('RGB'))
+            finally:
+                page.close()
+            gray=cv2.cvtColor(rgb,cv2.COLOR_RGB2GRAY)
+            valid={}
+            found_qr=False
+            # El código puede quedar de lado o pequeño. La rectificación
+            # reutiliza las mismas cuatro marcas que el lector principal.
+            rotations=(gray,cv2.rotate(gray,cv2.ROTATE_180),
+                       cv2.rotate(gray,cv2.ROTATE_90_CLOCKWISE),
+                       cv2.rotate(gray,cv2.ROTATE_90_COUNTERCLOCKWISE))
+            for rotated in rotations:
+                variants=[rotated]
+                for paper in PAPERS:
+                    variants.extend(_rectify(rotated,paper))
+                for image in variants:
+                    qr=_decode_qr(image)
+                    if not qr:
+                        continue
+                    found_qr=True
+                    match=QR_RE.fullmatch(qr)
+                    if match is None:
+                        continue
+                    sid,token,page_num,_mac=match.groups()
+                    if sid not in session_cache:
+                        try:
+                            session_cache[sid]=store.session(sid)
+                        except ValueError:
+                            session_cache[sid]=None
+                    session=session_cache[sid]
+                    if session is None or page_num!='1':
+                        continue
+                    if token not in {p['token'] for p in session['personal']}:
+                        continue
+                    if not hmac.compare_digest(
+                        _qr_data(sid,token,1,session['clave_hmac']),qr):
+                        continue
+                    person=next(p for p in session['personal']
+                                if p['token']==token)
+                    valid[(sid,token)]={
+                        'pagina':idx+1,'sesion_id':sid,'estado':'verificada',
+                        'evaluacion':session.get('nombre_evaluacion')
+                                     or session['titulo'],
+                        'nombre':person['nombre'],'folio':person['folio'],
+                    }
+            if len(valid)==1:
+                items.append(next(iter(valid.values())))
+            else:
+                reason=('Se detectaron identificaciones QR contradictorias.'
+                        if len(valid)>1 else
+                        'QR presente, pero sin firma o sesión verificable.'
+                        if found_qr else
+                        'No se pudo leer ningún QR firmado.')
+                items.append({'pagina':idx+1,'sesion_id':None,
+                              'estado':'sin_identificar','diagnostico':reason})
+    finally:
+        doc.close()
+    groups={}
+    for item in items:
+        if item['sesion_id']:
+            sid=item['sesion_id']
+            if sid not in groups:
+                groups[sid]={'sesion_id':sid,'evaluacion':item['evaluacion'],
+                             'paginas':[]}
+            groups[sid]['paginas'].append(item['pagina'])
+    return {'total_paginas':len(items),'paginas':items,
+            'grupos':list(groups.values()),
+            'no_identificadas':[x for x in items if not x['sesion_id']],
+            'mezclado':len(groups)>1}
+
+
 def _recognize(gray,paper,questions_count):
     """Mide tinta en el núcleo de cada círculo, evitando los contornos impresos."""
     scale=RENDER_DPI/72.0
@@ -956,7 +1056,7 @@ def _recognize(gray,paper,questions_count):
     return answers,issues,levels
 
 
-def scan_document(store:OMRStore,sid:str,pdf_path:Path):
+def scan_document(store:OMRStore,sid:str,pdf_path:Path, *, page_indices=None):
     """Lee PDF multipágina, valida QR+HMAC, archiva evidencias y devuelve resumen.
 
     No usa OCR de nombres ni cambia resultados anteriores ante duplicados.
@@ -977,8 +1077,16 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path):
             'duplicadas':0,'repetidas':0,'reprocesadas':0,'detalles':[]}
     doc=pdfium.PdfDocument(str(archived))
     try:
-        if len(doc)>MAX_PARTICIPANTS*3 or len(doc)>1500:raise ValueError('PDF con demasiadas páginas.')
+        if len(doc)>MAX_PARTICIPANTS*3 or len(doc)>1500:
+            raise ValueError('PDF con demasiadas páginas.')
+        selected=None if page_indices is None else set(page_indices)
+        if selected is not None and (
+                not selected or any(type(i) is not int or i<0 or i>=len(doc)
+                                    for i in selected)):
+            raise ValueError('Las páginas solicitadas están fuera del PDF.')
         for idx in range(len(doc)):
+            if selected is not None and idx not in selected:
+                continue
             page=doc[idx]
             try:
                 # Un PDF pequeño puede declarar páginas gigantes que saturan RAM
