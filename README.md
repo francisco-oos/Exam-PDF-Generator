@@ -11,7 +11,7 @@ Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-
 - **Cuadernillo reutilizable** (activado por defecto al diseñar uno nuevo): elimina los campos personales **solo del cuadernillo**; el participante escribe nombre, fecha y grupo en su **hoja de respuestas**. Las páginas del cuadernillo llevan la marca de agua tenue «NO RAYAR NI MANCHAR» detrás del contenido.
 - **Tamaño de impresión:** A4 (210 × 297 mm), Carta (8.5 × 11 pulgadas) u Oficio mexicano (8.5 × 13 pulgadas). No mezcles acetatos y hojas de distintos tamaños o generaciones.
 - **Letra de opciones y preguntas:** 8–12 puntos en intervalos de 0.5; podrás revisar la cantidad REAL de páginas sin imprimir.
-- **Vista ampliada · PDF exacto:** abre una ventana independiente, con navegación de páginas y zoom, que renderiza el PDF completo en memoria mediante PDFium. La vista pequeña al costado sigue siendo orientativa.
+- **Vista previa única · PDF exacto:** al iniciar se abre directamente el diseñador con controles a la izquierda y PDF real a la derecha; cuenta con zoom y navegación. Ya no se muestra una segunda ventana de generador ni su miniatura orientativa.
 - **Color RGB de la hoja de respuestas:** tinta para encabezados y círculos; el papel sigue blanco para gastar menos tinta. La clave para acetato usa un color RGB configurable; su valor inicial sigue siendo verde translúcido.
 - Estas opciones también quedan guardadas en cada cuestionario SQLite y se restauran al reabrirlo, con migración no destructiva para bibliotecas anteriores.
 - El ejemplo predeterminado contiene **20 preguntas generales** de matemáticas, lenguaje, ciencia y lógica, sin nombres ni procesos de empresas.
@@ -44,7 +44,7 @@ La ventana **Diseñar e imprimir** es la entrada principal; usa **Cerrar aplicac
 
 ## Calificación con folios QR y PDF escaneado (módulo OMR)
 
-El módulo opcional **Calificar · QR** permite importar preguntas y una lista CSV/XLSX de personas; generar una hoja con **folio visible, ID, nombre, QR firmado y marcas negras** por participante; leer el PDF multipágina escaneado, identificar personas, comprobar las burbujas y revisar dudas junto a la imagen original antes de exportar.
+El apartado integrado **Calificar y entregar** permite importar preguntas y una lista CSV/XLSX de personas; generar una hoja con **folio visible, ID, nombre, QR firmado y marcas negras** por participante; leer el PDF multipágina escaneado, identificar personas, comprobar las burbujas y revisar dudas junto a la imagen original antes de exportar.
 
 La vista de calificación se adapta al tipo de examen: los modos **Tradicional** y **Ecológico** conservan el flujo normal del generador y ocultan las herramientas de escaneo; **Personalizado** habilita importación de personal, impresión QR, lectura, revisión, resultados e informes. Es posible utilizar el cuadernillo reutilizable con las hojas QR personalizadas.
 
