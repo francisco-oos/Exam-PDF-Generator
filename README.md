@@ -42,64 +42,51 @@ La ventana **Diseñar e imprimir** es la entrada principal; usa **Cerrar aplicac
 **Verificación técnica:** en la rama de desarrollo `feature/modernizacion-integral`, la CI para Windows (Python 3.11/3.12/3.13), Ubuntu y Docker concluyó satisfactoriamente en la [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). La automatización no sustituye la prueba del editor con el equipo físico del usuario ni la superposición de hoja y acetato en impresora al 100 %.
 
 
-## Flujo único: diseñar, imprimir, calificar y entregar
+## Dos modalidades de cuadernillo y una hoja universal
 
-**Windows:** abre una sola vez `Iniciar_Windows.bat`; **Linux:** `Iniciar_Linux.sh`.
-La aplicación abre el diseñador PDF real. **No hay dos generadores ni una segunda
-captura de preguntas.**
+El escritorio muestra **una sola ventana de diseño** y únicamente los modos
+**Normal** y **Ecológico**. **El QR no es un modo:** se incorpora
+automáticamente cuando se carga una lista válida de participantes.
+No existe un tercer selector «Folio/QR».
 
-1. Importa el XLSX de preguntas o abre un cuestionario de la biblioteca.
-2. **Participantes (opcional):** descarga **Plantilla de participantes**, rellena
-   exclusivamente la pestaña **Participantes** y carga el CSV/XLSX. La plantilla
-   incluye cabeceras `ID_personal`, `Nombre`, `Area_adscripcion`, `Grupo`, `Turno`,
-   y una hoja **Ejemplo** separada que **no se importa**. ID como texto para
-   conservar ceros iniciales. Máximo 500 personas, una fila por persona.
-   **Quitar lista** vuelve a la generación genérica.
-3. Elige un único **tipo de examen**:
-   - **Tradicional:** sin lista, cuadernillo/hoja sin datos; con lista, además
-     crea un juego por persona en `Por_participante/` y
-     `Paquetes_individuales.zip`, con una hoja de respuestas agrupada.
-   - **Ecológico:** un solo cuadernillo reutilizable, con marca de agua
-     «NO RAYAR NI MANCHAR». Con lista, `Hoja_respuestas.pdf` contiene hojas
-     identificadas para cada participante; sin lista es una hoja genérica.
-   - **Con folio y QR:** con lista, un cuadernillo reutilizable y
-     `Hoja_respuestas.pdf` con **folio, nombre, ID, QR firmado y cuatro
-     marcas de registro** por persona. `Acetato_clave.pdf` se genera con la
-     MISMA geometría que el lector OMR, no con la del formato convencional.
-     Si no hay lista, el programa crea PDFs genéricos **sin emitir QR ni folios**.
-4. Comprueba en la vista **Cuadernillo / Respuestas / Acetato** el PDF real.
-   La vista de una hoja QR contiene un **QR de demostración no válido**,
-   que se sustituye por QR/HMAC real al generar la sesión.
-5. Pulsa **Generar PDF de examen**. La exportación crea una nueva carpeta
-   sin modificar el Excel original. Conserva `manifest.json`, hashes y
-   `LEEME_IMPRESION.txt` con instrucciones de ese lote.
-6. Para hojas QR impresas, entra a **Evaluaciones → Calificar y entregar
-   resultados**. Esta pantalla se abre maximizada solo con **Historial**,
-   **Escanear PDF**, **Revisión**, **Resultados** y **Excel de entrega**.
-   Selecciona la sesión indicada en `Sesion_OMR.txt`, escanea y revisa
-   incidencias; vuelve al diseñador sin perder cambios.
+1. Importa o edita las preguntas del mismo examen y revisa su vista PDF real.
+2. **Participantes (opcional):** descarga la plantilla XLSX, rellena la pestaña
+   **Participantes** (ID como texto, Nombre y, opcionalmente, área, grupo, turno)
+   y pulsa **Cargar lista**. La pestaña de ejemplo no se importa. Puedes
+   quitar la lista para volver a una evaluación anónima.
+3. Escoge el **tipo de cuadernillo**:
+   - **Normal, sin lista:** cuadernillo individual en blanco + hoja universal
+     con espacios para nombre, folio e ID; **sin QR**.
+   - **Normal, con lista:** un juego por persona, con **cuadernillo identificado**
+     y la **misma hoja de respuestas** con nombre, ID, folio y QR. Se guarda
+     el lote en `Hoja_respuestas.pdf` y cada juego en `Por_participante/`
+     y `Paquetes_individuales.zip`.
+   - **Ecológico, sin lista:** un cuadernillo reutilizable con aviso
+     «NO RAYAR NI MANCHAR» y hoja universal sin QR para llenar a mano.
+   - **Ecológico, con lista:** el **mismo cuadernillo reutilizable** compartido
+     por todo el grupo y una hoja por persona con folio, ID, nombre y QR.
+4. Consulta **Cuadernillo**, **Respuestas** y **Acetato** en la misma vista.
+   Todas las hojas del escritorio usan **idéntica disposición de burbujas,
+   marcas de registro y acetato**, tanto con como sin lista. El QR de la
+   vista previa con lista es solo ilustrativo; al generar se crea un QR
+   distinto y firmado para cada persona.
+5. **Generar PDF de examen** crea la carpeta del lote y el manifiesto de hashes.
+   Solo si se cargó lista registra una sesión OMR con su clave, asociada
+   a los folios. El identificador queda en `Sesion_OMR.txt`.
+6. Para hojas con QR impresas, usa **Calificar y entregar** → **Historial**,
+   recupera la sesión, importa el PDF escaneado, revisa dudas y exporta
+   los resultados. También puedes corregir cualquier hoja usando el
+   acetato universal del mismo lote.
 
-Las modalidades convencional y ecológica admiten **calificación manual
-con acetato**; la lectura automática está habilitada únicamente en hojas QR
-con lista y sesión persistida. Las hojas tradicionales y ecológicas tienen
-geometría convencional para su acetato; las hojas OMR y su acetato comparten
-`bubble_positions`, por lo que no deben intercambiarse entre modalidades.
+Sin lista no hay QR válido ni sesión de calificación automática: se rellenan
+datos a mano y se usa acetato. **No se intentará identificar automáticamente
+a alguien por su letra o por el orden de las páginas.**
 
-**Inicio y dependencias:** ambos iniciadores instalan las bibliotecas OMR
-faltantes en el entorno virtual del mismo proyecto. No se necesita Docker
-ni otra ventana para generar o calificar. `calificar_omr.py --solo-calificar`
-permanece como opción técnica antigua, no como flujo recomendado.
-
-**Datos privados:** las listas de personal y sesiones quedan en disco local
-y **no están cifradas**. Protege las carpetas `salidas/`, `datos/omr/`,
-`datos/biblioteca.sqlite3`, las copias de respaldo y las claves.
-No subas esos datos, hojas escaneadas ni resultados reales a GitHub.
-
-**Validación:** las pruebas con PDF y escaneos sintéticos comprueban que QR,
-identidad, HMAC, folio, geometría y resultados se relacionan con la misma
-sesión. **La precisión del escáner físico Xerox VersaLink C7120 aún requiere
-impresión al 100 %, escaneo y calibración con respuestas conocidas**.
-Consulta [el manual de escaneo y corrección](docs/OMR_ESCANEO_CALIFICACION.md).
+**Impresión y seguridad:** usa siempre escala 100 % y tamaño de papel coincidente
+para hojas y acetato. Protege `salidas/`, `datos/omr/` y las copias:
+contienen nombres y claves locales sin cifrado. No subas datos reales a Git.
+Antes de usar resultados oficiales hay que validar con escaneos físicos y
+calibrar el reconocimiento en la Xerox; las pruebas digitales son sintéticas.
 
 ## Características
 
@@ -110,7 +97,7 @@ Consulta [el manual de escaneo y corrección](docs/OMR_ESCANEO_CALIFICACION.md).
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
 - CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
-- **Interfaz de escritorio unificada:** una sola ventana de diseño con vista del PDF real, selector Normal/Ecológico/Folio-QR, menú para calificar y entregar, biblioteca, editor de preguntas y exportación. En modo OMR se oculta el diseñador para revisar a pantalla completa.
+- **Interfaz de escritorio unificada:** una sola vista PDF real, opciones Normal/Ecológico, QR automático al cargar lista y hoja universal compatible con escáner y acetato. Calificar y entregar se abre en pantalla completa.
 
 ## Iniciar con Docker — recomendado (Windows y Linux)
 
