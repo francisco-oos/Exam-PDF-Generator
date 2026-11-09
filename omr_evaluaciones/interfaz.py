@@ -17,6 +17,28 @@ from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
 from .demo import create_synthetic_scan
 
 NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
+def review_question_options(questions):
+    """Opciones del examen almacenado para revisión, nunca desde entrada libre.
+
+    El QR firmado identifica la sesión; su copia persistida de preguntas es
+    la referencia. Mantener la posición 1-based equivale al círculo impreso.
+    """
+    if not questions:
+        return ()
+    options=[]
+    for number, item in enumerate(questions,1):
+        prompt=' '.join(str(item.get('pregunta','')).split())
+        options.append(f'{number:02d} · {prompt[:100]}')
+    return tuple(options)
+
+
+def selected_question_number(selection, choices):
+    """Obtiene el reactivo por índice de un catálogo cerrado."""
+    try:
+        return choices.index(selection)+1
+    except ValueError as exc:
+        raise ValueError('Selecciona una pregunta del examen en la lista.') from exc
+
 
 class OMRApp:
     def __init__(self,parent=None,db_root=None, *,
@@ -409,7 +431,20 @@ class OMRApp:
                       'las marcas y captura respuestas manualmente si hace falta.')
         if not self._session_required():return
         pages=self.store.pages(self.session_id)
-        people={p['token']:p for p in self.store.session(self.session_id)['personal']}
+        session=self.store.session(self.session_id)
+        people={p['token']:p for p in session['personal']}
+        question_choices=review_question_options(session['preguntas'])
+        if not question_choices:
+            self._note('La sesión no tiene preguntas guardadas. '
+                       'No se puede corregir sin la versión original del examen.')
+            return
+        name=session.get('nombre_evaluacion') or session['titulo']
+        self._note(
+            f'Examen identificado: {name} · Aplicación: {self.session_id} · '
+            f'{len(question_choices)} preguntas. '
+            'El QR identifica la aplicación y recupera su cuestionario guardado; '
+            'no utiliza un examen distinto con título parecido.'
+        )
         # Incluir también hojas ya validadas: facilita comprobar el acetato,
         # cambiar de página y verificar las respuestas antes de la entrega.
         suspects=sorted(pages,key=lambda item:(item['estado']=='validada',
@@ -445,14 +480,29 @@ class OMRApp:
         detail=tk.StringVar(value='Selecciona una hoja para verla.')
         tk.Label(left,textvariable=detail,bg=LIGHT,fg='#607987',wraplength=385,justify='left').pack(anchor='w',pady=8)
         opt=tk.StringVar(value='A')
-        question=tk.StringVar(value='1')
+        question=tk.StringVar(value=question_choices[0])
+        full_question=tk.StringVar(value='')
         reviewer=tk.StringVar(value='Evaluador')
         reason=tk.StringVar(value='Marca verificada en el escaneo original')
         form=tk.Frame(left,bg=LIGHT);form.pack(fill='x')
-        for label,var,vals in [('Reactivo',question,None),('Decisión A/B/C/D o BLANCO',opt,('A','B','C','D','BLANCO','DESCARTAR')),('Revisor',reviewer,None),('Justificación',reason,None)]:
+        tk.Label(form,text='Reactivo del examen identificado',
+                 bg=LIGHT,fg=INK).pack(anchor='w',pady=(6,1))
+        question_selector=ttk.Combobox(
+            form,textvariable=question,values=question_choices,
+            state='readonly',height=min(20,len(question_choices)))
+        question_selector.pack(fill='x')
+        tk.Label(form,textvariable=full_question,bg=LIGHT,fg=INK,
+                 wraplength=435,justify='left').pack(anchor='w',pady=(4,6))
+        for label,var,vals in [
+            ('Decisión A/B/C/D o BLANCO',opt,('A','B','C','D','BLANCO','DESCARTAR')),
+            ('Revisor',reviewer,None),('Justificación',reason,None)
+        ]:
             tk.Label(form,text=label,bg=LIGHT,fg=INK).pack(anchor='w',pady=(6,1))
-            if vals:ttk.Combobox(form,textvariable=var,values=vals,state='readonly').pack(fill='x')
-            else:ttk.Entry(form,textvariable=var).pack(fill='x')
+            if vals:
+                ttk.Combobox(form,textvariable=var,values=vals,
+                             state='readonly').pack(fill='x')
+            else:
+                ttk.Entry(form,textvariable=var).pack(fill='x')
         selected={'id':None}
         def redraw(*_):
             sel=tree.selection()
@@ -463,8 +513,15 @@ class OMRApp:
             detail.set(f'{p["estado"].upper()} · página {p["pagina"]+1} · '
                        f'{len(p["dudas"])} observaciones'+
                        (f' · {reasons}' if reasons else ''))
-            if p['dudas'] and p['dudas'][0].get('pregunta'):
-                question.set(str(p['dudas'][0]['pregunta']))
+            try:
+                qid=selected_question_number(question.get(),question_choices)
+            except ValueError as exc:
+                detail.set(str(exc))
+                return
+            item=session['preguntas'][qid-1]
+            full_question.set(
+                f'Pregunta {qid} · {item["tema"]}\n{item["pregunta"]}'
+            )
             try:
                 # El archivo PNG archivado y el PDF original jamás se editan.
                 # La hoja se rectifica EN MEMORIA a partir de las cuatro marcas.
@@ -472,15 +529,15 @@ class OMRApp:
                 original=cv2.imread(str(p['imagen']))
                 if original is None:
                     raise OSError('No se encontró la evidencia archivada.')
-                session=self.store.session(self.session_id)
                 try:
                     img=render_review_with_acetato(
                         original,session['papel'],session['preguntas'],
                         show_acetato=show_acetato.get(),
                         issue_numbers=(
-                            [i.get('pregunta') for i in p['dudas']]
+                            [i.get('pregunta') for i in p['dudas']
+                             if isinstance(i.get('pregunta'),int)]
                             if show_overlay.get() else []
-                        ),
+                        ) + [qid],
                     )
                 except ValueError as alignment_error:
                     # No falsificar coincidencia del acetato sin cuatro marcas.
@@ -488,7 +545,8 @@ class OMRApp:
                     detail.set(detail.get()+' · SIN ACETATO: '+str(alignment_error))
                 if zoom_issue.get():
                     try:
-                        qid=int(question.get())
+                        qid=selected_question_number(question.get(),
+                                                      question_choices)
                         dots=bubble_positions(session['papel'],
                                                len(session['preguntas']))[qid-1]
                         height=PAPERS[session['papel']][1]
@@ -507,12 +565,28 @@ class OMRApp:
                 self.photo=ImageTk.PhotoImage(img,master=self.window)
                 image_label.configure(image=self.photo)
             except Exception as exc:detail.set('No se puede mostrar imagen: '+str(exc))
-        tree.bind('<<TreeviewSelect>>',redraw)
-        question.trace_add('write',lambda *_:redraw() if zoom_issue.get() else None)
+        def choose_sheet(event=None):
+            """Al cambiar de hoja, seleccionar su primera duda automáticamente."""
+            sel=tree.selection()
+            if not sel:return
+            page=lookup[sel[0]]
+            first=next((
+                issue.get('pregunta') for issue in page['dudas']
+                if isinstance(issue.get('pregunta'),int) and
+                1<=issue['pregunta']<=len(question_choices)
+            ),1)
+            question.set(question_choices[first-1])
+            redraw()
+
+        tree.bind('<<TreeviewSelect>>',choose_sheet)
+        question_selector.bind('<<ComboboxSelected>>',lambda event:redraw())
         def decide():
             if selected['id'] is None:return
             try:
-                self.store.review(selected['id'],int(question.get()) if opt.get()!='DESCARTAR' else None,
+                index=(selected_question_number(question.get(),
+                                                question_choices)
+                       if opt.get()!='DESCARTAR' else None)
+                self.store.review(selected['id'],index,
                     opt.get(),reason.get(),reviewer.get())
                 self.navigate('Revisión')
                 self.feedback.set('Decisión registrada con trazabilidad.')
@@ -640,7 +714,7 @@ class OMRApp:
                 suspects[0]['id'])
             tree.selection_set(first)
             tree.see(first)
-            redraw()
+            choose_sheet()
 
     def _results(self):
         self._heading('Resultados y desempeño','El promedio excluye ausentes y pendientes. El desempeño por tema utiliza preguntas de ese tema.')
