@@ -13,7 +13,7 @@ from PIL import Image,ImageTk,ImageDraw
 
 from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
                     export_report,PAPERS,bubble_positions,RENDER_DPI,
-                    render_review_with_acetato)
+                    render_review_with_acetato,resolve_pdf_session)
 from .demo import create_synthetic_scan
 
 NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
@@ -292,11 +292,18 @@ class OMRApp:
         self.preview.configure(image=self.photo)
 
     def _scanner(self):
-        self._heading('Escanear respuestas','Xerox VersaLink C7120 · PDF multipágina · 300 dpi en grises para la prueba física inicial.')
-        if not self._session_required():return
+        self._heading('Escanear respuestas',
+                      'El QR firmado selecciona automáticamente la evaluación correcta. '
+                      'Xerox VersaLink C7120 · PDF multipágina · 300 dpi en grises.')
+        if self.session_id is None:
+            self._note('Puedes cargar un PDF sin elegir la evaluación: el lector '
+                       'buscará su sesión por QR firmado. Si no lo reconoce, '
+                       'selecciona la sesión manualmente desde Historial.')
         c=self._card()
         self._btn(c,'Cargar PDF escaneado',self.load_scanned,True)
-        self._btn(c,'Simular lectura OMR real con hojas sintéticas',self.simulate_scanned)
+        if self.session_id:
+            self._btn(c,'Simular lectura OMR real con hojas sintéticas',
+                      self.simulate_scanned)
         self._note('La simulación sí utiliza el mismo motor de reconocimiento y compara píxeles de hojas marcadas, pero las marcas se generan digitalmente. No demuestra precisión en la Xerox física.')
         self._scan_status=tk.Text(self.stage,height=8,wrap='word',bg=WHITE,fg=INK,font=('Consolas',10))
         self._scan_status.pack(fill='x',pady=10)
@@ -310,7 +317,6 @@ class OMRApp:
         except Exception as exc:messagebox.showerror('Error en simulación',str(exc),parent=self.window)
 
     def load_scanned(self):
-        if not self.session_id:return
         f=filedialog.askopenfilename(parent=self.window,title='PDF de escáner',filetypes=[('PDF','*.pdf')])
         if f:self._run_scan(Path(f))
 
@@ -320,10 +326,23 @@ class OMRApp:
             messagebox.showinfo('Lectura en proceso','Ya hay un lote en procesamiento.',parent=self.window)
             return
         self.scanning=True
-        self.feedback.set('Leyendo PDF en segundo plano… Se mantiene disponible la interfaz.')
+        original_session=self.session_id
+        self.feedback.set('Localizando folios y leyendo PDF en segundo plano…')
         def work():
-            try:self.scan_updates.put(('ok',source,scan_document(self.store,self.session_id,Path(source))))
-            except Exception as exc:self.scan_updates.put(('error',source,str(exc)))
+            try:
+                detected=resolve_pdf_session(self.store,Path(source))
+                sid=detected or original_session
+                if not sid:
+                    raise ValueError(
+                        'No se reconoció ningún QR válido. Selecciona desde '
+                        'Historial la evaluación correspondiente y vuelve a importar.')
+                result=scan_document(self.store,sid,Path(source))
+                self.scan_updates.put(('ok',source,{
+                    'report':result,'sid':sid,
+                    'automatic':bool(detected and detected!=original_session),
+                }))
+            except Exception as exc:
+                self.scan_updates.put(('error',source,str(exc)))
         Thread(target=work,daemon=True).start()
         self.window.after(120,self._finish_scan)
 
@@ -337,8 +356,18 @@ class OMRApp:
             self.feedback.set('No se completó la lectura.')
             messagebox.showerror('No se pudo leer PDF',payload,parent=self.window)
             return
-        report=payload
-        summary=(f'PDF: {source} · Páginas: {report["leidas"]} · '
+        report=payload['report']
+        self.session_id=payload['sid']
+        if payload['automatic']:
+            session=self.store.session(self.session_id)
+            self.mode.set(session['modo'])
+            self.paper.set(session['papel'])
+            self.title.set(session['titulo'])
+            self.questions=session['preguntas']
+            self.people=session['personal']
+        auto=(' · Sesión reconocida por QR: '+self.session_id
+              if payload['automatic'] else '')
+        summary=(f'PDF: {source}'+auto+f' · Páginas: {report["leidas"]} · '
             f'Validadas: {report["validadas"]} · Pendientes: {report["revisar"]} · '
             f'Sin identificar: {report["sin_identificar"]} · Duplicadas: {report["duplicadas"]} · '
             f'Reimportadas: {report["repetidas"]} · '
