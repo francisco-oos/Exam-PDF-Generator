@@ -283,32 +283,63 @@ class DocumentInbox:
 
     def bind_manual_pending(self, digest, page, sid, personal_id, folio,
                             reviewer, reason):
-        """Asocia un QR ilegible a una aplicación SOLO como pendiente.
+        """Pasa una página QR ilegible a Revisión sin asignar notas.
 
-        Nunca se adjudica una nota. Se exige cotejo visual de ID+folio
-        contra participantes de la sesión. La lectura de la hoja para
-        calificarla sigue requiriendo revisión humana en OMRStore.
+        La pareja ID+folio se coteja con la sesión guardada. Crea una hoja
+        OMR sin respuestas para que el evaluador pueda abrir el acetato
+        digital y CAPTURAR TODO, dejando bitácora. Nunca se confía en OCR.
         """
+        import cv2
+        import numpy as np
+
         if not str(reviewer).strip() or not str(reason).strip():
             raise ValueError('Es necesario revisor y motivo.')
-        person=next((x for x in self.store.session(sid)['personal']
+        session=self.store.session(sid)
+        person=next((x for x in session['personal']
                      if x['id']==personal_id and x['folio']==folio),None)
         if person is None:
             raise ValueError('ID y folio no corresponden a esa aplicación.')
+        if any(x['token']==person['token'] and x['estado'] not in
+               ('descartada','duplicado') for x in self.store.pages(sid)):
+            raise ValueError('Ese folio ya tiene una hoja activa. '
+                             'Resuelve primero la duplicación.')
         with self.store.connect() as db:
             row=db.execute("""
                 SELECT * FROM paginas_documentos_omr WHERE sha=? AND pagina=?
             """,(digest,page)).fetchone()
             if row is None or row['estado'] not in ('pendiente','identificada'):
-                raise ValueError('Solo pueden asociarse hojas pendientes.')
+                raise ValueError('Solo se pueden asociar hojas pendientes.')
             if row['sesion_id'] and row['sesion_id']!=sid:
                 raise ValueError('La hoja ya pertenece a otra evaluación.')
+        doc=pdfium.PdfDocument(str(self.original(digest)))
+        try:
+            if page<0 or page>=len(doc):
+                raise ValueError('Página inexistente.')
+            part=doc[page]
+            try:
+                rgb=np.asarray(part.render(scale=200/72).to_pil()
+                               .convert('RGB'))
+            finally:
+                part.close()
+        finally:
+            doc.close()
+        bgr=cv2.cvtColor(rgb,cv2.COLOR_RGB2BGR)
+        n=len(session['preguntas'])
+        sheet_id,_=self.store.register_page(
+            sid,digest,page,bgr,None,[None]*n,
+            [{'pregunta':i,'razon':'Identificación y captura manual requerida'}
+             for i in range(1,n+1)],
+            'sin_identificar',
+        )
+        self.store.identify_page(sheet_id,personal_id,folio,
+                                 reason,reviewer)
+        with self.store.connect() as db:
             db.execute("""
                 UPDATE paginas_documentos_omr SET sesion_id=?,folio=?,persona=?,
-                    estado='manual_pendiente',diagnostico=?,revisada=?
+                    hoja_id=?,estado='manual_pendiente',diagnostico=?,revisada=?
                 WHERE sha=? AND pagina=?
-            """,(sid,folio,person['nombre'],
-                 'Vinculación de folio sin QR: requiere captura manual',
+            """,(sid,folio,person['nombre'],sheet_id,
+                 'Vinculación manual por ID+folio: captura total obligatoria',
                  utcnow(),digest,page))
             self._event(db,digest,page,'vinculacion_manual',reviewer,
                         reason.strip()[:600])
