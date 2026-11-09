@@ -19,9 +19,10 @@ NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
 class OMRApp:
     def __init__(self,parent=None,db_root=None, *,
                  questions=None, title=None, paper=None, source=None,
-                 on_return=None, start_page='Inicio'):
+                 on_return=None, start_page='Inicio', review_only=False):
         self.parent = parent
         self.on_return = on_return
+        self.review_only = review_only
         self.window=tk.Toplevel(parent) if parent is not None else tk.Tk()
         self.window.title('Evaluaciones · Folios, escaneo y calificación OMR')
         w=min(1390,self.window.winfo_screenwidth()-50)
@@ -55,7 +56,7 @@ class OMRApp:
         self.photo=None
         self.scan_updates=Queue()
         self.scanning=False
-        self.active_view='Inicio'
+        self.active_view='Historial' if self.review_only else 'Inicio'
         self.buttons={}
         self.last_print=None
         self.feedback=tk.StringVar(value='Listo para configurar una evaluación.')
@@ -63,13 +64,16 @@ class OMRApp:
         self.mode.trace_add('write',lambda *_:self._refresh_navigation())
         self._refresh_navigation()
         self.window.protocol('WM_DELETE_WINDOW', self.return_to_generator)
-        self.navigate(start_page if start_page in ('Inicio', 'Historial') else 'Inicio')
+        self.navigate('Historial' if self.review_only else
+                      (start_page if start_page in ('Inicio','Historial') else 'Inicio'))
 
     def _layout(self):
         sidebar=tk.Frame(self.window,bg=NAVY,width=232)
         sidebar.pack(side='left',fill='y');sidebar.pack_propagate(False)
         tk.Label(sidebar,text='EVALUACIONES',bg=NAVY,fg='#68dce4',font=('Segoe UI',11,'bold'),pady=25).pack(anchor='w',padx=21)
-        tk.Label(sidebar,text='Diseña · Aplica · Califica',bg=NAVY,fg=WHITE,font=('Segoe UI',11,'bold')).pack(anchor='w',padx=21,pady=(0,17))
+        tk.Label(sidebar,text='Escanea · Revisa · Entrega' if self.review_only else
+                 'Diseña · Aplica · Califica',bg=NAVY,fg=WHITE,
+                 font=('Segoe UI',11,'bold')).pack(anchor='w',padx=21,pady=(0,17))
         for item in ['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']:
             b=tk.Button(sidebar,text=item,anchor='w',bd=0,highlightthickness=0,bg=NAVY,fg='#dae6ea',
                 activebackground='#1e5360',activeforeground=WHITE,font=('Segoe UI',10),padx=21,pady=12,
@@ -86,7 +90,9 @@ class OMRApp:
         right.pack(side='left',fill='both',expand=True)
         bar=tk.Frame(right,bg=WHITE,height=63)
         bar.pack(fill='x');bar.pack_propagate(False)
-        tk.Label(bar,text='GESTOR DE APLICACIONES',bg=WHITE,fg=TEAL,font=('Segoe UI',11,'bold')).pack(side='left',padx=20)
+        tk.Label(bar,text='CALIFICACIÓN Y RESULTADOS' if self.review_only else
+                 'GESTOR DE APLICACIONES',bg=WHITE,fg=TEAL,
+                 font=('Segoe UI',11,'bold')).pack(side='left',padx=20)
         self.state_label=tk.Label(bar,textvariable=self.feedback,bg=WHITE,fg=INK,font=('Segoe UI',9),wraplength=480)
         self.state_label.pack(side='right',padx=18)
         self.stage=tk.Frame(right,bg=LIGHT,padx=22,pady=18)
@@ -106,12 +112,15 @@ class OMRApp:
 
     def _refresh_navigation(self):
         all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']
-        active=(['Inicio','Historial'] if self.mode.get() in ('tradicional','ecologico') else all_items)
+        active=(['Historial','Escanear PDF','Revisión','Resultados','Excel de entrega']
+                if self.review_only else
+                (['Inicio','Historial'] if self.mode.get() in ('tradicional','ecologico')
+                 else all_items))
         for item in all_items:
             self.buttons[item].pack_forget()
         for item in active:
             self.buttons[item].pack(fill='x',padx=9,pady=1)
-        if self.active_view not in active:self.navigate('Inicio')
+        if self.active_view not in active:self.navigate(active[0])
 
     def _clear(self):
         for w in self.stage.winfo_children():w.destroy()
@@ -136,6 +145,8 @@ class OMRApp:
         return btn
 
     def navigate(self,page):
+        if self.review_only and page in ('Inicio','Participantes','Hojas con QR'):
+            return
         self.active_view=page;self._clear()
         for item,b in self.buttons.items():b.configure(bg='#1c5163' if item==page else NAVY)
         pages={'Inicio':self._home,'Participantes':self._roster,'Hojas con QR':self._paper,
@@ -498,11 +509,14 @@ class OMRApp:
     def _history(self):
         self._heading('Historial de aplicaciones','Abre una sesión guardada para ver hojas, calificaciones e incidencias sin repetir el escaneo.')
         sessions=self.store.sessions()
+        if self.review_only:
+            sessions=[x for x in sessions if x['modo']=='personalizado']
         if not sessions:
-            self._note('Todavía no hay sesiones registradas. Prepara hojas con folio y QR '
-                       'desde Inicio para poder escanearlas y calificar.')
-        self._btn(self.stage, 'Nueva aplicación con folio y QR',
-                  lambda: self.navigate('Inicio'))
+            self._note('Aún no hay evaluaciones con folio y QR. Desde Diseñar e imprimir '
+                       'carga una lista, selecciona Folio + QR y genera los PDFs.')
+        if not self.review_only:
+            self._btn(self.stage, 'Nueva aplicación con folio y QR',
+                      lambda: self.navigate('Inicio'))
         tree=self._table(['ID','Evaluación','Modalidad','Formato','Fecha'],
             [(s['id'],s['titulo'],s['modo'],s['papel'],s['creada'][:16]) for s in sessions])
         def reopen():
@@ -513,13 +527,15 @@ class OMRApp:
             self.mode.set(session['modo']);self.title.set(session['titulo']);self.paper.set(session['papel'])
             self.questions=session['preguntas'];self.people=session['personal']
             self.feedback.set('Sesión histórica cargada: '+self.session_id)
-            self.navigate('Resultados' if self.mode.get()=='personalizado' else 'Inicio')
+            self.navigate('Resultados' if self.review_only or
+                          self.mode.get()=='personalizado' else 'Inicio')
         self._btn(self.stage,'Abrir sesión seleccionada',reopen,True)
 
 def launch(parent=None, *, questions=None, title=None, paper=None, source=None,
-           on_return=None, start_page='Inicio'):
+           on_return=None, start_page='Inicio', review_only=False):
     """Abre la calificación dentro del generador y hereda preguntas si existen."""
     app=OMRApp(parent=parent,questions=questions,title=title,paper=paper,
-               source=source,on_return=on_return,start_page=start_page)
+               source=source,on_return=on_return,start_page=start_page,
+               review_only=review_only)
     if parent is None:app.window.mainloop()
     return app
