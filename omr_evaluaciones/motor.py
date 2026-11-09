@@ -1044,35 +1044,53 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path, *, progress=None):
 
 
 def _recognize(gray,paper,questions_count):
-    """Mide tinta en el núcleo de cada círculo, evitando los contornos impresos."""
+    """Mide grafito por contraste del CENTRO, preservando dudas auténticas.
+
+    El detector anterior convertía toda la página en dos máscaras binarias
+    absolutas (148/215), por lo que un lápiz HB/#2 gris daba 15-20 dudas.
+    Este mide intensidad y cobertura en el interior, lejos del contorno
+    impreso, y compara la opción principal con las otras tres. Las marcas
+    dobles, tenues o sucias NO se adjudican por aproximación.
+    """
     scale=RENDER_DPI/72.0
+    r=round(4.7*scale)
+    yy,xx=np.ogrid[-r:r+1,-r:r+1]
+    mask=(xx*xx+yy*yy)<r*r
+    h,w=gray.shape[:2]
     answers=[];issues=[];levels=[]
-    dark=cv2.threshold(gray,148,255,cv2.THRESH_BINARY_INV)[1]
-    faint=cv2.threshold(gray,215,255,cv2.THRESH_BINARY_INV)[1]
     for index,positions in enumerate(bubble_positions(paper,questions_count),1):
-        fills=[]
-        pale_fills=[]
+        stats=[]
         for cx,cy in positions:
-            x=int(cx*scale);y=int((PAPERS[paper][1]-cy)*scale)
-            r=int(5.3*scale)
-            crop=dark[max(0,y-r):y+r+1,max(0,x-r):x+r+1]
-            pale=faint[max(0,y-r):y+r+1,max(0,x-r):x+r+1]
-            yy,xx=np.ogrid[:crop.shape[0],:crop.shape[1]]
-            cy0=min(r,y);cx0=min(r,x)
-            inside=(yy-cy0)**2+(xx-cx0)**2<r*r
-            fills.append(float(np.mean(crop[inside]>0)) if inside.any() else 0)
-            pale_fills.append(float(np.mean(pale[inside]>0)) if inside.any() else 0)
-        ranking=sorted(enumerate(fills),key=lambda z:z[1],reverse=True)
-        first,second=ranking[:2]
-        levels.append([round(z,3) for z in fills])
-        if first[1]<.09 and max(pale_fills)<.24:
-            answers.append(None) # Blanco inequívoco, no requiere revisión.
-        elif first[1]>=.20 and second[1]<.16 and first[1]-second[1]>=.13 and max(pale_fills[k] for k in range(4) if k!=first[0])<.24:
-            answers.append(ANSWER_CHOICES[first[0]])
+            x=round(cx*scale)
+            y=round((PAPERS[paper][1]-cy)*scale)
+            if x-r<0 or x+r>=w or y-r<0 or y+r>=h:
+                stats.append((0.,0.,0.))
+                continue
+            pixels=gray[y-r:y+r+1,x-r:x+r+1][mask]
+            ink=255.-pixels.astype(np.float32)
+            stats.append((float(ink.mean()),
+                          float(np.percentile(ink,70)),
+                          float(np.mean(pixels<210))))
+        ranking=sorted(enumerate(stats),key=lambda z:z[1][0],reverse=True)
+        winner,(v,q,c)=ranking[0]
+        other,(second,q2,c2)=ranking[1]
+        levels.append([round(score[0]/255,3) for score in stats])
+        if v<12 and max(item[2] for item in stats)<.11:
+            answers.append(None)
+            continue
+        strong=(v>=73 and q>=75 and c>=.54)
+        other_mark=(second>=31 and q2>=47 and c2>=.16)
+        separated=(v-second>=47 and
+                   (second<=12 or v>=2.15*second))
+        if strong and separated and not other_mark:
+            answers.append(ANSWER_CHOICES[winner])
         else:
             answers.append(None)
-            issues.append({'pregunta':index,'razon':'marca tenue, doble o poco diferenciada',
-                           'niveles':[round(z,3) for z in fills]})
+            reason=('Dos marcas o tachaduras posibles'
+                    if other_mark else
+                    'Lápiz demasiado tenue o marca poco diferenciada')
+            issues.append({'pregunta':index,'razon':reason,
+                           'niveles':levels[-1]})
     return answers,issues,levels
 
 
