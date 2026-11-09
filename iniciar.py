@@ -431,6 +431,7 @@ def build_ui(*, open_editor=False):
             'color_subtitulo': color_subtitle, 'color_respuestas': color_answers,
             'color_acetato': color_acetate, 'instrucciones': instructions_var,
             'modo_examen': modo_examen, 'lista_personal': lista_personal,
+            'nombre_evaluacion': lib_name,
         }
         editor=open_design_studio(root,datos_fn=preview_data,variables=vars_studio,
             editar_preguntas=edit_current,guardar=save_in_library,generar=run,
@@ -558,6 +559,38 @@ def build_ui(*, open_editor=False):
         schedule()
         status.set('Preguntas editadas. Usa «Guardar cuestionario» para conservar los cambios en la biblioteca.')
 
+    def cargar_examen_biblioteca(exam_id):
+        """Restaura por ID el examen ligado a una aplicación OMR.
+
+        El nombre de una sesión no se usa como llave: podría repetirse.
+        """
+        if not confirm_replace():
+            return False
+        try:
+            exam=load_exam(db_path,exam_id,BASE/'datos'/'biblioteca_cache')
+            workbook=export_workbook(
+                exam.questions,BASE/'datos'/'biblioteca_cache'/exam.id/'Preguntas.xlsx')
+        except (ExamError,OSError,ValueError) as exc:
+            messagebox.showerror('No se pudo abrir la evaluación',
+                                 str(exc),parent=active_window())
+            return False
+        active_id[0]=exam.id
+        lib_name.set(exam.nombre)
+        company_var.set(exam.empresa);group_var.set(exam.grupo)
+        title_var.set(exam.titulo);subtitle_var.set(exam.subtitulo)
+        color_title.set(exam.color_titulo);color_subtitle.set(exam.color_subtitulo)
+        color_acetate.set(exam.color_acetato);color_answers.set(exam.color_respuestas)
+        paper_choice.set(exam.tamano_papel);body_font.set(f'{exam.letra:.1f}')
+        reuse_booklet.set(exam.reutilizable)
+        modo_examen.set('ecologico' if exam.reutilizable else 'normal')
+        instructions_var.set(exam.instrucciones)
+        logo_var.set(str(exam.logo) if exam.logo else '')
+        file_var.set(str(workbook));cache['key']=None
+        dirty.set('Guardado en biblioteca')
+        status.set(f'Cuestionario «{exam.nombre}» · revisión {exam.revision}.')
+        schedule()
+        return True
+
     def open_library():
         """Gestiona biblioteca y papelera; no elimina archivos PDF ya exportados."""
         win=tk.Toplevel(active_window());win.title('Biblioteca y papelera de cuestionarios')
@@ -606,26 +639,8 @@ def build_ui(*, open_editor=False):
         def load_selected():
             if trashed.get():return
             item=pick()
-            if not item:return
-            if not confirm_replace():return
-            try:
-                exam=load_exam(db_path,item,BASE/'datos'/'biblioteca_cache')
-                workbook=export_workbook(exam.questions,BASE/'datos'/'biblioteca_cache'/exam.id/'Preguntas.xlsx')
-            except (ExamError,OSError,ValueError) as exc:
-                messagebox.showerror('No se pudo abrir',str(exc),parent=win);return
-            active_id[0]=exam.id
-            lib_name.set(exam.nombre);company_var.set(exam.empresa);group_var.set(exam.grupo)
-            title_var.set(exam.titulo);subtitle_var.set(exam.subtitulo)
-            color_title.set(exam.color_titulo);color_subtitle.set(exam.color_subtitulo)
-            color_acetate.set(exam.color_acetato)
-            color_answers.set(exam.color_respuestas);paper_choice.set(exam.tamano_papel)
-            body_font.set(f'{exam.letra:.1f}');reuse_booklet.set(exam.reutilizable)
-            instructions_var.set(exam.instrucciones)
-            logo_var.set(str(exam.logo) if exam.logo else '')
-            file_var.set(str(workbook));cache['key']=None
-            status.set(f'Cuestionario cargado · revisión {exam.revision}. Puedes editarlo y diseñarlo.')
-            dirty.set('Guardado en biblioteca')
-            win.destroy();schedule()
+            if item and cargar_examen_biblioteca(item):
+                win.destroy()
         def delete_selected():
             item=pick()
             if not item:return
@@ -701,7 +716,12 @@ def build_ui(*, open_editor=False):
             root.lift()
 
     def abrir_omr():
-        """Abre exclusivamente la calificación; la impresión vive en el diseñador."""
+        """Calificación dedicada, sincronizada por ID con la biblioteca."""
+
+        def abrir_evaluacion_desde_historial(exam_id):
+            # Volver sin cerrar la evaluación en la biblioteca.
+            if cargar_examen_biblioteca(exam_id):
+                volver_al_diseno()
         visible = active_window()
         visible.withdraw()
         try:
@@ -710,7 +730,9 @@ def build_ui(*, open_editor=False):
             launch(root, questions=load_questions(),
                    title=title_var.get(), paper=paper_choice.get(),
                    source=file_var.get(), on_return=volver_al_diseno,
-                   start_page='Historial', review_only=True)
+                   start_page='Historial', review_only=True,
+                   library_db_path=db_path,
+                   on_open_exam=abrir_evaluacion_desde_historial)
         except (ImportError, OSError, tk.TclError) as exc:
             volver_al_diseno()
             messagebox.showerror('No se pudo abrir la calificación',
@@ -745,6 +767,18 @@ def build_ui(*, open_editor=False):
             return
         # Guardar ahora evita asociar los cambios posteriores con esta exportación.
         saved = save_in_library(silent=True)
+        if saved is None:
+            messagebox.showerror('No se pudo vincular la evaluación',
+                'Guarda un nombre válido en la biblioteca antes de imprimir.',
+                parent=active_window())
+            return
+        revision = next((item['revision'] for item in list_exams(db_path)
+                         if item['id']==saved),None)
+        options.update(
+            nombre_evaluacion=lib_name.get().strip() or title,
+            cuestionario_id=saved,
+            revision_biblioteca=revision,
+        )
         exporting[0] = True
         btn.config(state='disabled', text='Generando…')
         status.set('Generando documentos; puedes seguir consultando la vista previa.')
