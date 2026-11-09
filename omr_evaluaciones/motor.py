@@ -884,6 +884,17 @@ def _decode_qr(gray, *, allow_full=True):
             center=points.reshape(-1,2).mean(axis=0)
             if .64*w<center[0]<.99*w and .04*h<center[1]<.36*h:
                 return text
+    # Segundo motor opcional: más robusto para algunos QR inclinados o de
+    # contraste bajo; NO modifica las reglas HMAC ni requiere Internet.
+    try:
+        import zxingcpp
+        hits=zxingcpp.read_barcodes(
+            roi,formats=zxingcpp.BarcodeFormat.QRCode)
+        for hit in hits:
+            if hit.text:
+                return hit.text
+    except (ImportError,OSError,AttributeError,ValueError):
+        pass
     try:
         from pyzbar.pyzbar import decode
         for item in decode(Image.fromarray(roi)):
