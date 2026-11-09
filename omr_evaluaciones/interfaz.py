@@ -695,6 +695,9 @@ class OMRApp:
             'La clave y los resultados permanecen en la sesión original.',
         )
         from biblioteca import list_exams
+        # Resolver nombres de aplicaciones anteriores solo si la clave y
+        # el papel coinciden con un UNICO cuestionario de la biblioteca.
+        self.store.link_legacy_library_by_exact_key(self.library_db_path)
         exams=(list_exams(self.library_db_path)
                if self.library_db_path.is_file() else [])
         sessions=self.store.sessions()
