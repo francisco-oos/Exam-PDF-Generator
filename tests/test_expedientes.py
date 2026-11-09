@@ -276,3 +276,33 @@ def test_inspeccion_no_borra_identidad_verificada_en_fallo_transitorio(tmp_path)
                        "diagnostico":"QR borroso temporalmente"}]}
     evidence.inspect(doc["sha"],weak)
     assert evidence.pages(doc["sha"])[0]["sesion_id"]==sid
+
+
+
+def test_combinar_y_normalizar_copias_sin_modificar_pdf_origen(tmp_path):
+    from omr_evaluaciones.expedientes import combine_pdfs,normalize_pdf_copy
+    store,sid_a,sid_b,a,b,blank=fixture_two_sessions(tmp_path)
+    original_a,original_b=sha(a),sha(b)
+    merged=combine_pdfs([a,b],tmp_path/"combinados.pdf")
+    assert len(PdfReader(str(merged)).pages)==3
+    repaired=normalize_pdf_copy(merged,tmp_path/"normalizado.pdf")
+    assert len(PdfReader(str(repaired)).pages)==3
+    assert sha(a)==original_a and sha(b)==original_b
+    with pytest.raises(ValueError,match="sobrescribir"):
+        combine_pdfs([a,b],a)
+
+
+def test_reimportar_archivo_registra_procedencia_sin_doblar_pdf(tmp_path):
+    store=OMRStore(tmp_path/"omr")
+    sid=store.create_session("Examen",questions(1),persons("Ejemplo"),"Carta")
+    src=create_forms_pdf(store,sid,tmp_path/"original.pdf")
+    repeated_name=tmp_path/"segunda_entrega.pdf"
+    shutil.copy2(src,repeated_name)
+    evidence=EvidenceStore(store)
+    doc,first=evidence.ingest(src)
+    other,again=evidence.ingest(repeated_name)
+    assert not first and again
+    assert doc["sha"]==other["sha"]
+    assert len(evidence.documents())==1
+    actions=[x["accion"] for x in evidence.audit(doc["sha"])]
+    assert actions==["ARCHIVADO","REIMPORTACION_PDF"]
