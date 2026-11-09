@@ -85,7 +85,10 @@ def test_dos_modalidades_lista_opcional_misma_hoja(tmp_path,modo,con_personal):
         sid=manifest['sesion_omr']
         assert sid and sid in (folder/'Sesion_OMR.txt').read_text(encoding='utf-8')
         session=OMRStore(tmp_path/'omr').session(sid)
+        assert session['modo']==modo
         assert len(session['personal'])==2
+        listed=OMRStore(tmp_path/'omr').sessions()
+        assert listed[0]['cantidad_participantes']==2
         assert '000001' in '\n'.join(hojas)
         assert 'EX-' in hojas[0]
     else:
