@@ -25,7 +25,7 @@ LABEL = '#607487'
 def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
                        editar_preguntas=None, guardar=None, generar=None,
                        importar=None, biblioteca=None, plantilla=None, estado=None,
-                       calificar=None):
+                       calificar=None, preparar_folios=None, on_close=None):
     """Crea el diseñador de dos paneles y devuelve la ventana (útil para pruebas).
 
     ``variables`` contiene StringVar/BooleanVar ya utilizadas por la ventana
@@ -33,7 +33,7 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     parámetro se refleja en el siguiente render de PDF en memoria.
     """
     window = tk.Toplevel(parent)
-    window.title('Editar diseño · Documento PDF real')
+    window.title('Evaluaciones · Diseñar, imprimir y calificar')
     window.geometry(f'{min(1400, parent.winfo_screenwidth()-60)}x{min(860, parent.winfo_screenheight()-90)}')
     window.minsize(820, 560)
     window.configure(bg=BG)
@@ -53,12 +53,33 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     pending = [None]
     polling = [None]
 
+    # Un solo menú para todo el ciclo; no se abre una segunda pantalla principal.
+    menu = tk.Menu(window, tearoff=False)
+    work_menu = tk.Menu(menu, tearoff=False)
+    work_menu.add_command(label='Diseñar examen (vista actual)', command=window.lift)
+    if calificar is not None:
+        work_menu.add_command(label='Calificar y entregar resultados', command=calificar)
+    if biblioteca is not None:
+        work_menu.add_command(label='Biblioteca de cuestionarios', command=biblioteca)
+    if plantilla is not None:
+        work_menu.add_command(label='Descargar plantilla de preguntas', command=plantilla)
+    menu.add_cascade(label='Evaluaciones', menu=work_menu)
+    window.configure(menu=menu)
+
     header = tk.Frame(window, bg=NAVY, padx=19, pady=12)
     header.pack(fill='x')
-    tk.Label(header, text='EDITOR DE DISEÑO', bg=NAVY, fg='#75d9dc',
+    tk.Label(header, text='DISEÑAR EVALUACIONES', bg=NAVY, fg='#75d9dc',
              font=('Segoe UI', 10, 'bold')).pack(anchor='w')
-    tk.Label(header, text='Diseña a la izquierda y comprueba el PDF real a la derecha',
+    tk.Label(header, text='Prepara cualquier modalidad y comprueba el PDF real a la derecha',
              bg=NAVY, fg=WHITE, font=('Segoe UI', 15, 'bold')).pack(anchor='w', pady=(2, 1))
+    nav = tk.Frame(header, bg=NAVY)
+    nav.pack(anchor='w', pady=(8, 0))
+    tk.Button(nav, text='Diseñar e imprimir', state='disabled', bg=ACCENT, fg=WHITE,
+              disabledforeground=WHITE, bd=0, padx=13, pady=7).pack(side='left', padx=(0, 7))
+    if calificar is not None:
+        tk.Button(nav, text='Calificar y entregar', command=calificar,
+                  bg='#e0edf1', fg=NAVY, bd=0, padx=13, pady=7).pack(side='left')
+
 
     container = tk.PanedWindow(window, orient='horizontal', bd=0, sashwidth=6,
                                bg=BG, opaqueresize=False)
@@ -96,12 +117,7 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
         if action:
             ttk.Button(settings_inner, text=title, command=action).grid(sticky='ew', columnspan=2, pady=3)
 
-    if calificar is not None:
-        tk.Button(settings_inner, text='Calificar · QR / escáner',
-                  command=calificar, bg=ACCENT, fg=WHITE, bd=0, pady=10,
-                  font=('Segoe UI',10,'bold')).grid(
-                      sticky='ew', columnspan=2, pady=(8, 4))
-
+    # El acceso a calificación está en el menú superior, no duplicado en el formulario.
     section('01 · Texto de portada', 'Cambia el título y observa el encabezado del cuadernillo.')
     field('Título de la evaluación', variables['titulo'])
     field('Subtítulo', variables['subtitulo'])
@@ -134,7 +150,61 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
                 variables['logotipo'].set(path)
         ttk.Button(settings_inner, text='Elegir logotipo…', command=choose_logo).grid(sticky='ew', columnspan=2)
 
-    section('02 · Página y tipografía', 'Ajusta la composición; no modifica las preguntas originales.')
+    section('02 · Tipo de examen', 'Elige qué vas a imprimir; el diseño y la clave del examen son los mismos.')
+    exam_type = tk.StringVar(master=window,
+        value='ecologico' if variables['reutilizable'].get() else 'normal')
+    type_help = tk.StringVar(master=window)
+    type_options = (
+        ('normal', 'Normal · cuadernillo y hoja de respuestas'),
+        ('ecologico', 'Ecológico · cuadernillo reutilizable'),
+        ('folio', 'Con folio y QR · hojas individuales para escáner'),
+    )
+    for code, label in type_options:
+        ttk.Radiobutton(settings_inner, text=label, variable=exam_type,
+                        value=code).grid(sticky='w', columnspan=2, pady=(1, 5))
+    tk.Label(settings_inner, textvariable=type_help, bg=WHITE, fg=LABEL,
+             wraplength=300, justify='left').grid(
+                 sticky='w', columnspan=2, pady=(2, 6))
+    folio_button = None
+    if preparar_folios is not None:
+        folio_button = tk.Button(settings_inner,
+            text='Preparar hojas con folio y QR', command=preparar_folios,
+            bg=ACCENT, fg=WHITE, bd=0, pady=10,
+            font=('Segoe UI', 10, 'bold'))
+        folio_button.grid(sticky='ew', columnspan=2, pady=(4, 10))
+    def update_type(*_):
+        mode = exam_type.get()
+        # Con QR se conserva el cuadernillo reutilizable; la identificación
+        # del participante vive exclusivamente en su hoja personalizada.
+        variables['reutilizable'].set(mode != 'normal')
+        descriptions = {
+            'normal': 'Genera cuadernillo, hoja de respuestas, clave y acetato normales.',
+            'ecologico': 'Genera cuadernillo sin datos personales y con aviso NO RAYAR NI MANCHAR.',
+            'folio': 'Primero genera el cuadernillo; después prepara las hojas individuales '
+                     'con folio y QR desde el botón de esta sección.',
+        }
+        type_help.set(descriptions.get(mode, ''))
+        if folio_button is not None:
+            if mode == 'folio':
+                folio_button.grid()
+            else:
+                folio_button.grid_remove()
+
+    def sync_type_from_booklet(*_):
+        # Al abrir una evaluación de la biblioteca, se respeta su modalidad.
+        # La modalidad con QR permanece seleccionada durante el cambio de vistas.
+        if exam_type.get() == 'folio':
+            return
+        expected = 'ecologico' if variables['reutilizable'].get() else 'normal'
+        if exam_type.get() != expected:
+            exam_type.set(expected)
+
+    traces.append((exam_type, exam_type.trace_add('write', update_type)))
+    traces.append((variables['reutilizable'],
+                   variables['reutilizable'].trace_add('write', sync_type_from_booklet)))
+    update_type()
+
+    section('03 · Página y tipografía', 'Ajusta la composición; no modifica las preguntas originales.')
     tk.Label(settings_inner, text='Formato de papel', bg=WHITE, fg=NAVY).grid(sticky='w', columnspan=2)
     ttk.Combobox(settings_inner, textvariable=variables['papel'],
                  values=('Carta', 'A4', 'Oficio'), state='readonly').grid(
@@ -144,12 +214,7 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     ttk.Combobox(settings_inner, textvariable=variables['letra'],
                  values=[f'{n/2:.1f}' for n in range(16, 25)], state='readonly').grid(
                      sticky='ew', columnspan=2, pady=(3, 8))
-    tk.Checkbutton(settings_inner, text='Cuadernillo reutilizable · NO RAYAR NI MANCHAR',
-                   variable=variables['reutilizable'], bg=WHITE, fg=NAVY,
-                   activebackground=WHITE, wraplength=280,
-                   justify='left').grid(sticky='w', columnspan=2, pady=(4, 7))
-
-    section('03 · Paletas de color', 'Elige colores RGB. La hoja de respuestas conserva fondo blanco.')
+    section('04 · Paletas de color', 'Elige colores RGB. La hoja de respuestas conserva fondo blanco.')
     swatches = {}
     def color_input(label: str, key: str):
         row = tk.Frame(settings_inner, bg=WHITE)
@@ -173,12 +238,12 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     color_input('Hoja de respuestas', 'color_respuestas')
     color_input('Acetato', 'color_acetato')
 
-    section('04 · Preguntas y biblioteca', 'Se edita la fuente del examen; el PDF se regenera al cambiarla.')
+    section('05 · Preguntas y biblioteca', 'Se edita la fuente del examen; el PDF se regenera al cambiarla.')
     tk.Button(settings_inner, text='Editar preguntas y opciones', command=editar_preguntas,
               bg='#e5eef2', fg=NAVY, bd=0, pady=10).grid(sticky='ew', columnspan=2, pady=(0,7))
     tk.Button(settings_inner, text='Guardar cuestionario en biblioteca', command=guardar,
               bg=ACCENT, fg=WHITE, bd=0, pady=11).grid(sticky='ew', columnspan=2, pady=(0,7))
-    tk.Button(settings_inner, text='Generar documentos PDF', command=generar,
+    tk.Button(settings_inner, text='Generar cuadernillo, respuestas y acetato PDF', command=generar,
               bg=NAVY, fg=WHITE, bd=0, pady=11).grid(sticky='ew', columnspan=2, pady=(0,8))
     tk.Label(settings_inner, text='La vista es exacta respecto al generador. No permite mover '
              'objetos con el ratón ni editar archivos PDF externos.', bg=WHITE, fg=LABEL,
@@ -287,9 +352,9 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     footer.pack(fill='x')
     if estado is not None:
         tk.Label(footer, textvariable=estado, bg=BG, fg=NAVY).pack(side='left', padx=8)
-    tk.Label(footer, text='Esc: volver · Guarda para conservar los cambios.', bg=BG, fg=LABEL,
+    tk.Label(footer, text='Esc: cerrar aplicación · Guarda para conservar los cambios.', bg=BG, fg=LABEL,
              font=('Segoe UI', 9)).pack(side='left')
-    tk.Button(footer, text='Volver al generador', command=lambda:close(),
+    tk.Button(footer, text='Cerrar aplicación', command=lambda:close(),
               bg=NAVY, fg=WHITE, bd=0, padx=13, pady=8).pack(side='right')
 
     def cleanup(event=None):
@@ -313,6 +378,11 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
         worker.close()
 
     def close():
+        # El diseñador es la ventana principal cuando on_close está definido.
+        # Delegamos la confirmación de cambios y el cierre de la raíz oculta.
+        if on_close is not None:
+            on_close()
+            return
         cleanup()
         window.destroy()
 
