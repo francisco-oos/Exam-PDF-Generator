@@ -60,7 +60,9 @@ def test_bandeja_pdf_aparece_solo_en_calificacion_y_archiva_pendientes(
                 if isinstance(w,tk.Button)]
         for expected in ['Subir página','Bajar página','Girar 90°',
                          'Extraer página','Exportar PDF ordenado',
-                         'Copiar original','Vincular pendiente']:
+                         'Copiar original','Vincular pendiente',
+                         'Añadir página al montaje','Añadir PDF completo',
+                         'Exportar PDF combinado','Vaciar montaje']:
             assert expected in labels
         trees=[w for w in _widgets(app.stage)
                if isinstance(w,ttk.Treeview)]
