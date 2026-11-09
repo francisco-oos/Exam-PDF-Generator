@@ -62,6 +62,55 @@ ambas modalidades, tanto con como sin lista.
   Respaldar y no subir a GitHub.
 - No declarar resultados oficiales sin probar impresión y escaneo físicos.
 
+## Bandeja PDF: recibir, organizar y conservar evidencias
+
+**Regla nueva:** todas las páginas se archivan por SHA-256 ANTES de calificar.
+El documento completo vive en el directorio local datos/omr/documentos.
+Las tablas documento_paginas y documento_bitacora guardan clasificación,
+enlace de folio, reimportaciones y cambios; NO guardan nuevas claves HMAC.
+
+### Cómo usarla
+
+1. Abrir **Calificar y entregar → Escanear PDF** y cargar un PDF, incluso
+   si está mezclado. Se archiva primero; si cancelas la confirmación de
+   mezcla, el original seguirá en la bandeja, sin calificación.
+2. Abrir **Bandeja PDF** para consultar cada archivo y sus páginas.
+   Las desconocidas se muestran como SIN IDENTIFICAR, no desaparecen.
+3. Elegir una página y usar **Subir/Bajar**, **Girar**, **Extraer**,
+   **Separar por evaluación**, **Combinar PDF seleccionados** o
+   **Normalizar copia PDF**. Estas operaciones generan OTRO PDF sin editar
+   originales ni calificaciones. La normalización no garantiza reparar
+   todos los PDF dañados.
+4. Para una página sin QR, **Identificar hoja** exige seleccionar una
+   aplicación y comprobar ID+folio, revisor y motivo. Esto NO califica:
+   después se deben revisar/capturar respuestas en **Revisión**.
+5. Si se cerró la aplicación antes de terminar el lote, seleccionar el
+   documento y pulsar **Retomar escaneo**. Una reimportación idéntica
+   no crea otra hoja; un folio reescaneado con respuestas distintas queda
+   en conflicto.
+6. Si existen escaneos anteriores a esta versión, pulsar
+   **Incorporar escaneos anteriores**. Los archivos migrados conservan
+   notas originales y sus decisiones humanas.
+7. Desde **Excel de entrega**, exportar **Expediente de entrega (ZIP)**
+   o **Expediente interno + evidencias (ZIP)**. Incluyen Resultados.xlsx,
+   evidencias ordenadas y Manifiesto.json. El interno añade la bitácora
+   y PDF originales puros; un original mezclado se exporta filtrado
+   para evitar páginas de otras evaluaciones.
+
+**Seguridad:** la base y los archivos locales NO están cifrados.
+Los ZIP tampoco tienen contraseña. Proteger las carpetas, restringir la
+entrega al destinatario y verificar los hashes del manifiesto. El PDF
+original puede contener participantes de distintas evaluaciones y NO debe
+incluirse íntegro en el ZIP de una sola aplicación.
+
+**Herramientas:** pypdf se instala con el lector; los complementos
+ZXing-C++ y pikepdf son opcionales. Si se usan en Windows:
+
+    .\.venv\Scripts\python.exe -m pip install -r requirements-omr-opcional.txt
+
+El procedimiento detallado de pruebas físicas y recuperación está en
+docs/RELEVO_CODEX_BANDEJA_OMR_2026-11-09.md.
+
 ## Escaneo por jornadas: retomar sin repetir ni perder resultados
 
 Una **evaluación** de Biblioteca puede tener una o más **aplicaciones
