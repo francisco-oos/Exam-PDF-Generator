@@ -118,7 +118,15 @@ def test_exportacion_no_bloquea_tk(tmp_path, monkeypatch):
     messages = []
     monkeypatch.setattr(iniciar.messagebox, 'showinfo', lambda *a, **k: messages.append(a))
     monkeypatch.setattr(iniciar.messagebox, 'showerror', lambda *a, **k: pytest.fail(str(a)))
-    parent = iniciar.build_ui()
+    try:
+        parent = iniciar.build_ui()
+    except tk.TclError as exc:
+        # GitHub Actions puede iniciar Windows con los archivos Tcl/Tk
+        # incompletos. No es evidencia de un fallo de la app: reportar
+        # como OMITIDO y exigir prueba real del UI antes de producir.
+        if "usable init.tcl" in str(exc) or "usable tk.tcl" in str(exc):
+            pytest.skip("El runner de Windows carece de Tcl/Tk utilizable; prueba manual pendiente.")
+        raise
     try:
         errors = []
         parent.report_callback_exception = lambda *args: errors.append(args)
