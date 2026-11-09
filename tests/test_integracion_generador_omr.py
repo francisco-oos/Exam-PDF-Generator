@@ -171,3 +171,56 @@ def test_menu_calificar_oculta_editor_y_lo_restaura(tmp_path, monkeypatch):
             root.destroy()
         except tk.TclError:
             pass
+
+
+
+def test_historial_unido_por_id_y_nombre_sin_duplicar_examen(tmp_path):
+    """Un examen de Biblioteca contiene sus aplicaciones, folios y escaneos."""
+    try:
+        parent=tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip('Tcl/Tk no utilizable: '+str(exc))
+    try:
+        from biblioteca import save_exam
+        from src.evaluaciones.core import Question
+        from omr_evaluaciones.motor import OMRStore
+        from omr_evaluaciones.interfaz import OMRApp
+        library=tmp_path/'biblioteca.sqlite3'
+        exam_id=save_exam(
+            library,nombre='Seguridad operativa - personal',
+            empresa='Empresa ficticia',grupo='Equipo A',
+            titulo='Evaluación de conocimientos',subtitulo='',
+            instrucciones='',questions=[
+                Question('Tema','¿Pregunta de prueba?',('A','B','C','D'),2)
+            ])
+        data=OMRStore(tmp_path/'omr')
+        sid=data.create_session(
+            'Evaluación de conocimientos',
+            [{'tema':'Tema','pregunta':'¿Pregunta de prueba?','correcta':'C'}],
+            [{'id':'000001','nombre':'Persona ficticia','grupo':'A'}],
+            'Carta','normal',
+            nombre_evaluacion='Seguridad operativa - personal',
+            cuestionario_id=exam_id,revision_biblioteca=1,
+        )
+        parent.withdraw()
+        app=OMRApp(
+            parent=parent,db_root=tmp_path/'omr',
+            library_db_path=library,review_only=True,
+            on_return=lambda:None,
+        )
+        tree=next(w for w in _descendants(app.stage)
+                  if isinstance(w,ttk.Treeview))
+        assert tree.item('exam:'+exam_id,'text')=='Seguridad operativa - personal'
+        assert tree.parent('session:'+sid)=='exam:'+exam_id
+        assert 'Seguridad operativa - personal' in tree.item(
+            'session:'+sid,'text')
+        assert tree.set('session:'+sid,'Participantes')=='1'
+        data.rename_session(sid,'Capacitación 2026 - turno B')
+        app.navigate('Historial')
+        tree=next(w for w in _descendants(app.stage)
+                  if isinstance(w,ttk.Treeview))
+        assert 'Capacitación 2026' in tree.item('session:'+sid,'text')
+        app.return_to_generator()
+    finally:
+        try:parent.destroy()
+        except tk.TclError:pass
