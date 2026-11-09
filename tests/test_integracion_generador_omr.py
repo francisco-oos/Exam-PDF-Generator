@@ -375,3 +375,50 @@ def test_escaneo_de_usuario_no_muestra_botones_de_simulacion(tmp_path):
     finally:
         try:parent.destroy()
         except tk.TclError:pass
+
+
+
+def test_alerta_previa_impide_calificar_sin_confirmacion(tmp_path,monkeypatch):
+    """La aprobación humana ocurre ANTES de registrar un lote mezclado."""
+    try:
+        parent=tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip('Entorno sin escritorio Tk: '+str(exc))
+    try:
+        from omr_evaluaciones.interfaz import OMRApp, messagebox
+        parent.withdraw()
+        app=OMRApp(parent=parent,db_root=tmp_path/'omr',review_only=True,
+                   on_return=lambda:None)
+        inspection={
+            'total_paginas':3,'mezclado':True,
+            'grupos':[
+                {'sesion_id':'aaaaaaaaaaaa','evaluacion':'Cabos','paginas':[1,2]},
+                {'sesion_id':'bbbbbbbbbbbb','evaluacion':'Checadores','paginas':[3]},
+            ],
+            'no_identificadas':[],
+        }
+        dialogs=[]
+        routed=[]
+        monkeypatch.setattr(messagebox,'askyesno',
+            lambda title,detail,**kwargs: dialogs.append((title,detail)) or False)
+        monkeypatch.setattr(app,'_process_verified_groups',
+            lambda *args:routed.append(args))
+        app.scanning=True
+        app.scan_updates.put(('preflight',tmp_path/'scan.pdf',inspection))
+        app._finish_scan()
+        assert not app.scanning
+        assert not routed
+        assert len(dialogs)==1
+        assert 'Cabos' in dialogs[0][1] and 'Checadores' in dialogs[0][1]
+        assert 'No para cancelar' in dialogs[0][1]
+        monkeypatch.setattr(messagebox,'askyesno',lambda *a,**k:True)
+        app.scanning=True
+        app.scan_updates.put(('preflight',tmp_path/'scan.pdf',inspection))
+        app._finish_scan()
+        assert app.scanning
+        assert routed and routed[0][1] is inspection
+        app.scanning=False
+        app.return_to_generator()
+    finally:
+        try:parent.destroy()
+        except tk.TclError:pass
