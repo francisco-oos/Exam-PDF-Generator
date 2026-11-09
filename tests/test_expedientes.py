@@ -306,3 +306,31 @@ def test_reimportar_archivo_registra_procedencia_sin_doblar_pdf(tmp_path):
     assert len(evidence.documents())==1
     actions=[x["accion"] for x in evidence.audit(doc["sha"])]
     assert actions==["ARCHIVADO","REIMPORTACION_PDF"]
+
+
+
+def test_fallback_zxing_opcional_sin_confiar_en_el_texto_del_qr(monkeypatch):
+    """Se llama al segundo lector solo cuando OpenCV no encuentra QR."""
+    import sys
+    from types import SimpleNamespace
+    import numpy as np
+    import cv2
+    from omr_evaluaciones.motor import _decode_qr
+    class EmptyCV:
+        def detectAndDecode(self,image):
+            return ("",None,None)
+    monkeypatch.setattr(cv2,"QRCodeDetector",lambda:EmptyCV())
+    seen=[]
+    fake=SimpleNamespace(
+        BarcodeFormat=SimpleNamespace(QRCode="QR_CODE"),
+        read_barcodes=lambda image,formats=None:(
+            seen.append((image.shape,formats)) or
+            [SimpleNamespace(text="QR_DE_PRUEBA_SIN_FIRMA")]
+        ),
+    )
+    monkeypatch.setitem(sys.modules,"zxingcpp",fake)
+    result=_decode_qr(np.full((1000,700),255,dtype=np.uint8))
+    assert result=="QR_DE_PRUEBA_SIN_FIRMA"
+    assert seen
+    # La función NO convierte esto en una identidad válida: el consumidor
+    # valida formato OMR1 y HMAC de la sesión por separado.
