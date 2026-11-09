@@ -129,3 +129,43 @@ def test_calificar_ocupa_su_espacio_y_regresa_al_diseno(tmp_path):
             parent.destroy()
         except tk.TclError:
             pass
+
+
+def test_menu_calificar_oculta_editor_y_lo_restaura(tmp_path, monkeypatch):
+    """Flujo completo desde el menú: nunca deben coexistir dos vistas visibles."""
+    try:
+        import iniciar
+        import omr_evaluaciones.interfaz as interfaz
+        root = iniciar.build_ui(open_editor=True)
+    except tk.TclError as exc:
+        pytest.skip("Entorno sin escritorio Tk: " + str(exc))
+    original_store = interfaz.OMRStore
+    monkeypatch.setattr(interfaz, "OMRStore", lambda _path: original_store(tmp_path))
+    try:
+        root.after(180, root.quit)
+        root.mainloop()
+        editor = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel))
+        enter = next(w for w in _descendants(editor)
+            if isinstance(w, tk.Button) and w.cget("text") == "Calificar y entregar")
+        enter.invoke()
+        root.update_idletasks()
+        omr_windows = [w for w in root.winfo_children()
+                       if isinstance(w, tk.Toplevel) and w is not editor]
+        assert len(omr_windows) == 1
+        omr_window = omr_windows[0]
+        assert editor.state() == "withdrawn"
+        assert root.state() == "withdrawn"
+        assert omr_window.winfo_exists()
+
+        back = next(w for w in _descendants(omr_window)
+            if isinstance(w, tk.Button) and w.cget("text") == "← Diseño e impresión")
+        back.invoke()
+        root.update_idletasks()
+        assert not omr_window.winfo_exists()
+        assert editor.state() == "normal"
+        assert root.state() == "withdrawn"
+    finally:
+        try:
+            root.destroy()
+        except tk.TclError:
+            pass
