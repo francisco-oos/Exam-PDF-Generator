@@ -151,3 +151,15 @@ def test_formulario_impreso_se_puede_reconocer(tmp_path):
     lectura=scan_document(OMRStore(tmp_path/'omr'),sid,folder/'Hoja_respuestas.pdf')
     assert lectura['leidas']==2
     assert lectura['sin_identificar']==0,lectura
+
+
+def test_qr_rechaza_burbujas_casi_blancas_antes_de_escribir(tmp_path):
+    archivo=examen(tmp_path)
+    personas=plantilla_personas(tmp_path)
+    with pytest.raises(ValueError,match='oscuro'):
+        preparar_examen(
+            archivo,tmp_path/'salidas','Prueba','',modo_examen='folio',
+            lista_personal=personas,omr_root=tmp_path/'omr',
+            color_respuestas='#FFFF99',
+        )
+    assert not (tmp_path/'salidas').exists()
