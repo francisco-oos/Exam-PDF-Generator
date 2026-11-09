@@ -114,6 +114,73 @@ Opcionales **solo si se desea investigar QR difícil o reparar una copia**:
 **No** subir base SQLite, escaneos originales, nombres o resultados reales
 a GitHub, a un issue público ni a una herramienta externa.
 
+### Instalación desde cero para el equipo del compañero
+
+Si ya eliminó el repositorio local, NO usar `git pull` en una carpeta que
+no contiene el proyecto. Abrir PowerShell en el directorio donde lo instalará:
+
+```powershell
+git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
+cd Exam-PDF-Generator
+git fetch origin
+git switch --track origin/feature/bandeja-documental-omr-evidencias
+git status
+.\Iniciar_Windows.bat
+```
+
+Instalar previamente Git y Python 3.11/3.12/3.13. En un clon limpio,
+`Iniciar_Windows.bat` crea `.venv` e instala dependencias y complementos
+OMR. Tras el primer arranque, para instalar los tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest -q tests/test_bandeja_documental.py tests/test_bandeja_gui.py
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+**Para publicar correcciones**, comprobar primero acceso de escritura al
+repositorio desde su propia cuenta. No usar ni compartir tokens de GitHub,
+Codex u otras cuentas del propietario. Si GitHub rechaza el `push`,
+el dueño del repositorio tendrá que autorizar acceso de colaborador o
+el compañero deberá usar fork + PR.
+
+En la rama de este trabajo, después de **cada conjunto pequeño de
+correcciones y sus pruebas**:
+
+```powershell
+git status
+git add <archivos_de_codigo_o_tests_modificados>
+git commit -m "fix(omr): describe el fallo corregido"
+git push origin feature/bandeja-documental-omr-evidencias
+```
+
+La sintaxis `<archivos_de_codigo_o_tests_modificados>` es un
+marcador: reemplazarla con rutas reales antes de ejecutar. No hacer
+`git add .` sin revisar, no agregar `datos/`, `.venv/`,
+archivos de escáner, identificadores personales ni secretos.
+
+### Uso eficiente de Codex y límite de tokens
+
+- Comenzar leyendo **este manual**, el PR #13 y el conjunto concreto
+  de tests de la funcionalidad. No solicitar rediseñar el sistema entero.
+- Trabajar de **un escenario F01–F16 a la vez**: reproducir fallo,
+  identificar causa, corregir solo archivos implicados, añadir regresión,
+  ejecutar prueba focalizada, luego suite relacionada.
+- Después de una tanda que pasa, hacer **commit y push**, actualizar
+  el PR #13 con caso, causa, corrección y resultados. Evitar dejar cambios
+  grandes sin subir cuando se agotará la cuota de Codex.
+- Revisar periódicamente el **consumo/cuota de Codex de su propia cuenta**
+  en el producto que use; no hay garantía de una cantidad fija de tokens.
+  Reservar capacidad para pruebas y documentación final. Evitar lanzar
+  agentes paralelos o reenviar íntegramente el repositorio en cada mensaje.
+- Si queda poca cuota, **priorizar guardar estado**: commits verificados,
+  push y sección de relevo con último SHA, pruebas pasadas/fallidas,
+  archivos pendientes, errores y siguiente escenario. No prometer
+  continuar en segundo plano.
+- No publicar tokens de acceso, claves, contraseñas o valores de entorno
+  en archivos, logs, capturas, commits ni comentarios del PR. Nunca
+  copiar la base de datos real a cuentas distintas.
+
 ## 5. Matriz de pruebas físicas para Codex del compañero
 
 Realizar una copia aislada de `datos/omr` y ejecutar pruebas sobre ella.
