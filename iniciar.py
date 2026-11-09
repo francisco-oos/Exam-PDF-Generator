@@ -719,9 +719,8 @@ def build_ui(*, open_editor=False):
         """Calificación dedicada, sincronizada por ID con la biblioteca."""
 
         def abrir_evaluacion_desde_historial(exam_id):
-            # Volver sin cerrar la evaluación en la biblioteca.
-            if cargar_examen_biblioteca(exam_id):
-                volver_al_diseno()
+            # La ventana OMR ya se cerró antes de invocar este callback.
+            cargar_examen_biblioteca(exam_id)
         visible = active_window()
         visible.withdraw()
         try:
