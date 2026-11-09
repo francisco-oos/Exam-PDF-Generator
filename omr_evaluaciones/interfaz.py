@@ -913,6 +913,249 @@ class OMRApp:
             messagebox.showinfo('Archivo generado','Excel disponible en:\n'+str(target),parent=self.window)
         except Exception as exc:messagebox.showerror('No se pudo exportar',str(exc),parent=self.window)
 
+    def _documents(self):
+        """Organizador PDF integrado: orden virtual, giro y extracción no destructiva."""
+        self._heading('Bandeja documental de escaneos',
+                      'Un PDF original por huella SHA-256. Hojas mezcladas y '
+                      'sin QR permanecen archivadas; organizar NO cambia notas.')
+        documents=self.inbox.documents()
+        if not documents:
+            self._note('Bandeja vacía. En Escanear PDF puedes archivar '
+                       'también hojas sin QR, aunque todavía no se puedan calificar.')
+            self._btn(self.stage,'Ir a Escanear PDF',
+                      lambda:self.navigate('Escanear PDF'),True)
+            return
+        selected={'sha':None,'page':None,'order':[],'rotations':{}}
+        top=tk.Frame(self.stage,bg=LIGHT)
+        top.pack(fill='both',expand=True)
+        docframe=tk.Frame(top,bg=LIGHT)
+        docframe.pack(fill='x')
+        tk.Label(docframe,text='Archivos recibidos (copias originales intactas)',
+                 bg=LIGHT,fg=NAVY,font=('Segoe UI',11,'bold')).pack(anchor='w')
+        doc_cols=('Páginas','Pendientes','Ingresos','Fecha')
+        doctree=ttk.Treeview(docframe,columns=doc_cols,show='tree headings',
+                             height=5,selectmode='browse')
+        doctree.heading('#0',text='Archivo / SHA-256')
+        doctree.column('#0',width=400,minwidth=200,stretch=True)
+        for col,width in [('Páginas',75),('Pendientes',80),
+                          ('Ingresos',70),('Fecha',150)]:
+            doctree.heading(col,text=col)
+            doctree.column(col,width=width,stretch=False)
+        doctree.pack(fill='x',pady=5)
+        for doc in documents:
+            doctree.insert('', 'end',iid=doc['sha'],
+                text=f'{doc["nombre"]} · {doc["sha"][:12]}',
+                values=(doc['paginas'],doc['pendientes'],
+                        doc['veces_recibido'],doc['recibido'][:16]))
+        region=tk.Frame(top,bg=LIGHT)
+        region.pack(fill='both',expand=True,pady=(5,1))
+        left=tk.Frame(region,bg=LIGHT)
+        left.pack(side='left',fill='both',expand=True,padx=(0,8))
+        right=tk.Frame(region,bg=WHITE)
+        right.pack(side='left',fill='both',expand=True)
+        page_columns=('Estado','Evaluación','Folio')
+        tree=ttk.Treeview(left,columns=page_columns,show='tree headings',
+                          selectmode='browse',height=11)
+        tree.heading('#0',text='Página física')
+        tree.column('#0',width=92,stretch=False)
+        for col,width in [('Estado',148),('Evaluación',150),('Folio',115)]:
+            tree.heading(col,text=col)
+            tree.column(col,width=width,stretch=True)
+        tree.pack(fill='both',expand=True)
+        help_text=tk.StringVar(value='Selecciona un PDF y después una página.')
+        tk.Label(left,textvariable=help_text,fg=INK,bg=LIGHT,
+                 wraplength=445,justify='left').pack(anchor='w',pady=5)
+        preview=tk.Label(right,bg=WHITE,anchor='n',
+                         text='Vista previa de la página seleccionada')
+        preview.pack(fill='both',expand=True,padx=5,pady=5)
+        self.inbox_photo=None
+        info=tk.StringVar(value='')
+        tk.Label(right,textvariable=info,bg=WHITE,fg=INK,
+                 wraplength=490,justify='left').pack(pady=4)
+
+        def render_list(prefer=None):
+            tree.delete(*tree.get_children())
+            rows={p['pagina']:p for p in self.inbox.pages(selected['sha'])}
+            for physical in selected['order']:
+                p=rows[physical]
+                display=(f'{physical+1}  ↻'
+                         if selected['rotations'].get(physical) else
+                         str(physical+1))
+                tree.insert('', 'end',iid=str(physical),text=display,
+                    values=(p['estado'],
+                            p['sesion_id'] or 'Sin identificar',
+                            p['folio'] or '—'))
+            key=str(prefer if prefer is not None else
+                    selected['order'][0] if selected['order'] else '')
+            if key and tree.exists(key):
+                tree.selection_set(key)
+                tree.see(key)
+                show_page()
+
+        def choose_doc(_event=None):
+            sel=doctree.selection()
+            if not sel:return
+            digest=sel[0]
+            selected['sha']=digest
+            selected['order']=[p['pagina'] for p in self.inbox.pages(digest)]
+            selected['rotations']={}
+            selected['page']=None
+            render_list()
+            help_text.set(f'{len(selected["order"])} páginas en el PDF. '
+                          'Subir/bajar y girar sólo cambian la copia exportada.')
+
+        def show_page(_event=None):
+            if not selected['sha']:return
+            sel=tree.selection()
+            if not sel:return
+            page=int(sel[0])
+            selected['page']=page
+            try:
+                image=self.inbox.render_page(
+                    selected['sha'],page,
+                    rotate=selected['rotations'].get(page,0),
+                    scale=.65)
+                target_width=max(250,min(490,self.window.winfo_width()//3))
+                target_height=max(260,min(550,self.window.winfo_height()-365))
+                image.thumbnail((target_width,target_height))
+                self.inbox_photo=ImageTk.PhotoImage(image,master=self.window)
+                preview.configure(image=self.inbox_photo,text='')
+                record=next(p for p in self.inbox.pages(selected['sha'])
+                            if p['pagina']==page)
+                info.set('Hoja '+str(page+1)+' · '+record['estado']+
+                         ' · '+(record['diagnostico'] or
+                                record['folio'] or 'Sin observaciones'))
+            except Exception as exc:
+                info.set('Error al mostrar evidencia: '+str(exc))
+                preview.configure(image='',text='No se pudo abrir la página.')
+
+        def rearrange(delta):
+            page=selected['page']
+            if page is None:return
+            position=selected['order'].index(page)
+            next_pos=position+delta
+            if not 0<=next_pos<len(selected['order']):return
+            selected['order'][position],selected['order'][next_pos]=(
+                selected['order'][next_pos],selected['order'][position])
+            render_list(page)
+
+        def rotate(delta):
+            page=selected['page']
+            if page is None:return
+            selected['rotations'][page]=(
+                selected['rotations'].get(page,0)+delta)%360
+            render_list(page)
+
+        def save_pdf(one=False,original=False):
+            if not selected['sha']:
+                messagebox.showwarning('Selecciona PDF',
+                    'Primero selecciona un documento.',parent=self.window)
+                return
+            file_name=('Original_'+selected['sha'][:10]+'.pdf'
+                       if original else
+                       'Pagina_'+str(selected['page']+1)+'.pdf'
+                       if one and selected['page'] is not None else
+                       'PDF_Organizado.pdf')
+            output=filedialog.asksaveasfilename(
+                parent=self.window,initialfile=file_name,
+                defaultextension='.pdf',filetypes=[('PDF','*.pdf')])
+            if not output:return
+            try:
+                if original:
+                    from shutil import copyfile
+                    src=self.inbox.original(selected['sha'])
+                    if src.resolve()==Path(output).resolve():
+                        raise ValueError('El original no puede sobrescribirse.')
+                    copyfile(src,output)
+                else:
+                    entries=([selected['page']] if one else
+                             selected['order'])
+                    entries=[i for i in entries if i is not None]
+                    self.inbox.assemble([
+                        (selected['sha'],page,
+                         selected['rotations'].get(page,0))
+                        for page in entries],Path(output))
+                self.feedback.set('PDF exportado sin alterar el original.')
+                messagebox.showinfo('PDF generado',
+                                    'Guardado en:\n'+output,parent=self.window)
+            except (OSError,ValueError,ImportError) as exc:
+                messagebox.showerror('No se pudo organizar PDF',
+                                     str(exc),parent=self.window)
+
+        def associate_pending():
+            if selected['sha'] is None or selected['page'] is None:
+                return
+            page=next(p for p in self.inbox.pages(selected['sha'])
+                      if p['pagina']==selected['page'])
+            if page['estado'] not in ('pendiente','identificada'):
+                messagebox.showinfo('No disponible',
+                    'Esta hoja ya tiene lectura o revisión; consúltala en '
+                    'Historial.',parent=self.window)
+                return
+            sessions=self.store.sessions()
+            if not sessions:
+                return
+            names={x['id']:x['nombre_evaluacion'] or x['titulo']
+                   for x in sessions if x['cantidad_participantes']}
+            choose=tk.Toplevel(self.window)
+            choose.title('Vincular hoja sin QR')
+            choose.geometry('560x350')
+            choose.transient(self.window);choose.grab_set()
+            vars_={key:tk.StringVar() for key in
+                   ('sesion','id','folio','revisor','motivo')}
+            options=[f'{value} · {sid}' for sid,value in names.items()]
+            if not options:
+                choose.destroy()
+                return
+            vars_['sesion'].set(options[0])
+            for label,key in [('Aplicación verificada','sesion'),
+                              ('ID personal en la hoja','id'),
+                              ('Folio impreso en la hoja','folio'),
+                              ('Revisor','revisor'),
+                              ('Justificación','motivo')]:
+                tk.Label(choose,text=label).pack(anchor='w',padx=14,pady=(5,1))
+                if key=='sesion':
+                    ttk.Combobox(choose,textvariable=vars_[key],
+                                 values=options,state='readonly').pack(
+                                     fill='x',padx=14)
+                else:
+                    ttk.Entry(choose,textvariable=vars_[key]).pack(
+                        fill='x',padx=14)
+            def confirm():
+                sid=vars_['sesion'].get().rsplit(' · ',1)[-1]
+                try:
+                    name=self.inbox.bind_manual_pending(
+                        selected['sha'],selected['page'],sid,
+                        vars_['id'].get(),vars_['folio'].get(),
+                        vars_['revisor'].get(),vars_['motivo'].get())
+                except (ValueError,OSError) as exc:
+                    messagebox.showerror('No se vinculó la hoja',
+                                         str(exc),parent=choose)
+                    return
+                choose.destroy()
+                self.feedback.set('Hoja vinculada con evidencia: '+name+
+                                  '. Aún requiere revisión manual de respuestas.')
+                render_list(selected['page'])
+            ttk.Button(choose,text='Vincular sin calificar',
+                       command=confirm).pack(pady=12)
+
+        tools=tk.Frame(self.stage,bg=LIGHT)
+        tools.pack(fill='x',pady=5)
+        for label,cmd in [
+            ('Subir página',lambda:rearrange(-1)),
+            ('Bajar página',lambda:rearrange(1)),
+            ('Girar 90°',lambda:rotate(90)),
+            ('Extraer página',lambda:save_pdf(one=True)),
+            ('Exportar PDF ordenado',lambda:save_pdf()),
+            ('Copiar original',lambda:save_pdf(original=True)),
+            ('Vincular pendiente',associate_pending),
+        ]:
+            self._btn(tools,label,cmd)
+        doctree.bind('<<TreeviewSelect>>',choose_doc)
+        tree.bind('<<TreeviewSelect>>',show_page)
+        doctree.selection_set(documents[0]['sha'])
+        choose_doc()
+
     def _history(self):
         self._heading(
             'Historial de evaluaciones y aplicaciones',
