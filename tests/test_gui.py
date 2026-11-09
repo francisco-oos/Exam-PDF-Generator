@@ -124,7 +124,9 @@ def test_exportacion_no_bloquea_tk(tmp_path, monkeypatch):
         # GitHub Actions puede iniciar Windows con los archivos Tcl/Tk
         # incompletos. No es evidencia de un fallo de la app: reportar
         # como OMITIDO y exigir prueba real del UI antes de producir.
-        if "usable init.tcl" in str(exc) or "usable tk.tcl" in str(exc):
+        if any(fragment in str(exc) for fragment in (
+                'usable init.tcl', 'usable tk.tcl',
+                'invalid command name "tcl_findLibrary"')):
             pytest.skip("El runner de Windows carece de Tcl/Tk utilizable; prueba manual pendiente.")
         raise
     try:
