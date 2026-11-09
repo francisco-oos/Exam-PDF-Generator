@@ -238,3 +238,41 @@ def test_sesion_y_codigo_no_se_exponen_en_zip(tmp_path):
         manifest=bundle.read("Manifiesto.json").decode("utf-8")
         assert store.session(sid)["clave_hmac"] not in manifest
         assert "provisional" in manifest
+
+
+
+def test_migrar_escaneos_historicos_sin_recalificar(tmp_path):
+    store=OMRStore(tmp_path/"omr")
+    sid=store.create_session("Anterior",questions(1),persons("Persona histórica"),
+                             "Carta")
+    pdf=create_forms_pdf(store,sid,tmp_path/"antiguo.pdf")
+    first=scan_document(store,sid,pdf)
+    assert first["validadas"]==1
+    old_id=store.pages(sid)[0]["id"]
+    before=store.results(sid)["validados"]
+    evidence=EvidenceStore(store)
+    assert evidence.documents()==[]
+    migration=evidence.migrate_legacy()
+    assert migration["hojas_vinculadas"]==1
+    assert len(evidence.documents())==1
+    page=evidence.pages(evidence.documents()[0]["sha"])[0]
+    assert page["sesion_id"]==sid
+    assert page["hoja_id"]==old_id
+    assert store.results(sid)["validados"]==before
+    assert evidence.migrate_legacy()["hojas_vinculadas"]==0
+
+
+def test_inspeccion_no_borra_identidad_verificada_en_fallo_transitorio(tmp_path):
+    store=OMRStore(tmp_path/"omr")
+    sid=store.create_session("Ejemplo",questions(1),persons("Persona"),"Carta")
+    doc_file=create_forms_pdf(store,sid,tmp_path/"scan.pdf")
+    evidence=EvidenceStore(store)
+    doc,_=evidence.ingest(doc_file)
+    inspection=inspect_pdf_sessions(store,Path(doc["ruta"]))
+    evidence.inspect(doc["sha"],inspection)
+    assert evidence.pages(doc["sha"])[0]["sesion_id"]==sid
+    weak={"paginas":[{"pagina":1,"sesion_id":None,
+                       "estado":"sin_identificar",
+                       "diagnostico":"QR borroso temporalmente"}]}
+    evidence.inspect(doc["sha"],weak)
+    assert evidence.pages(doc["sha"])[0]["sesion_id"]==sid
