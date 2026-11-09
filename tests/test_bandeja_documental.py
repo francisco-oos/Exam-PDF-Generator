@@ -215,6 +215,8 @@ def test_vincular_sin_qr_a_una_sesion_no_califica_automaticamente(tmp_path):
     store.capture_manual_sheet(rows[0]['id'],list('ABCD'),
                                'Respuesta cotejada','Inspector')
     assert store.results(sid)['validados']==1
+    assert inbox.pages(digest)[0]['estado']=='procesada_manual'
+    assert inbox.documents()[0]['pendientes']==0
     assert len(store.revisions(sid))==5
 
 
@@ -254,3 +256,45 @@ def test_no_exponer_rutas_ni_hmac_en_manifiestos(tmp_path):
         manifest=z.read('Manifiesto.json').decode()
         assert str(tmp_path) not in manifest
         assert store.session(sid)['clave_hmac'] not in manifest
+
+
+
+def test_migracion_de_bandeja_no_modifica_sesiones_anteriores(tmp_path):
+    store=OMRStore(tmp_path/'omr')
+    sid=store.create_session('Evaluación anterior',qs(),people('H',1),
+                             'Carta')
+    old=store.session(sid)
+    inbox=DocumentInbox(store)
+    inbox2=DocumentInbox(store)
+    new=store.session(sid)
+    assert old['clave_hmac']==new['clave_hmac']
+    assert old['version_sha']==new['version_sha']
+    assert len(store.sessions())==1
+    assert inbox.documents()==inbox2.documents()==[]
+
+
+def test_original_alterado_bloqueado_para_todas_las_exportaciones(tmp_path):
+    store,inbox,cabos,chec,pdf=fixture_mixed(tmp_path)
+    inspected,digest,archived=_ingest_and_grade(store,inbox,pdf)
+    with archived.open('ab') as out:
+        out.write(b'alterado')
+    with pytest.raises(ValueError,match='alterado'):
+        inbox.original(digest)
+    with pytest.raises(ValueError,match='alterado'):
+        inbox.assemble([(digest,0,0)],tmp_path/'derivado.pdf')
+    with pytest.raises(ValueError,match='alterado'):
+        export_session_bundle(store,inbox,cabos,tmp_path/'expediente.zip')
+
+
+def test_no_incluir_datos_de_otra_evaluacion_en_historial_pdf(tmp_path):
+    store,inbox,cabos,chec,pdf=fixture_mixed(tmp_path)
+    _ingest_and_grade(store,inbox,pdf)
+    result=export_session_bundle(store,inbox,cabos,
+                                 tmp_path/'solo_cabos.zip',internal=True)
+    with ZipFile(result) as z:
+        assert 'Historial_Documental.pdf' in z.namelist()
+        import io
+        reader=PdfReader(io.BytesIO(z.read('Historial_Documental.pdf')))
+        text='\n'.join(page.extract_text() or '' for page in reader.pages)
+        # Los eventos de página de Checadores no deben salir en Cabos.
+        assert store.session(chec)['personal'][0]['folio'] not in text
