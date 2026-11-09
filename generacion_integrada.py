@@ -29,7 +29,11 @@ MODOS = ('normal', 'ecologico')
 def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
                     modo_examen: str = 'ecologico',
                     lista_personal: str | Path | None = None,
-                    omr_root: Path | None = None, **opciones) -> Path:
+                    omr_root: Path | None = None,
+                    nombre_evaluacion: str | None = None,
+                    cuestionario_id: str | None = None,
+                    revision_biblioteca: int | None = None,
+                    **opciones) -> Path:
     """Genera los materiales y, con lista, una sesión OMR del MISMO examen.
 
     Normal + lista: PDF QR en lote, cuadernillo y misma hoja QR por persona.
@@ -60,6 +64,8 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
     # El generador estándar valida primero preguntas, papeles, recursos y tintas.
     carpeta = generate(entrada, salida, titulo, subtitulo, **opciones)
     sesion = None
+    store = None
+    nombre = str(nombre_evaluacion or titulo).strip()[:120]
     try:
         questions = read_questions(Path(entrada))
         respuestas = [
@@ -80,8 +86,11 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             data_root = (Path(omr_root) if omr_root is not None else
                          Path(__file__).resolve().parent / 'datos' / 'omr')
             store = OMRStore(data_root)
-            sesion = store.create_session(titulo, respuestas, personas, papel,
-                                          modo_examen)
+            sesion = store.create_session(
+                titulo,respuestas,personas,papel,modo_examen,
+                nombre_evaluacion=nombre,cuestionario_id=cuestionario_id,
+                revision_biblioteca=revision_biblioteca,
+            )
             create_forms_pdf(store, sesion, carpeta / 'Hoja_respuestas.pdf',
                              **config)
             create_acetato_omr(
@@ -151,7 +160,8 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             else 'Se genera UN cuadernillo reutilizable para todas las personas.'
         )
         (carpeta / 'LEEME_IMPRESION.txt').write_text(
-            f'Modalidad: {modo_examen}\nParticipantes: {len(personas)}\n'
+            f'Evaluación: {nombre}\nModalidad: {modo_examen}\n'
+            f'Participantes: {len(personas)}\n'
             + cuaderno + '\n' + detalle
             + '\nImprime al 100 %, sin ajustar escala; mantén el mismo papel.\n',
             encoding='utf-8',
@@ -160,6 +170,9 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
         manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
         manifest.update({
             'modo_examen': modo_examen,
+            'nombre_evaluacion': nombre,
+            'cuestionario_id': cuestionario_id,
+            'revision_biblioteca': revision_biblioteca,
             'participantes': len(personas),
             'sesion_omr': sesion,
             'folio_qr_habilitado': bool(personas),
@@ -174,8 +187,12 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding='utf-8',
         )
+        if sesion and store is not None:
+            store.update_lote(sesion,carpeta)
         return carpeta
     except Exception:
         # No ocultar fallos; no dejar el lote incompleto como impresión válida.
+        if sesion and store is not None:
+            store.discard_empty_session(sesion)
         shutil.rmtree(carpeta, ignore_errors=True)
         raise
