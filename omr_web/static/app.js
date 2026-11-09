@@ -241,6 +241,7 @@
       ["A","B","C","D","BLANCO"].map(c=>'<option '+(c===value?'selected':'')+'>'+c+'</option>').join("")+
       '</select></label><label>Justificación<textarea id="reason" placeholder="Ej. Dos marcas, se considera BLANCO conforme a la política"></textarea></label>'+
       '<div class="actions"><button class="primary" id="saveChoice">Guardar decisión</button>'+
+      '<button class="secondary" id="captureWhole">Captura completa</button>'+
       '<button class="ghost" id="releaseSheet">Liberar hoja</button></div>'+
       '<p class="hint">No elijas la respuesta solo por el acetato: comprueba la marca física. Toda decisión deja auditoría.</p></div></div>';
     byId("questionSelect").onchange=e=>{
@@ -263,6 +264,47 @@
         await renderSheet();
         await queueTable();
       }catch(err){alertBox(err.message,true);}
+    };
+    byId("captureWhole").onclick=async()=>{
+      const area=byId("sheetArea");
+      if(!area)return;
+      const questions=state.sheet.preguntas,original=state.sheet.respuestas;
+      const form=document.createElement("div");
+      form.className="panel";
+      form.innerHTML='<h3>Captura íntegra auditada · '+questions.length+' preguntas</h3>'+
+        '<p class="hint">Es obligatorio revisar TODOS los reactivos. Los que no tengan decisión permanecen como SIN REVISAR.</p>'+
+        questions.map((q,i)=>{
+          const previous=original[i];
+          const unresolved=state.sheet.dudas.some(x=>x.pregunta===i+1);
+          const current=unresolved?"SIN REVISAR":previous||"SIN REVISAR";
+          return '<div class="inline"><div><label>'+String(i+1).padStart(2,"0")+' · '+
+            h(q.pregunta)+'</label></div><div><select data-q="'+(i+1)+'">'+
+            ["SIN REVISAR","A","B","C","D","BLANCO"].map(opt=>
+              '<option'+(opt===current?" selected":"")+'>'+opt+'</option>').join("")+
+            '</select></div></div>';
+        }).join("")+
+        '<label>Justificación de la captura completa<textarea id="fullReason" required placeholder="Cotejo físico de todas las marcas"></textarea></label>'+
+        '<div class="actions"><button class="primary" id="submitFull">Guardar todas las decisiones</button>'+
+        '<button class="ghost" id="cancelFull">Cancelar</button></div>';
+      area.append(form);form.scrollIntoView({behavior:"smooth",block:"start"});
+      form.querySelector("#cancelFull").onclick=()=>form.remove();
+      form.querySelector("#submitFull").onclick=async()=>{
+        const changes=[...form.querySelectorAll("[data-q]")].map(field=>({
+          pregunta:Number(field.dataset.q),decision:field.value}));
+        if(changes.some(x=>x.decision==="SIN REVISAR")){
+          alertBox("Todas las preguntas requieren una decisión.",true);return;
+        }
+        try{
+          const result=await api("/sheets/"+state.sheet.id+"/decisions",{
+            method:"PUT",body:{lease:state.lease,
+              expected_revision:state.revision,cambios:changes,
+              motivo:form.querySelector("#fullReason").value}});
+          state.revision=result.revision;
+          alertBox("Hoja completa auditada y guardada.");
+          state.sheet=await api("/sheets/"+state.sheet.id);
+          await renderSheet();await queueTable();
+        }catch(err){alertBox(err.message,true);}
+      };
     };
     byId("releaseSheet").onclick=async()=>{
       try{await api("/sheets/"+sheet.id+"/release",{
@@ -305,8 +347,28 @@
   async function library(){
     if(!isAdmin())throw Error("Solo el administrador emite folios.");
     const exams=await api("/library");
-    renderTitle("Diseñar e imprimir","Usa las preguntas ya guardadas en Biblioteca. Se generan folios nuevos únicamente al confirmar esta operación.");
-    if(!exams.length){content.innerHTML+='<div class="panel empty">La biblioteca está vacía. Importa primero las preguntas en la aplicación de escritorio; no se creará una sesión sin cuestionario.</div>';return;}
+    renderTitle("Diseñar e imprimir","Importa un Excel de preguntas o usa un cuestionario guardado. Solo esta acción emite folios nuevos.");
+    content.innerHTML+='<form class="panel" id="importQuestions"><h3>Incorporar preguntas a la biblioteca</h3>'+
+      '<div class="cols"><label>Nombre de biblioteca<input name="name" placeholder="Ej. Checadores C" required></label>'+
+      '<label>Título de impresión<input name="title" placeholder="Evaluación de conocimientos"></label></div>'+
+      '<label>Excel de preguntas<input name="file" type="file" accept=".xlsx" required></label>'+
+      '<button class="secondary">Importar cuestionario XLSX</button></form>';
+    byId("importQuestions").onsubmit=async e=>{
+      e.preventDefault();const fd=new FormData(e.target),name=fd.get("name"),title=fd.get("title");
+      const file=fd.get("file");
+      if(!(file instanceof File)||!file.name.toLowerCase().endsWith(".xlsx")){
+        alertBox("Selecciona un Excel XLSX.",true);return;
+      }
+      const form=new FormData();form.append("file",file);
+      const query="?name="+encodeURIComponent(name)+"&title="+encodeURIComponent(title);
+      try{const res=await api("/library/import"+query,{method:"POST",body:form});
+        alertBox("Cuestionario importado: "+res.preguntas+" preguntas.");await library();
+      }catch(err){alertBox(err.message,true);}
+    };
+    if(!exams.length){
+      content.innerHTML+='<div class="panel empty">No hay cuestionarios todavía. Importa primero uno desde Excel.</div>';
+      return;
+    }
     content.innerHTML+='<form id="createForm" class="panel"><label>Cuestionario guardado<select name="cuestionario">'+
       exams.map(x=>'<option value="'+h(x.id)+'">'+h(x.nombre)+' · '+x.total+' preguntas (revisión '+x.revision+')</option>').join("")+
       '</select></label><div class="cols"><label>Nombre de la aplicación<input name="nombre" placeholder="Ej. Cabos turno C"></label>'+
