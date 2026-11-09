@@ -8,68 +8,59 @@ certifican todavía precisión en la Xerox VersaLink C7120.
 
 ## Procedimiento para el personal (Windows 10/11 o Linux)
 
-1. Abrir `Iniciar_Windows.bat` (Windows) o `Iniciar_Linux.sh` (Linux). Se abre
-   directamente **Diseñar e imprimir** con el PDF real a la derecha.
-2. Importar un XLSX de preguntas o abrir un cuestionario desde la biblioteca.
-   Configurar título, institución, grupo, papel y colores.
-3. Si se aplicará a personas identificadas, descargar la **plantilla de
-   participantes**, rellenar SOLO la hoja **Participantes** y pulsar
-   **Cargar lista**. Los campos son `ID_personal` (texto único, obligatorio),
-   `Nombre` (obligatorio), `Area_adscripcion`, `Grupo` y `Turno`. El ejemplo
-   está en otra pestaña y no se importa. Puedes **Quitar lista** para
-   volver a exámenes anónimos.
-4. Escoger la modalidad:
-   - **Tradicional:** cuadernillo y hoja. Con lista se generan
-     `Por_participante/` y `Paquetes_individuales.zip` para entregar a cada
-     persona su cuadernillo y hoja, además de la hoja agrupada.
-   - **Ecológica:** solo un cuadernillo reutilizable; con lista se generan
-     hojas de respuestas identificadas para todos. Sin lista, hoja genérica.
-   - **Folio + QR:** con lista se generan hojas individuales con nombre,
-     ID, folio y QR firmado. Usa un solo cuadernillo reutilizable; además
-     el acetato se adapta a la geometría de las burbujas del lector OMR.
-     **Sin lista, NO se generan QR ni folios**.
-5. En el diseñador seleccionar **Cuadernillo / Respuestas / Acetato**
-   y verificar la vista exacta, incluidas las marcas cuadradas de la hoja QR.
-   El QR de la vista es deliberadamente una MUESTRA SIN SESIÓN VÁLIDA.
-6. Pulsar **Generar PDF de examen**. Se crea una carpeta nueva con
-   `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`,
-   `Clave_docente.pdf`, `manifest.json`, `LEEME_IMPRESION.txt` y,
-   cuando corresponde, los paquetes por persona y `Sesion_OMR.txt`.
-   La lista y el examen originales no se sobrescriben.
-7. Imprimir al **100 %**, sin «ajustar a página». Las hojas QR requieren que
-   estén presentes las **cuatro marcas cuadradas, el QR completo y todas
-   las burbujas**. No mezclar acetatos de modalidades diferentes.
-8. Para corregir por escáner, pulsar **Calificar y entregar** desde el menú.
-   La ventana maximizada SOLO permite **Historial, Escanear PDF, Revisión,
-   Resultados y Excel de entrega**. Elegir en Historial la sesión que figura
-   en `Sesion_OMR.txt` de la carpeta impresa.
-9. Escanear el lote en PDF multipágina. Perfil inicial propuesto para
-   validar físicamente: **Xerox VersaLink C7120**, 300 dpi en escala de grises,
-   sin recortar bordes. Cargarlo en **Escanear PDF**. Se conserva el PDF
-   original y sus hashes; QR/HMAC identifica al participante, las cuatro
-   marcas permiten rectificar y el lector evalúa los círculos.
-10. En **Revisión** resolver cualquier marca ambigua, duplicada o sin QR
-    viendo la evidencia. La identificación manual requiere ID + folio y
-    una revisión íntegra. En **Resultados** consultar aciertos y temas.
-    En **Excel de entrega** exportar la versión oficial sin claves o la
-    interna con incidencias. Una sesión con incidencias se indica
-    **PROVISIONAL**. Salir con **Volver al diseño** para retomar el mismo
-    cuestionario sin abrir otra copia.
+La modalidad seleccionada define **solo el cuadernillo**: normal o ecológico.
+La **lista opcional** determina si la hoja universal lleva un QR firmado y
+los datos del participante. La misma hoja y el mismo acetato sirven para
+ambas modalidades, tanto con como sin lista.
 
-## Reglas que no se deben romper
+1. Ejecutar `Iniciar_Windows.bat` o `Iniciar_Linux.sh`; se abre una sola ventana.
+2. Cargar/editar preguntas y completar los datos institucionales del examen.
+3. Si se desea identificar a los participantes, descargar la plantilla,
+   rellenar **Participantes**, respetar `ID_personal` como texto y pulsar
+   **Cargar lista**. La hoja **Ejemplo** no se importa. Para evaluación
+   anónima, pulsar **Quitar lista** (o no cargarla).
+4. Elegir **Normal** para cuadernillos individuales o **Ecológico** para un
+   cuadernillo reutilizable. La opción folio/QR ya no es modalidad independiente.
+5. Ver la hoja de respuestas y el acetato en la vista PDF exacta:
+   - Sin lista: nombre, folio e ID en blanco, **sin QR**; marcar respuestas
+     y calificar manualmente con el acetato.
+   - Con lista: nombre, ID, folio y QR individual; se pueden **escanear
+     o calificar con el mismo acetato**, sin cambiar burbujas ni marcas.
+6. **Generar PDF de examen**. En **Normal con lista** se obtienen paquetes
+   por participante con el cuadernillo y hoja QR coincidentes. En
+   **Ecológico con lista** se imprime un cuadernillo común y una hoja QR
+   por participante. El QR es el mismo dentro de un paquete y en el lote,
+   sin crear otra sesión de examen.
+7. El **Acetato_clave.pdf** comparte **exactamente** la geometría de
+   `Hoja_respuestas.pdf`, con o sin QR. Nunca intercambiar claves entre
+   evaluaciones distintas; imprimir al 100 % sin ajustar.
+8. Para la corrección automática, entrar en **Calificar y entregar**,
+   consultar **Historial** y abrir la sesión que figura en
+   `Sesion_OMR.txt`. Esta sesión existe **solo si se cargó lista**.
+9. Escanear las hojas en PDF multipágina. Perfil inicial a validar
+   físicamente con la Xerox VersaLink C7120: **300 dpi, escala de grises**,
+   sin recortar QR ni marcas de las esquinas. Importar el PDF, revisar
+   marcas ambiguas y duplicados, y exportar el Excel.
+10. Si hay folios sin QR legible, cotejar folio e ID con evidencia y
+    registrar revisión justificada. Nunca asignar una identidad
+    únicamente por orden de las hojas. Una calificación con incidencias
+    sigue siendo **PROVISIONAL**.
 
-- Un solo XLSX de preguntas y una sola lista opcional para todas las modalidades.
-- El cuadernillo y la hoja convencional comparten coordenadas con el acetato
-  convencional; la hoja QR comparte `bubble_positions` con el lector OMR y
-  con su propio acetato generado para esa sesión.
-- Al editar preguntas después de imprimir NO cambian las claves de sesiones
-  antiguas: siempre generar un lote nuevo si varía el cuestionario.
-- La sesión y los QR usan identificadores opacos: el QR no contiene nombre
-  ni ID personal. Las evidencias y la lista quedan locales y no cifradas;
-  controlar el acceso, respaldar y no subir a Git.
-- Sin lista no hay sesión QR. Tradicional y ecológico se corrigen
-  manualmente con acetato, no automáticamente con el escáner.
-- La prueba física es obligatoria antes de entregar calificaciones oficiales.
+## Contratos que debe cumplir cada versión
+
+- **Dos modalidades de cuadernillo**: normal y ecológico.
+- **Una hoja de respuestas geométrica universal** y **un acetato** con
+  idénticas posiciones de burbujas, independientemente de los participantes.
+- **Lista vacía = sin QR**. Lista validada = **QR/HMAC por persona**
+  en cualquiera de los dos modos y sesión de calificación persistida.
+- El lector OMR sólo acepta QR de la sesión correspondiente, no hojas
+  genéricas y sin QR. La corrección manual siempre puede usar el acetato.
+- El cuadernillo ecológico no contiene datos personales, aunque la hoja sí.
+- No sobrescribir fuentes ni sesiones históricas: una modificación del
+  examen requiere un lote y una sesión nueva.
+- Los PDF escaneados, las claves y las listas son **privados y no cifrados**.
+  Respaldar y no subir a GitHub.
+- No declarar resultados oficiales sin probar impresión y escaneo físicos.
 
 ## Qué significa «promedio» y «desempeño»
 
@@ -87,7 +78,7 @@ certifican todavía precisión en la Xerox VersaLink C7120.
 | `omr_evaluaciones/motor.py` | Única geometría, impresión de folio/QR, HMAC, OMR OpenCV, SQLite, correcciones auditadas y exportación. |
 | `omr_evaluaciones/interfaz.py` | Vista de calificación, revisión y entregables; no duplica el diseñador ni decide geometrías. |
 | `omr_evaluaciones/demo.py` | Genera marcas sintéticas sobre hojas PDF reales, sin suponer que son escaneos Xerox. |
-| `generacion_integrada.py` | Orquesta tres modalidades desde el mismo examen y participantes opcionales; crea la sesión QR si corresponde. |
+| `generacion_integrada.py` | Orquesta normal/ecológico y activa QR en ambos únicamente al importar participantes. |
 | `calificar_omr.py` | Compatibilidad para pruebas técnicas; no es el punto de entrada habitual. |
 | `requirements-omr.txt` | Dependencias adicionales de lectura; OpenCV, numpy, qrcode/Pillow, pyzbar opcional como segundo lector. |
 | `tests/test_motor_omr.py` | Pruebas de tamaños, QR, rotación, desenfoque, duplicados, revisión, Excel y puntuaciones. |
