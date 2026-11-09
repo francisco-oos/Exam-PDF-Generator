@@ -329,3 +329,39 @@ def test_certificado_tls_local_no_exponer_clave(tmp_path,monkeypatch):
         main(["192.168.0.14"])
     with pytest.raises(SystemExit,match="privadas"):
         main(["8.8.8.8"])
+
+
+
+def test_diez_capturistas_reciben_diez_hojas_diferentes(tmp_path):
+    import numpy as np
+    svc=WebService(tmp_path,start_workers=False)
+    svc.setup(svc._setup_token,"administrador","Admin","AdminSeguro123456")
+    token,_,_=svc.login("administrador","AdminSeguro123456")
+    admin=svc.authenticate(token)
+    questions=[{"tema":"Trabajo","pregunta":"¿Qué corresponde hacer?",
+                "correcta":"A"}]
+    people=[{"id":f"P{i:03d}","nombre":f"Ficticio {i}"}
+            for i in range(1,16)]
+    sid=svc.store.create_session("Examen",questions,people,"Carta")
+    blank=np.full((2200,1700,3),255,dtype=np.uint8)
+    for index,person in enumerate(svc.store.session(sid)["personal"]):
+        svc.store.register_page(
+            sid,secrets.token_hex(32),index,blank,person["token"],
+            [None],[{"pregunta":1,"razon":"Doble marca"}],"revisar")
+    reviewers=[user_for(svc,f"revision{i:02d}",f"ClaveRevisor{i:02d}2026!",
+                        "capturista",sid,admin)[0]
+               for i in range(10)]
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        claims=list(pool.map(lambda u:svc.claim_next(u,sid),reviewers))
+    assert len({claim["hoja_id"] for claim in claims})==10
+    assert len({claim["lease"] for claim in claims})==10
+    with svc.store.connect() as db:
+        active=db.execute("SELECT COUNT(*) FROM web_reclamos WHERE vence>0").fetchone()[0]
+    assert active==10
+    svc.close()
+
+
+def test_modo_produccion_bloqueado_sin_validador_licencia(tmp_path,monkeypatch):
+    monkeypatch.setenv("OMR_WEB_MODE","production")
+    with pytest.raises(RuntimeError,match="licencia central"):
+        create_app(tmp_path,start_workers=False)
