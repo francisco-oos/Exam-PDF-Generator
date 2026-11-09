@@ -35,6 +35,7 @@ class PreviewData:
     color_titulo: str = '#213A4C'
     color_subtitulo: str = '#5E7180'
     color_respuestas: str = '#213A4C'
+    color_acetato: str = '#167341'
     tamano_papel: str = 'A4'
     letra: float = 9.0
     reutilizable: bool = False
@@ -198,7 +199,7 @@ def _sheet_page(d: PreviewData, *, acetate: bool) -> Image.Image:
             x,y=pts[correct]
             ry=PAGE_H-y
             dr.ellipse((int(x-RADIUS-4),int(ry-RADIUS-4),int(x+RADIUS+4),int(ry+RADIUS+4)),
-                       outline=GREEN,fill='#C1E9D2',width=3)
+                       outline=d.color_acetato,fill=tuple(round(255*.74+int(d.color_acetato[i:i+2],16)*.26) for i in (1,3,5)),width=3)
     # _bubbles usa coordenadas de PDF con origen abajo; la imagen tiene origen arriba.
     for x,y in ((37,38),(558,38),(37,805),(558,805)):
         dr.line((x-6,y,x+6,y),fill=INK,width=1)

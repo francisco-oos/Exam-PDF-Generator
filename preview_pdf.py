@@ -43,7 +43,8 @@ def render_document_preview(data: PreviewData, view: str = 'Cuadernillo',
                       acetate=view == 'Acetato',normal=normal,bold=bold,
                       title_color=colors.HexColor(data.color_titulo),
                       subtitle_color=colors.HexColor(data.color_subtitulo),
-                      answer_color=colors.HexColor(data.color_respuestas),size=size)
+                      answer_color=colors.HexColor(data.color_respuestas),size=size,
+                      acetate_color=colors.HexColor(data.color_acetato))
     doc = pdfium.PdfDocument(buffer.getvalue())
     try:
         pages = len(doc)
@@ -51,7 +52,11 @@ def render_document_preview(data: PreviewData, view: str = 'Cuadernillo',
         pdf_page = doc[page]
         try:
             page_w, _page_h = pdf_page.get_size()
-            image = pdf_page.render(scale=width/page_w).to_pil().convert('RGB')
+            bitmap = pdf_page.render(scale=width/page_w)
+            try:
+                image = bitmap.to_pil().convert('RGB')
+            finally:
+                bitmap.close()
         finally:
             pdf_page.close()
     finally:
