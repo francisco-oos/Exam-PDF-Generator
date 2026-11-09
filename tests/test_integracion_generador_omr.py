@@ -224,3 +224,38 @@ def test_historial_unido_por_id_y_nombre_sin_duplicar_examen(tmp_path):
     finally:
         try:parent.destroy()
         except tk.TclError:pass
+
+
+
+def test_migracion_legado_no_adivina_nombres_por_titulo(tmp_path):
+    from biblioteca import save_exam, delete_exam
+    from src.evaluaciones.core import Question
+    from omr_evaluaciones.motor import OMRStore
+    lib=tmp_path/'lib.sqlite3'
+    question=Question('General','Pregunta de seguridad',
+                      ('Uno','Dos','Tres','Cuatro'),1)
+    def save(name):
+        return save_exam(
+            lib,nombre=name,empresa='Ejemplo',grupo='A',
+            titulo='Evaluación de conocimientos',subtitulo='',
+            instrucciones='',questions=[question],tamano_papel='Carta',
+        )
+    exam_id=save('Operaciones 2026')
+    store=OMRStore(tmp_path/'omr')
+    sid=store.create_session(
+        'Evaluación de conocimientos',
+        [{'tema':'General','pregunta':'Pregunta de seguridad','correcta':'B'}],
+        [{'id':'00001','nombre':'Persona ficticia'}],paper='Carta')
+    assert store.link_legacy_library_by_exact_key(lib)==1
+    assert store.session(sid)['cuestionario_id']==exam_id
+    assert store.session(sid)['nombre_evaluacion']=='Operaciones 2026'
+    sid2=store.create_session(
+        'Evaluación de conocimientos',
+        [{'tema':'General','pregunta':'Pregunta de seguridad','correcta':'B'}],
+        [{'id':'00002','nombre':'Persona de prueba'}],paper='Carta')
+    other=save('Segundo cuestionario idéntico')
+    assert store.link_legacy_library_by_exact_key(lib)==0
+    assert store.session(sid2)['cuestionario_id'] is None
+    delete_exam(lib,other)
+    assert store.link_legacy_library_by_exact_key(lib)==1
+    assert store.session(sid2)['cuestionario_id']==exam_id
