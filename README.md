@@ -41,6 +41,26 @@ Al abrir un editor existente, usa los botones **Volver al generador**, la **X** 
 
 **Verificación técnica:** en la rama de desarrollo `feature/modernizacion-integral`, la CI para Windows (Python 3.11/3.12/3.13), Ubuntu y Docker concluyó satisfactoriamente en la [ejecución 42548502303](https://github.com/francisco-oos/Exam-PDF-Generator/actions/runs/42548502303). La automatización no sustituye la prueba del editor con el equipo físico del usuario ni la superposición de hoja y acetato en impresora al 100 %.
 
+
+## Calificación con folios QR y PDF escaneado (módulo OMR)
+
+El módulo opcional **Calificar · QR** permite importar preguntas y una lista CSV/XLSX de personas; generar una hoja con **folio visible, ID, nombre, QR firmado y marcas negras** por participante; leer el PDF multipágina escaneado, identificar personas, comprobar las burbujas y revisar dudas junto a la imagen original antes de exportar.
+
+La vista de calificación se adapta al tipo de examen: los modos **Tradicional** y **Ecológico** conservan el flujo normal del generador y ocultan las herramientas de escaneo; **Personalizado** habilita importación de personal, impresión QR, lectura, revisión, resultados e informes. Es posible utilizar el cuadernillo reutilizable con las hojas QR personalizadas.
+
+Instalación adicional, solo para activar la lectura óptica en Windows:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-omr.txt
+.\.venv\Scripts\python.exe calificar_omr.py
+```
+
+Si usas Linux: `python -m pip install -r requirements-omr.txt`, asegurando `libzbar0` si deseas usar el lector redundante de QR. La aplicación principal sigue funcionando aunque no instales estos complementos.
+
+**Mediciones sintéticas:** 20 QR/20 hojas detectados; 19 hojas validadas automáticamente y una con doble marca retenida para revisión; las 380 marcas de las 19 hojas validadas coincidieron con el patrón artificial. **No se ha medido precisión con la Xerox VersaLink C7120 física**: antes de calificar oficialmente hay que imprimir y escanear tandas reales y calibrar umbrales. El libro Excel de entrega es PROVISIONAL si quedan incidencias. Las sesiones y los PDF de personal permanecen únicamente en `datos/omr/`.
+
+Consulta el [manual de escaneo, criterios y mantenimiento](docs/OMR_ESCANEO_CALIFICACION.md). Hay una [plantilla de personal de ejemplo](plantillas/Plantilla_Personal_OMR.xlsx) con IDs que conservan ceros iniciales.
+
 ## Características
 
 - Formatos A4, Carta y Oficio, con diseño corporativo con **nombre de empresa, título, subtítulo, puesto/área, instrucciones y logotipo**.
