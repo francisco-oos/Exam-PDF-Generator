@@ -63,7 +63,7 @@ def _descendants(widget):
         yield from _descendants(child)
 
 
-def test_inicio_presenta_una_sola_ventana_y_tres_modalidades():
+def test_inicio_presenta_una_sola_ventana_y_dos_modalidades():
     """Iniciar desde BAT o Linux invoca el mismo main: no deben verse dos vistas."""
     try:
         import iniciar
@@ -82,15 +82,16 @@ def test_inicio_presenta_una_sola_ventana_y_tres_modalidades():
         controls = list(_descendants(editor))
         radios = [w for w in controls if isinstance(w, ttk.Radiobutton)]
         labels = [w.cget("text") for w in radios]
-        assert any(label.startswith("Tradicional") for label in labels)
+        assert len(labels)==2
+        assert any(label.startswith("Normal") for label in labels)
         assert any(label.startswith("Ecológico") for label in labels)
-        assert any(label.startswith("Con folio y QR") for label in labels)
+        assert not any(label.startswith("Con folio") for label in labels)
 
-        normal = next(w for w in radios if w.cget("text").startswith("Tradicional"))
-        folio = next(w for w in radios if w.cget("text").startswith("Con folio y QR"))
+        normal = next(w for w in radios if w.cget("text").startswith("Normal"))
+        ecologico = next(w for w in radios if w.cget("text").startswith("Ecológico"))
         normal.invoke()
-        folio.invoke()
-        # Generar folios forma parte del mismo botón de exportación.
+        ecologico.invoke()
+        # El QR depende solo de Cargar lista, no de una tercera modalidad.
         actions = [w.cget("text") for w in controls if isinstance(w, tk.Button)]
         assert "Calificar y entregar" in actions
         assert "Generar PDF de examen" in actions
