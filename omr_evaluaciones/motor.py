@@ -21,6 +21,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 from zipfile import ZipFile, BadZipFile
 
@@ -1008,6 +1009,7 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path, *, progress=None):
     hoja es difícil se renderiza a 200 DPI y se alinean marcas. No multiplica
     por 4 rotaciones x 3 papeles a menos que fallen las rutas rápidas.
     """
+    started=perf_counter()
     path=Path(pdf_path)
     if (not path.is_file() or path.suffix.lower()!='.pdf' or
             path.stat().st_size>MAX_PDF_SIZE):
@@ -1117,7 +1119,8 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path, *, progress=None):
     return {'total_paginas':len(items),'paginas':items,
             'grupos':list(groups.values()),
             'no_identificadas':[x for x in items if not x['sesion_id']],
-            'mezclado':len(groups)>1}
+            'mezclado':len(groups)>1,
+            'segundos_prelectura':round(perf_counter()-started,3)}
 
 
 def _recognize(gray,paper,questions_count):
@@ -1177,6 +1180,7 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path, *, page_indices=None):
     No usa OCR de nombres ni cambia resultados anteriores ante duplicados.
     Un QR ilegible implica hoja sin identificar; nunca adjudica una identidad falsa.
     """
+    started=perf_counter()
     path=Path(pdf_path)
     if not path.is_file() or path.suffix.lower()!='.pdf' or path.stat().st_size>MAX_PDF_SIZE:
         raise ValueError('Selecciona un PDF válido de hasta 100 MB.')
@@ -1275,6 +1279,7 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path, *, page_indices=None):
                 'sesion_detectada':different_session if best is None else None,
             })
     finally:doc.close()
+    report['segundos_calificacion']=round(perf_counter()-started,3)
     return report
 
 
