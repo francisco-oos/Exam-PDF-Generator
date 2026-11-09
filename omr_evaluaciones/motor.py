@@ -171,7 +171,21 @@ class OMRStore:
                decision TEXT NOT NULL,motivo TEXT NOT NULL,revisor TEXT NOT NULL,
                fecha TEXT NOT NULL,FOREIGN KEY(hoja_id) REFERENCES hojas(id));
             ''')
-    def create_session(self,title,questions,people,paper='Carta',modo='personalizado'):
+            # Migración aditiva: sesiones antiguas, escaneos y claves HMAC
+            # continúan íntegros. No se fusionan dos bases de datos.
+            fields={r['name'] for r in db.execute('PRAGMA table_info(sesiones)')}
+            additions={
+                'nombre_evaluacion':'TEXT',
+                'cuestionario_id':'TEXT',
+                'revision_biblioteca':'INTEGER',
+                'lote_path':'TEXT',
+            }
+            for field,sqltype in additions.items():
+                if field not in fields:
+                    db.execute(f'ALTER TABLE sesiones ADD COLUMN {field} {sqltype}')
+    def create_session(self,title,questions,people,paper='Carta',modo='personalizado',
+                       *,nombre_evaluacion=None,cuestionario_id=None,
+                       revision_biblioteca=None):
         validate_questions(questions)
         if modo not in ('normal','tradicional','ecologico','personalizado'):
             raise ValueError('Modalidad de sesión inválida.')
@@ -183,6 +197,12 @@ class OMRStore:
         with self.connect() as db:
             db.execute('INSERT INTO sesiones(id,titulo,modo,papel,preguntas_json,version_sha,clave_hmac,creada) VALUES(?,?,?,?,?,?,?,?)',
                 (sid,title[:100],modo,paper,src,digest,secret,utcnow()))
+            if nombre_evaluacion or cuestionario_id or revision_biblioteca is not None:
+                db.execute("""
+                    UPDATE sesiones SET nombre_evaluacion=?,cuestionario_id=?,
+                        revision_biblioteca=? WHERE id=?
+                """,((nombre_evaluacion or title).strip()[:120],
+                     cuestionario_id,revision_biblioteca,sid))
             for p in people:
                 if not IDS_RE.fullmatch(str(p.get('id',''))):raise ValueError('ID del participante inválido.')
                 if not str(p.get('nombre','')).strip():raise ValueError('Falta nombre del participante.')
@@ -192,6 +212,33 @@ class OMRStore:
                 db.execute('INSERT INTO participantes VALUES(?,?,?,?,?,?,?,?)',
                     (sid,p['id'],p['nombre'],p.get('area',''),p.get('grupo',''),p.get('turno',''),tok,folio))
         return sid
+    def update_lote(self,sid,path):
+        """Vincula sin alterar la clave OMR la carpeta de impresión del lote."""
+        with self.connect() as db:
+            db.execute('UPDATE sesiones SET lote_path=? WHERE id=?',
+                       (str(Path(path).resolve()),sid))
+
+    def rename_session(self,sid,name):
+        """Permite recuperar nombres de sesiones anteriores sin cambiar folios."""
+        name=str(name).strip()
+        if not name or len(name)>120:
+            raise ValueError('Escribe un nombre de 1 a 120 caracteres.')
+        if not SID_RE.fullmatch(str(sid)):
+            raise ValueError('Identificador de sesión inválido.')
+        with self.connect() as db:
+            if db.execute('UPDATE sesiones SET nombre_evaluacion=? WHERE id=?',
+                          (name,sid)).rowcount!=1:
+                raise ValueError('Sesión inexistente.')
+
+    def discard_empty_session(self,sid):
+        """Limpia únicamente un intento fallido propio SIN hojas escaneadas."""
+        with self.connect() as db:
+            if db.execute('SELECT COUNT(*) FROM hojas WHERE sesion_id=?',(sid,)).fetchone()[0]:
+                return False
+            db.execute('DELETE FROM participantes WHERE sesion_id=?',(sid,))
+            db.execute('DELETE FROM sesiones WHERE id=?',(sid,))
+        return True
+
     def session(self,sid):
         if not SID_RE.fullmatch(sid):raise ValueError('Sesión inválida.')
         with self.connect() as db:
@@ -202,9 +249,16 @@ class OMRStore:
     def sessions(self):
         with self.connect() as db:
             return [dict(r) for r in db.execute("""
-                SELECT s.id,s.titulo,s.modo,s.papel,s.creada,s.estado,
+                SELECT s.id,s.titulo,s.nombre_evaluacion,s.cuestionario_id,
+                       s.revision_biblioteca,s.lote_path,s.modo,s.papel,s.creada,
+                       s.estado,
                        (SELECT COUNT(*) FROM participantes p
-                        WHERE p.sesion_id=s.id) AS cantidad_participantes
+                        WHERE p.sesion_id=s.id) AS cantidad_participantes,
+                       (SELECT COUNT(*) FROM hojas h
+                        WHERE h.sesion_id=s.id) AS hojas_escaneadas,
+                       (SELECT COUNT(*) FROM hojas h
+                        WHERE h.sesion_id=s.id AND h.estado IN
+                        ('sin_identificar','revisar','duplicado')) AS hojas_pendientes
                 FROM sesiones s ORDER BY s.creada DESC
             """)]
     def register_page(self,sid,source_sha,page_idx,image,token,answers,uncertain,state):
