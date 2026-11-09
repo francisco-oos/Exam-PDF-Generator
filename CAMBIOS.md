@@ -32,3 +32,12 @@
 - La vista del cuadernillo es orientativa, no una rasterización del PDF final; para imprimir se usa el archivo generado.
 - Etiquetas de documento actualizadas a «Área / grupo»; preservado el argumento `puesto` en API por compatibilidad.
 - Los bancos de 4 funciones (80 preguntas) se preparan fuera de GitHub; contienen claves y no se publican en código.
+
+## Biblioteca y personalización de documentos (2026-11-08)
+- Plantilla descargable `plantillas/Plantilla_Cuestionario.xlsx`, generada con guía y ejemplos, con validación de una letra A/B/C/D.
+- Biblioteca de cuestionarios local SQLite con persistencia de encabezados, 1–100 preguntas, respuestas, fotografías y logotipos, y revisión incremental.
+- Editor de preguntas A/B/C/D en ventana local y catálogo de cuestionarios para reabrir/editar/regenerar.
+- Paletas RGB independientes de título y subtítulo (PDF, vista previa y manifest).
+- Acetato con relleno semitransparente (26 %) y contorno visible, manteniendo centros geométricos exactos.
+- Web local Docker: descargar plantilla y escoger colores; biblioteca SQLite solo disponible en escritorio nativo por ahora.
+- Nuevas pruebas de biblioteca, exportación, integridad de recursos, validación RGB, color PDF y opacidad del acetato.

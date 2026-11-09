@@ -13,3 +13,5 @@ salidas
 *.pdf
 *.zip
 *.xlsx
+
+!plantillas/Plantilla_Cuestionario.xlsx

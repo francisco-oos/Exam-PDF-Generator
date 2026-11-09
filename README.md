@@ -6,16 +6,29 @@ Aplicación local para preparar exámenes de opción múltiple: **cuadernillo pr
 
 Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-PDF-Generator), creado por **Uziel Humberto López Meneses** en 2020 bajo licencia **MIT**. Conservamos su atribución y el archivo [`LICENSE`](LICENSE). Esta adaptación es una reimplementación con medidas de seguridad, diseño propio y nuevas funciones, **no es una versión oficial del autor original**.
 
+## Cuestionarios reutilizables, colores y plantilla (interfaz de escritorio)
+
+1. En Windows abre `Iniciar_Windows.bat`, o en Linux `Iniciar_Linux.sh`.
+2. Pulsa **Descargar plantilla Excel**. El archivo `Plantilla_Cuestionario.xlsx` incluye la pestaña obligatoria **Preguntas**, un **Ejemplo** independiente y una **Guia**. En `Preguntas`, cada fila indica un tema, la pregunta, las cuatro opciones A/B/C/D y la columna **Correcta** con una sola letra A, B, C o D. Las imágenes se indican con el nombre del PNG/JPG en una carpeta `imagenes` junto al Excel.
+3. Selecciona el XLSX con **Examinar** o modifica el cuestionario directamente usando **Editar preguntas** (añadir, editar, eliminar). La plantilla y el origen nunca se sobrescriben.
+4. Usa los botones **Paleta** del título y del subtítulo; cada uno admite RGB hexadecimal `#RRGGBB`, y la previsualización refleja la selección.
+5. Pulsa **Guardar cuestionario** para persistir preguntas, opciones, respuestas correctas, logotipo e imágenes en SQLite. **Mis cuestionarios** permite reabrirlos y editarlos. Al pulsar **Generar documentos**, el examen se guarda también en la biblioteca.
+6. La biblioteca permanece en **`datos/biblioteca.sqlite3`** dentro de la carpeta del proyecto; está excluida de Git y no se sube a Internet. Haz copias de seguridad de ese archivo cuando el programa esté cerrado. **La base no está cifrada:** cualquier persona con acceso a ella puede leer las respuestas correctas; protege el equipo y las copias de respaldo.
+
+El acetato ahora imprime cada respuesta correcta como **círculo verde con relleno semitransparente** para facilitar el conteo. Su transparencia real depende del material e impresora: prueba papel y acetato superpuestos **A4 al 100 %**, sin ajuste de escala, antes de uso oficial.
+
+**Nota de modalidades:** la biblioteca editable y el editor de preguntas están en el escritorio Tkinter. La interfaz web Docker ofrece la descarga de plantilla y los colores RGB, pero todavía no incluye el administrador de cuestionarios SQLite.
+
 ## Características
 
 - Formato A4 y diseño corporativo con **nombre de empresa, título, subtítulo, puesto/área, instrucciones y logotipo**.
 - Preguntas organizadas por temas, cuatro opciones A–D y **una imagen local opcional por pregunta**.
 - Plantilla XLSX editable en Excel o LibreOffice Calc; hasta 100 preguntas.
-- Hoja y acetato usan el **mismo modelo geométrico de coordenadas** para superposición manual.
+- Hoja y acetato usan el **mismo modelo geométrico de coordenadas** para superposición manual; el acetato tiene un círculo coloreado semitransparente.
 - Salidas por examen en carpeta nueva: `Cuadernillo.pdf`, `Hoja_respuestas.pdf`, `Acetato_clave.pdf`, `Clave_docente.pdf`, copia del Excel, recursos y `manifest.json` con hashes SHA-256.
 - Funciona sin conexión tras instalar dependencias. No sube preguntas ni archivos a ningún servidor.
 - CLI para procesos automatizados, GUI Tkinter sin Docker y **web local en Docker Compose**, sin instalar Python en Windows.
-- [Captura real de la vista previa genérica](docs/capturas/vista_previa_generica.png).\n- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final A4 es la referencia para impresión.
+- **Interfaz de escritorio renovada:** campos libres para empresa y público/grupo; vista previa lateral de cuadernillo, hoja de respuestas y acetato, actualizada al editar. La vista es orientativa; el PDF final A4 es la referencia para impresión.
 
 ## Iniciar con Docker — recomendado (Windows y Linux)
 
@@ -35,13 +48,13 @@ Para parar: `docker compose stop`. Para reiniciar: `docker compose start`. Para 
 
 ## Instalar en Windows 10/11 (sin Docker)
 
-1. Descarga el ZIP de la rama de trabajo de GitHub y selecciona **Extraer todo** (no abras el programa dentro del ZIP).
-2. Instala **Python 3.11 o 3.12**, asegurándote de incluir `py` (Python Launcher). No necesitas permisos de administrador para ejecutar el programa.
+1. Descarga el código de `main` con Git o actualiza tu copia con `git pull --ff-only`.
+2. Utiliza **Python 3.13, 3.12 o 3.11**, con `py` (Python Launcher). No necesitas instalar otra versión si ya tienes Python 3.13. No necesitas permisos de administrador para ejecutar el programa.
 3. Haz doble clic en **`Iniciar_Windows.bat`**. La primera vez crea `.venv`, instala las dependencias y genera una plantilla de ejemplo. La instalación inicial **sí necesita Internet**.
 4. En la interfaz selecciona el Excel, indica el título, empresa y área/grupo libre, elige opcionalmente un logotipo y escribe instrucciones. Consulta a la derecha las pestañas Cuadernillo, Respuestas y Acetato antes de generar.
 5. Pulsa **Generar documentos** y luego **Abrir resultado**.
 
-Si falla la instalación, abre PowerShell en la carpeta del proyecto y ejecuta `py -3.11 -m venv .venv` y `.venv\Scripts\python.exe -m pip install -r requirements.txt`, o revisa los mensajes que muestra el iniciador. No hace falta activar PowerShell ni cambiar su política de ejecución.
+Si falla la instalación, abre PowerShell en la carpeta del proyecto y ejecuta `py -3.13 -m venv .venv` y `.venv\Scripts\python.exe -m pip install -r requirements.txt`, o revisa los mensajes que muestra el iniciador. No hace falta activar PowerShell ni cambiar su política de ejecución.
 
 ## Linux
 
@@ -116,7 +129,7 @@ python crear_ejemplo.py
 python generar.py --entrada ejemplos/Plantilla_20_preguntas.xlsx --salida salidas
 ```
 
-La CI está preparada para Windows/Linux y Python 3.11/3.12. **No declares compatibilidad Windows confirmada hasta ver la ejecución de los workflows y probar el iniciador físicamente.**
+La CI incluye Windows/Linux con Python 3.11/3.12/3.13, además de la prueba `Iniciar_Windows.bat --verificar` en Windows 3.13. La impresión física y la experiencia de GUI en Windows requieren pruebas manuales.
 
 ## Evaluaciones del usuario (archivos privados)
 
