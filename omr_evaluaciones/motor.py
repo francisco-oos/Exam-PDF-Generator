@@ -787,32 +787,32 @@ def _rectify(gray,paper):
         result=cv2.warpPerspective(img,warp,(tw,th),flags=cv2.INTER_LINEAR,borderValue=255)
         yield result
 
-def _decode_qr(gray):
-    """Lee QR del encabezado, tolerando poca resolución y papel escaneado.
+def _decode_qr(gray, *, allow_full=True):
+    """Primero leer SOLO el encabezado: más veloz que buscar en toda la página.
 
-    Primero intenta el documento; si falla, recorta SOLO el encabezado
-    superior derecho y reintenta ampliado (150% y 200%), sin OCR.
-    El QR nunca es válido sin la posterior comprobación HMAC/sesión.
+    Los recortes y escalados no modifican la evidencia. Solo retorna texto:
+    una lectura NO es válida hasta comprobar token, sesión y HMAC.
     """
     detector=cv2.QRCodeDetector()
-    height,width=gray.shape[:2]
-    text,points,_=detector.detectAndDecode(gray)
-    if text and points is not None:
-        cx,cy=points.reshape(-1,2).mean(axis=0)
-        if .68*width<cx<.985*width and .055*height<cy<.31*height:
-            return text
-    # Subregión: mejora lectura de QR reducidos sin interpolar toda la página.
-    x0,x1=int(.66*width),int(.99*width)
-    y0,y1=int(.055*height),int(.33*height)
+    h,w=gray.shape[:2]
+    x0,x1=int(.65*w),int(.985*w)
+    y0,y1=int(.05*h),int(.315*h)
     roi=gray[y0:y1,x0:x1]
-    if roi.size==0:return None
-    for image in (roi,
-                  cv2.resize(roi,None,fx=1.5,fy=1.5,interpolation=cv2.INTER_CUBIC),
-                  cv2.resize(roi,None,fx=2.0,fy=2.0,interpolation=cv2.INTER_CUBIC)):
-        text,points,_=detector.detectAndDecode(image)
+    if roi.size==0:
+        return None
+    for factor in (1.,1.5,2.):
+        candidate=(roi if factor==1. else
+                   cv2.resize(roi,None,fx=factor,fy=factor,
+                              interpolation=cv2.INTER_CUBIC))
+        text,points,_=detector.detectAndDecode(candidate)
         if text and points is not None:
             return text
-    # pyzbar es una segunda alternativa opcional para imágenes difíciles.
+    if allow_full:
+        text,points,_=detector.detectAndDecode(gray)
+        if text and points is not None:
+            center=points.reshape(-1,2).mean(axis=0)
+            if .64*w<center[0]<.99*w and .04*h<center[1]<.36*h:
+                return text
     try:
         from pyzbar.pyzbar import decode
         for item in decode(Image.fromarray(roi)):
@@ -821,6 +821,7 @@ def _decode_qr(gray):
     except (ImportError,OSError,UnicodeDecodeError):
         pass
     return None
+
 
 def render_review_with_acetato(original_bgr, paper, questions, *,
                               show_acetato=True, issue_numbers=()):
@@ -923,12 +924,12 @@ def resolve_pdf_session(store:OMRStore,pdf_path:Path,*,max_pages=5):
     return next(iter(found)) if found else None
 
 
-def inspect_pdf_sessions(store: OMRStore, pdf_path: Path):
-    """Inspecciona TODAS las páginas sin escribir resultados.
+def inspect_pdf_sessions(store: OMRStore, pdf_path: Path, *, progress=None):
+    """Clasifica el lote completo en dos niveles sin modificar calificaciones.
 
-    Únicamente acepta QR OMR con token y HMAC de una sesión de esta
-    instalación. Primero intenta el escaneo directo; la rectificación
-    por marcas se reserva para QR difíciles, para no ralentizar lotes largos.
+    PREVISUALIZACIÓN RÁPIDA: render a 175 DPI y QR recortado. Solo cuando una
+    hoja es difícil se renderiza a 200 DPI y se alinean marcas. No multiplica
+    por 4 rotaciones x 3 papeles a menos que fallen las rutas rápidas.
     """
     path=Path(pdf_path)
     if (not path.is_file() or path.suffix.lower()!='.pdf' or
@@ -938,85 +939,94 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path):
         if source.read(5)!=b'%PDF-':
             raise ValueError('Archivo PDF inválido.')
     doc=pdfium.PdfDocument(str(path))
-    session_cache={}
+    cache={}
     items=[]
     try:
-        if len(doc)>1500:
+        count=len(doc)
+        if count>1500:
             raise ValueError('PDF con demasiadas páginas.')
-        for idx in range(len(doc)):
+        for idx in range(count):
+            if progress:
+                progress(idx+1,count)
             page=doc[idx]
             try:
-                w,h=page.get_size()
-                if not 100<=w<=1500 or not 100<=h<=2000:
-                    raise ValueError(
-                        f'Página {idx+1}: dimensiones anormales de PDF escaneado.')
-                rgb=np.asarray(
-                    page.render(scale=RENDER_DPI/72).to_pil().convert('RGB'))
+                pw,ph=page.get_size()
+                if not 100<=pw<=1500 or not 100<=ph<=2000:
+                    raise ValueError(f'Página {idx+1}: dimensiones anormales.')
+                raw=np.asarray(page.render(scale=175/72).to_pil().convert('RGB'))
             finally:
                 page.close()
-            gray=cv2.cvtColor(rgb,cv2.COLOR_RGB2GRAY)
-            found_qr=False
-            verified=None
+            gray=cv2.cvtColor(raw,cv2.COLOR_RGB2GRAY)
+            seen=False
 
-            def check_qr(qr):
-                nonlocal found_qr
+            def valid_qr(qr):
+                nonlocal seen
                 if not qr:
                     return None
-                found_qr=True
+                seen=True
                 match=QR_RE.fullmatch(qr)
-                if match is None:
-                    return None
-                sid,token,page_num,_mac=match.groups()
-                if sid not in session_cache:
+                if match is None:return None
+                sid,token,page_num,_=match.groups()
+                if page_num!='1':return None
+                if sid not in cache:
                     try:
-                        session_cache[sid]=store.session(sid)
+                        data=store.session(sid)
+                        data['_tokens']={
+                            person['token']:person for person in data['personal']
+                        }
+                        cache[sid]=data
                     except ValueError:
-                        session_cache[sid]=None
-                session=session_cache[sid]
-                if session is None or page_num!='1':
-                    return None
-                person=next((p for p in session['personal']
-                             if p['token']==token),None)
-                if person is None:
-                    return None
+                        cache[sid]=None
+                session=cache[sid]
+                if session is None:return None
+                person=session['_tokens'].get(token)
+                if person is None:return None
                 if not hmac.compare_digest(
                     _qr_data(sid,token,1,session['clave_hmac']),qr):
                     return None
-                return {
-                    'pagina':idx+1,'sesion_id':sid,'estado':'verificada',
-                    'evaluacion':session.get('nombre_evaluacion')
-                                 or session['titulo'],
-                    'nombre':person['nombre'],'folio':person['folio'],
-                }
+                return {'pagina':idx+1,'sesion_id':sid,
+                        'estado':'verificada',
+                        'evaluacion':session.get('nombre_evaluacion')
+                                     or session['titulo'],
+                        'nombre':person['nombre'],'folio':person['folio']}
 
-            rotations=(gray,cv2.rotate(gray,cv2.ROTATE_180),
-                       cv2.rotate(gray,cv2.ROTATE_90_CLOCKWISE),
-                       cv2.rotate(gray,cv2.ROTATE_90_COUNTERCLOCKWISE))
-            # Ruta rápida: la gran mayoría de hojas impresas puede leerse
-            # directamente o con una rotación, sin cuatro homografías.
-            for rotated in rotations:
-                verified=check_qr(_decode_qr(rotated))
-                if verified:
-                    break
-            if not verified:
-                # Ruta robusta: marcas grises, hoja inclinada o QR pequeño.
-                for rotated in rotations:
+            verified=valid_qr(_decode_qr(gray,allow_full=False))
+            if verified is None:
+                verified=valid_qr(
+                    _decode_qr(cv2.rotate(gray,cv2.ROTATE_180),
+                               allow_full=False))
+            if verified is None:
+                # Las páginas complicadas conservan el reconocimiento
+                # anterior a resolución completa y alineación por marcas.
+                page=doc[idx]
+                try:
+                    full=np.asarray(page.render(scale=RENDER_DPI/72)
+                                      .to_pil().convert('RGB'))
+                finally:
+                    page.close()
+                full_gray=cv2.cvtColor(full,cv2.COLOR_RGB2GRAY)
+                orientations=(
+                    full_gray,cv2.rotate(full_gray,cv2.ROTATE_180),
+                    cv2.rotate(full_gray,cv2.ROTATE_90_CLOCKWISE),
+                    cv2.rotate(full_gray,cv2.ROTATE_90_COUNTERCLOCKWISE))
+                for rotated in orientations:
+                    verified=valid_qr(_decode_qr(rotated))
+                    if verified:break
+                if verified is None:
                     for paper in PAPERS:
-                        for rectified in _rectify(rotated,paper):
-                            verified=check_qr(_decode_qr(rectified))
-                            if verified:
-                                break
-                        if verified:
-                            break
-                    if verified:
-                        break
+                        for aligned in _rectify(full_gray,paper):
+                            verified=valid_qr(_decode_qr(aligned))
+                            if verified:break
+                        if verified:break
             if verified:
                 items.append(verified)
             else:
-                reason=('QR presente, pero sin firma o sesión verificable.'
-                        if found_qr else 'No se pudo leer ningún QR firmado.')
-                items.append({'pagina':idx+1,'sesion_id':None,
-                              'estado':'sin_identificar','diagnostico':reason})
+                items.append({
+                    'pagina':idx+1,'sesion_id':None,'estado':'sin_identificar',
+                    'diagnostico':(
+                        'QR presente pero sin token o firma verificables.'
+                        if seen else 'No se pudo leer un QR firmado.'),
+                })
     finally:
         doc.close()
     groups={}
