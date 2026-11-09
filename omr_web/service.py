@@ -520,7 +520,10 @@ class WebService:
                             error=?,actualizado=? WHERE id=?""",
                             (str(exc)[:550],utcnow(),row["id"]))
         finally:
-            self._wake_lock.release()
+            # En operación normal wake() adquirió el lock. Las pruebas y
+            # recuperación explícita permiten ejecutar la cola sin executor.
+            if self._wake_lock.locked():
+                self._wake_lock.release()
             # Si llegó un trabajo justo después de comprobar la cola vacía,
             # su add_job no pudo adquirir el candado. Volver a despertarla.
             if self._executor:
