@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from types import SimpleNamespace
 import tkinter as tk
+from tkinter import ttk
 import pytest
 
 
@@ -79,7 +80,7 @@ def test_inicio_presenta_una_sola_ventana_y_tres_modalidades():
         editor = studios[0]
         assert editor.winfo_viewable()
         controls = list(_descendants(editor))
-        radios = [w for w in controls if isinstance(w, __import__("tkinter").ttk.Radiobutton)]
+        radios = [w for w in controls if isinstance(w, ttk.Radiobutton)]
         labels = [w.cget("text") for w in radios]
         assert any(label.startswith("Normal") for label in labels)
         assert any(label.startswith("Ecológico") for label in labels)
