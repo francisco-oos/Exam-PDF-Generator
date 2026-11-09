@@ -67,6 +67,16 @@ def test_seguridad_login_csrf_roles_y_asignaciones(server):
         login=reviewer.post("/api/login",json={
             "usuario":"captura1","password":"ClaveCapturaSegura1234"})
         assert login.status_code==200
+        # Una contraseña temporal NO autoriza consultar aplicaciones.
+        assert reviewer.get("/api/applications").status_code==403
+        changed=reviewer.post("/api/change-password",
+            headers={"X-CSRF-Token":reviewer.cookies.get("omr_csrf")},
+            json={"anterior":"ClaveCapturaSegura1234",
+                  "nueva":"ClaveCapturaDefinitiva1234!"})
+        assert changed.status_code==200,changed.text
+        login=reviewer.post("/api/login",json={
+            "usuario":"captura1","password":"ClaveCapturaDefinitiva1234!"})
+        assert login.status_code==200
         assert reviewer.get("/api/applications").json()[0]["id"]==sid
         assert reviewer.get("/api/users").status_code==403
         assert reviewer.post("/api/applications",json={},headers={
@@ -96,7 +106,13 @@ def make_pending(svc,sid=None):
 def user_for(svc,username,password,role, sid,admin):
     uid=svc.add_user(admin,username,username,password,role)
     svc.assign(admin,uid,sid)
+    # El primer acceso obliga a reemplazar la contraseña temporal;
+    # la prueba ejercita el mismo proceso que se exige a una persona real.
     token,csrf,u=svc.login(username,password)
+    current=svc.authenticate(token)
+    permanent=password+"Nueva!"
+    svc.change_password(current,password,permanent)
+    token,csrf,u=svc.login(username,permanent)
     return svc.authenticate(token),token,csrf
 
 
