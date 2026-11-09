@@ -938,7 +938,14 @@ class OMRApp:
             date=session['creada'][:16].replace('T',' ')
             # La evaluación es el padre; la aplicación es la emisión de
             # folios, no otra copia del mismo cuestionario.
-            name=(f'Aplicación {date} · folios {session["cantidad_participantes"]}'
+            parent_name=next(
+                (exam['nombre'] for exam in exams
+                 if exam['id']==session.get('cuestionario_id')),None)
+            custom=(session.get('nombre_evaluacion') and
+                    session['nombre_evaluacion']!=parent_name)
+            name=(f'Aplicación {date} · '
+                  + (f'{title} · ' if custom else '')
+                  + f'{session["cantidad_participantes"]} folios'
                   if parent else
                   f'{title} · aplicación histórica {date}')
             mode={'normal':'Normal + QR','ecologico':'Ecológico + QR',
