@@ -650,9 +650,11 @@ class OMRApp:
         tk.Label(c,text=f'PROMEDIO DE VALIDADOS: {report["promedio"] if report["promedio"] is not None else "—"}%  ·  '
                         f'Validados {report["validados"]}  ·  Pendientes {report["pendientes"]}  ·  Ausentes {report["ausentes"]}',
                   bg=WHITE,fg=NAVY,font=('Segoe UI',12,'bold')).pack(anchor='w')
-        listing=self._table(['ID','Nombre','Aciertos','Porcentaje','Estado'],
-                    [(p['id'],p['nombre'],f'{p["aciertos"]}/{p["preguntas"]}' if p['aciertos'] is not None else '—',
-                    str(p['porcentaje'])+'%' if p['porcentaje'] is not None else '—',p['estado']) for p in report['participantes']])
+        listing=self._table(['ID','Folio','Nombre','Aciertos','Porcentaje','Estado'],
+                    [(p['id'],p['folio'],p['nombre'],
+                      f'{p["aciertos"]}/{p["preguntas"]}' if p['aciertos'] is not None else '—',
+                      str(p['porcentaje'])+'%' if p['porcentaje'] is not None else '—',
+                      p['estado']) for p in report['participantes']])
         breakdown=tk.StringVar(value='Selecciona una persona para ver sus temas.')
         tk.Label(self.stage,textvariable=breakdown,bg=LIGHT,fg=INK,font=('Segoe UI',10),wraplength=860,justify='left').pack(anchor='w',pady=7)
         def show_detail(_event):
@@ -663,6 +665,15 @@ class OMRApp:
             breakdown.set(person['nombre']+': '+ ' · '.join(f'{n}: {v["aciertos"]}/{v["preguntas"]} ({v["porcentaje"]}%)'
                   for n,v in person['temas'].items()) if person['temas'] else 'Sin calificación validada.')
         listing.bind('<<TreeviewSelect>>',show_detail)
+        focus=getattr(self,'history_selected_person',None)
+        if focus:
+            for row_id in listing.get_children():
+                if listing.item(row_id,'values')[0]==focus:
+                    listing.selection_set(row_id)
+                    listing.see(row_id)
+                    show_detail(None)
+                    break
+            self.history_selected_person=None
         self._note('GRUPO · DESEMPEÑO POR TEMA: '+ '   ·   '.join(f'{n}: {v["porcentaje"] if v["porcentaje"] is not None else "—"}%'
                    for n,v in report['temas'].items()))
 
@@ -745,7 +756,31 @@ class OMRApp:
                 values=(mode,session['cantidad_participantes'],
                         session.get('hojas_escaneadas',0),
                         session.get('hojas_pendientes',0),
-                        session['creada'][:16].replace('T',' ')))
+                        session['creada'][:16].replace('T',' ')),open=False)
+            # Folios bajo la aplicación que los emitió: no son exámenes
+            # separados. Los estados provienen de la misma BD OMR.
+            data=self.store.session(sid)
+            by_token={}
+            for scan in self.store.pages(sid):
+                if scan['token']:
+                    by_token.setdefault(scan['token'],[]).append(scan['estado'])
+            for participant in data['personal']:
+                states=by_token.get(participant['token'],[])
+                if not states:
+                    scan_status='Sin escanear'
+                elif 'duplicado' in states:
+                    scan_status='Duplicado'
+                elif 'sin_identificar' in states or 'revisar' in states:
+                    scan_status='En revisión'
+                elif states.count('validada')==1:
+                    scan_status='Validado'
+                else:
+                    scan_status='Verificar'
+                tree.insert('session:'+sid,'end',
+                    iid='folio:'+sid+':'+participant['id'],
+                    text=participant['nombre']+' · '+participant['folio'],
+                    values=('Folio / QR',participant['id'],
+                            str(len(states)),scan_status,''))
         if not exams and not sessions:
             self._note('Todavía no hay evaluaciones guardadas. Diseña el examen, '
                        'ponle un nombre y genera los documentos.')
@@ -772,13 +807,18 @@ class OMRApp:
                 self.return_to_generator()
                 self.on_open_exam(exam_id)
                 return
-            sid=selected.split(':',1)[1]
+            folio_person=None
+            if selected.startswith('folio:'):
+                _,sid,folio_person=selected.split(':',2)
+            else:
+                sid=selected.split(':',1)[1]
             try:
                 session=self.store.session(sid)
             except ValueError as exc:
                 messagebox.showerror('Sesión inválida',str(exc),parent=self.window)
                 return
             self.session_id=sid
+            self.history_selected_person=folio_person
             self.mode.set(session['modo'])
             self.title.set(session['titulo'])
             self.paper.set(session['papel'])
