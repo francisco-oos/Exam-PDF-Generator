@@ -212,6 +212,8 @@ def test_historial_unido_por_id_y_nombre_sin_duplicar_examen(tmp_path):
                   if isinstance(w,ttk.Treeview))
         assert tree.item('exam:'+exam_id,'text')=='Seguridad operativa - personal'
         assert tree.parent('session:'+sid)=='exam:'+exam_id
+        assert tree.parent('folio:'+sid+':000001')=='session:'+sid
+        assert 'EX-' in tree.item('folio:'+sid+':000001','text')
         assert 'Seguridad operativa - personal' in tree.item(
             'session:'+sid,'text')
         assert tree.set('session:'+sid,'Participantes')=='1'
