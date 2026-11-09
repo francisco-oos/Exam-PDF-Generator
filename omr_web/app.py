@@ -247,6 +247,57 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             raise WebError("No existe la imagen archivada.",404)
         return FileResponse(path,media_type="image/png")
 
+    @web.get("/api/sheets/{sheet_id}/overlay")
+    def sheet_overlay(sheet_id:str,pregunta:int=1,acetato:bool=False,
+                      user=Depends(user_of)):
+        """Resalta el reactivo, nunca modifica el PDF ni el PNG original.
+
+        El acetato con respuestas CORRECTAS está reservado a coordinador/admin;
+        el capturista solo ve la zona de burbujas.
+        """
+        detail=engine.get_sheet(user,sheet_id)
+        if not 1<=pregunta<=len(detail["preguntas"]):
+            raise WebError("Reactivo fuera de rango.")
+        if acetato:
+            engine.require(user,roles={"admin","coordinador"})
+        from omr_evaluaciones.motor import render_review_with_acetato
+        import cv2
+        from io import BytesIO
+        from PIL import Image
+        with engine.store.connect() as db:
+            image_path=db.execute("SELECT imagen FROM hojas WHERE id=?",
+                                  (sheet_id,)).fetchone()["imagen"]
+        source=Path(image_path).resolve()
+        if not source.is_relative_to((engine.store.root/"escaneos").resolve()):
+            raise WebError("La evidencia no está en la carpeta permitida.",403)
+        bitmap=cv2.imread(str(source))
+        if bitmap is None:
+            raise WebError("No se pudo recuperar el escaneo.",404)
+        sess=engine.store.session(detail["sesion_id"])
+        try:
+            picture=render_review_with_acetato(
+                bitmap,sess["papel"],sess["preguntas"],
+                show_acetato=acetato,issue_numbers=[pregunta],
+                already_aligned=True)
+        except ValueError as exc:
+            raise WebError(str(exc),422) from exc
+        picture.thumbnail((1400,1900))
+        stream=BytesIO()
+        picture.save(stream,format="JPEG",quality=80)
+        return Response(stream.getvalue(),media_type="image/jpeg")
+
+    @web.post("/api/documents/{digest}/pages/{page}/link")
+    def link_pending(digest:str,page:int,data:dict,user=Depends(write_user)):
+        engine.require(user,roles={"admin"})
+        sid=str(data.get("sesion_id",""))
+        engine.store.session(sid)
+        name=engine.inbox.bind_manual_pending(
+            digest,page,sid,str(data.get("id","")),
+            str(data.get("folio","")),user["nombre"],
+            str(data.get("motivo","")))
+        return {"nombre":name,"estado":"manual_pendiente",
+                "aviso":"Revisar TODOS los reactivos antes de calificar."}
+
     @web.post("/api/sheets/{sheet_id}/claim")
     def claim(sheet_id:str,user=Depends(write_user)):
         return engine.claim(user,sheet_id)
