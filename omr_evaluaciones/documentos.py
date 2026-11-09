@@ -387,6 +387,11 @@ class DocumentInbox:
                 os.replace(tmp,output)
             finally:
                 tmp.unlink(missing_ok=True)
+        output_hash=sha_file(output)
+        with self.store.connect() as db:
+            for digest in sorted({item[0] for item in entries}):
+                self._event(db,digest,None,'pdf_organizado','Operador OMR',
+                            f'{len(entries)} páginas en derivado SHA-256 {output_hash}')
         return output
 
     def repair_copy(self, digest, target):
@@ -417,6 +422,9 @@ class DocumentInbox:
             os.replace(temp,target)
         finally:
             temp.unlink(missing_ok=True)
+        with self.store.connect() as db:
+            self._event(db,digest,None,'copia_reparada','Operador OMR',
+                        'Derivado SHA-256 '+sha_file(target))
         return target
 
     def render_page(self, digest, index, *, scale=0.9, rotate=0):
