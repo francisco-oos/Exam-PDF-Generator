@@ -19,7 +19,7 @@ NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
 class OMRApp:
     def __init__(self,parent=None,db_root=None, *,
                  questions=None, title=None, paper=None, source=None,
-                 on_return=None):
+                 on_return=None, start_page='Inicio'):
         self.parent = parent
         self.on_return = on_return
         self.window=tk.Toplevel(parent) if parent is not None else tk.Tk()
@@ -29,6 +29,16 @@ class OMRApp:
         self.window.geometry(f'{w}x{h}')
         self.window.minsize(930,590)
         self.window.configure(bg=LIGHT)
+        # Espacio dedicado a la calificación: se maximiza para revisar
+        # escaneos y evidencias sin tener el editor PDF detrás.
+        try:
+            self.window.state('zoomed')
+        except tk.TclError:
+            try:
+                self.window.attributes('-zoomed', True)
+            except tk.TclError:
+                self.window.geometry(
+                    f'{self.window.winfo_screenwidth()}x{self.window.winfo_screenheight()}+0+0')
         self.store=OMRStore(db_root or Path(__file__).resolve().parents[1]/'datos'/'omr')
         self.session_id=None
         self.mode=tk.StringVar(value='personalizado')
@@ -52,7 +62,8 @@ class OMRApp:
         self._layout()
         self.mode.trace_add('write',lambda *_:self._refresh_navigation())
         self._refresh_navigation()
-        self.navigate('Inicio')
+        self.window.protocol('WM_DELETE_WINDOW', self.return_to_generator)
+        self.navigate(start_page if start_page in ('Inicio', 'Historial') else 'Inicio')
 
     def _layout(self):
         sidebar=tk.Frame(self.window,bg=NAVY,width=232)
@@ -82,21 +93,16 @@ class OMRApp:
         self.stage.pack(fill='both',expand=True)
 
     def return_to_generator(self):
-        """Devuelve al generador integral sin perder lo abierto en la ventana padre."""
-        if self.parent is None or not self.parent.winfo_exists():
-            messagebox.showinfo('Diseño e impresión',
-                'Abre Iniciar_Windows.bat para usar el diseñador, '
-                'la vista PDF real y la generación de cuadernillos.',
-                parent=self.window)
-            return
+        """Vuelve al diseñador existente, también cuando se cierra con la X."""
         self.window.destroy()
-        self.parent.deiconify()
-        self.parent.lift()
-        self.parent.focus_force()
         if self.on_return is not None:
-            # Si el usuario venía del editor PDF completo, devolverlo allí;
-            # no obligarlo a buscar otra vez el botón de diseño.
+            # La aplicación principal decide qué ventana restaurar. No mostrar
+            # la raíz oculta: causaría las dos ventanas que se quieren eliminar.
             self.on_return()
+        elif self.parent is not None and self.parent.winfo_exists():
+            self.parent.deiconify()
+            self.parent.lift()
+            self.parent.focus_force()
 
     def _refresh_navigation(self):
         all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']
@@ -488,6 +494,11 @@ class OMRApp:
     def _history(self):
         self._heading('Historial de aplicaciones','Abre una sesión guardada para ver hojas, calificaciones e incidencias sin repetir el escaneo.')
         sessions=self.store.sessions()
+        if not sessions:
+            self._note('Todavía no hay sesiones registradas. Prepara hojas con folio y QR '
+                       'desde Inicio para poder escanearlas y calificar.')
+        self._btn(self.stage, 'Nueva aplicación con folio y QR',
+                  lambda: self.navigate('Inicio'))
         tree=self._table(['ID','Evaluación','Modalidad','Formato','Fecha'],
             [(s['id'],s['titulo'],s['modo'],s['papel'],s['creada'][:16]) for s in sessions])
         def reopen():
@@ -502,9 +513,9 @@ class OMRApp:
         self._btn(self.stage,'Abrir sesión seleccionada',reopen,True)
 
 def launch(parent=None, *, questions=None, title=None, paper=None, source=None,
-           on_return=None):
+           on_return=None, start_page='Inicio'):
     """Abre la calificación dentro del generador y hereda preguntas si existen."""
     app=OMRApp(parent=parent,questions=questions,title=title,paper=paper,
-               source=source,on_return=on_return)
+               source=source,on_return=on_return,start_page=start_page)
     if parent is None:app.window.mainloop()
     return app
