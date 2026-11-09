@@ -510,15 +510,19 @@ class OMRApp:
         self._heading('Historial de aplicaciones','Abre una sesión guardada para ver hojas, calificaciones e incidencias sin repetir el escaneo.')
         sessions=self.store.sessions()
         if self.review_only:
-            sessions=[x for x in sessions if x['modo']=='personalizado']
+            sessions=[x for x in sessions if x.get('cantidad_participantes',0)>0]
         if not sessions:
-            self._note('Aún no hay evaluaciones con folio y QR. Desde Diseñar e imprimir '
-                       'carga una lista, selecciona Folio + QR y genera los PDFs.')
+            self._note('Aún no hay evaluaciones con personal. Desde Diseñar e imprimir '
+                       'elige Normal o Ecológico, carga una lista y genera los PDFs: '
+                       'sus hojas llevarán QR automáticamente.')
         if not self.review_only:
             self._btn(self.stage, 'Nueva aplicación con folio y QR',
                       lambda: self.navigate('Inicio'))
         tree=self._table(['ID','Evaluación','Modalidad','Formato','Fecha'],
-            [(s['id'],s['titulo'],s['modo'],s['papel'],s['creada'][:16]) for s in sessions])
+            [(s['id'],s['titulo'],
+              {'normal':'Normal + QR','ecologico':'Ecológico + QR',
+               'personalizado':'QR (histórico)'}.get(s['modo'],s['modo']),
+              s['papel'],s['creada'][:16]) for s in sessions])
         def reopen():
             sel=tree.selection()
             if not sel:return
