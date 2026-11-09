@@ -127,8 +127,12 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
             ttk.Button(settings_inner, text=title, command=action).grid(sticky='ew', columnspan=2, pady=3)
 
     # El acceso a calificación está en el menú superior, no duplicado en el formulario.
-    section('01 · Texto de portada', 'Cambia el título y observa el encabezado del cuadernillo.')
-    field('Título de la evaluación', variables['titulo'])
+    section('01 · Identificación y portada',
+            'El nombre identifica la evaluación en Biblioteca e Historial; '
+            'el título se imprime en el cuadernillo.')
+    if 'nombre_evaluacion' in variables:
+        field('Nombre de la evaluación (para el historial)', variables['nombre_evaluacion'])
+    field('Título que se imprime en el examen', variables['titulo'])
     field('Subtítulo', variables['subtitulo'])
     field('Empresa / institución', variables['empresa'])
     field('Área o público', variables['grupo'])
