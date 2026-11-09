@@ -29,8 +29,8 @@ if not exist ".venv\Scripts\python.exe" (
         exit /b 1
     )
 )
-REM Validar tambien PDFium para actualizar un .venv ya creado en versiones previas.
-".venv\Scripts\python.exe" -c "import importlib.metadata as m; assert m.version('openpyxl') == '3.1.5'; assert m.version('reportlab') == '5.1.0'; assert m.version('pypdfium2') == '5.15.1'" >nul 2>&1
+REM Validar tambien la bandeja PDF al actualizar entornos de versiones previas.
+".venv\Scripts\python.exe" -c "import pypdf; import importlib.metadata as m; assert m.version('openpyxl') == '3.1.5'; assert m.version('reportlab') == '5.1.0'; assert m.version('pypdfium2') == '5.15.1'" >nul 2>&1
 if errorlevel 1 (
     echo [2/3] Instalando las dependencias solo en este entorno...
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt

@@ -254,3 +254,26 @@ El PR se mantiene **en borrador**, sin fusionar con la rama base ni con
 `main`, hasta que Codex del compañero registre pruebas físicas F01–F16
 y se resuelvan los problemas encontrados. Documentar cambios en este
 mismo archivo, sin crear múltiples documentos paralelos de relevo.
+
+## 9. Seguimiento Windows — 2026-11-09
+
+### Tanda 1: instalación limpia y actualización del iniciador
+
+- Clon limpio en Windows, Python 3.13, base `7947347`, rama de este PR.
+- `Iniciar_Windows.bat --verificar`: crea el entorno, instala dependencias
+  básicas/OMR y genera documentos correctamente.
+- Suite inicial: **154 aprobadas, 3 omitidas**, 54.78 s.
+- Fallo reproducido retirando solamente `pypdf` del entorno de prueba:
+  el BAT anunciaba verificación correcta, pero importar la interfaz OMR
+  fallaba con `ModuleNotFoundError`. La comprobación antigua solo validaba
+  openpyxl, reportlab y PDFium, omitiendo la nueva bandeja.
+- Corrección mínima: comprobar también la importación de `pypdf` antes
+  de decidir si instalar requirements.txt. Regresión ejecutada en rojo/verde.
+- Verificación posterior: el BAT reinstala pypdf automáticamente, genera
+  PDFs e importa la interfaz OMR. Suite iniciador + bandeja + Tk:
+  **16 aprobadas**, 14.78 s.
+- Datos exclusivamente ficticios; salidas y logs locales ignorados por Git.
+- CI del commit base: Windows/Linux Python 3.11/3.12/3.13 y Docker aprobados
+  (Actions run 42712304947). Docker local no tiene el motor en ejecución.
+- Aceptación física F01–F16 y Xerox todavía pendiente; los resultados
+  anteriores son automáticos/sintéticos, no certifican papel ni lápiz real.
