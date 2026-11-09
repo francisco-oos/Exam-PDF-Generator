@@ -16,6 +16,8 @@ from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
                     export_report,PAPERS,bubble_positions,RENDER_DPI,
                     render_review_with_acetato,inspect_pdf_sessions)
 from .demo import create_synthetic_scan
+from .documentos import DocumentInbox
+from .expedientes import export_session_bundle,participant_receipt
 
 NAVY='#132e40';INK='#243e4c';TEAL='#0b7988';LIGHT='#eff4f6';WHITE='#ffffff'
 def review_question_options(questions):
@@ -101,6 +103,7 @@ class OMRApp:
                 self.window.geometry(
                     f'{self.window.winfo_screenwidth()}x{self.window.winfo_screenheight()}+0+0')
         self.store=OMRStore(db_root or Path(__file__).resolve().parents[1]/'datos'/'omr')
+        self.inbox=DocumentInbox(self.store)
         self.session_id=None
         self.mode=tk.StringVar(value='personalizado')
         self.paper=tk.StringVar(value=paper if paper in PAPERS else 'Carta')
@@ -134,7 +137,7 @@ class OMRApp:
         tk.Label(sidebar,text='Escanea · Revisa · Entrega' if self.review_only else
                  'Diseña · Aplica · Califica',bg=NAVY,fg=WHITE,
                  font=('Segoe UI',11,'bold')).pack(anchor='w',padx=21,pady=(0,17))
-        for item in ['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']:
+        for item in ['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial','Bandeja PDF']:
             b=tk.Button(sidebar,text=item,anchor='w',bd=0,highlightthickness=0,bg=NAVY,fg='#dae6ea',
                 activebackground='#1e5360',activeforeground=WHITE,font=('Segoe UI',10),padx=21,pady=12,
                 command=lambda v=item:self.navigate(v))
@@ -171,8 +174,8 @@ class OMRApp:
             self.parent.focus_force()
 
     def _refresh_navigation(self):
-        all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial']
-        active=(['Historial','Escanear PDF','Revisión','Resultados','Excel de entrega']
+        all_items=['Inicio','Participantes','Hojas con QR','Escanear PDF','Revisión','Resultados','Excel de entrega','Historial','Bandeja PDF']
+        active=(['Historial','Escanear PDF','Bandeja PDF','Revisión','Resultados','Excel de entrega']
                 if self.review_only else
                 (['Inicio','Historial'] if self.mode.get() in ('tradicional','ecologico')
                  else all_items))
@@ -211,7 +214,8 @@ class OMRApp:
         for item,b in self.buttons.items():b.configure(bg='#1c5163' if item==page else NAVY)
         pages={'Inicio':self._home,'Participantes':self._roster,'Hojas con QR':self._paper,
             'Escanear PDF':self._scanner,'Revisión':self._review,'Resultados':self._results,
-            'Excel de entrega':self._export,'Historial':self._history}
+            'Excel de entrega':self._export,'Historial':self._history,
+            'Bandeja PDF':self._documents}
         pages[page]()
 
     def _home(self):
@@ -353,6 +357,8 @@ class OMRApp:
                        'selecciona la sesión manualmente desde Historial.')
         c=self._card()
         self._btn(c,'Cargar PDF escaneado',self.load_scanned,True)
+        self._btn(c,'Abrir bandeja documental',
+                  lambda:self.navigate('Bandeja PDF'))
         self._note('Antes de calificar, se verifican los QR de TODAS las páginas. '
                    'Si hay hojas de diferentes evaluaciones, se mostrarán '
                    'las páginas de cada una y podrás confirmar su separación. '
