@@ -10,6 +10,7 @@ from pathlib import Path
 from queue import Queue, Empty
 from threading import Thread
 from PIL import Image,ImageTk,ImageDraw
+import cv2
 
 from .motor import (OMRStore,read_roster,create_forms_pdf,scan_document,
                     export_report,PAPERS,bubble_positions,RENDER_DPI,
@@ -381,7 +382,11 @@ class OMRApp:
         self.feedback.set('Verificando los QR de todas las hojas y sus evaluaciones…')
         def inspect():
             try:
-                result=inspect_pdf_sessions(self.store,Path(source))
+                result=inspect_pdf_sessions(
+                    self.store,Path(source),
+                    progress=lambda i,n:self.scan_updates.put(
+                        ('progress',source,f'Identificando QR: hoja {i} de {n}…')),
+                )
                 self.scan_updates.put(('preflight',source,result))
             except Exception as exc:
                 self.scan_updates.put(('error',source,str(exc)))
@@ -393,7 +398,12 @@ class OMRApp:
         def work():
             processed=[]
             try:
-                for group in inspection['grupos']:
+                for step,group in enumerate(inspection['grupos'],1):
+                    self.scan_updates.put((
+                        'progress',source,
+                        f'Calificando evaluación {step} de '
+                        f'{len(inspection["grupos"])}: {group["evaluacion"]}…',
+                    ))
                     sid=group['sesion_id']
                     # Convertir páginas visibles (1-based) a índices PDF (0-based).
                     indices=[number-1 for number in group['paginas']]
@@ -419,6 +429,11 @@ class OMRApp:
         except Empty:
             if self.window.winfo_exists():
                 self.window.after(120,self._finish_scan)
+            return
+
+        if status=='progress':
+            self.feedback.set(str(payload))
+            self.window.after(120,self._finish_scan)
             return
 
         if status=='error':
@@ -919,9 +934,13 @@ class OMRApp:
         for session in sessions:
             sid=session['id']
             parent=known.get(session.get('cuestionario_id'),'')
-            name=session.get('nombre_evaluacion') or session['titulo']
-            if not session.get('nombre_evaluacion'):
-                name += ' · histórica '+sid[:8]
+            title=session.get('nombre_evaluacion') or session['titulo']
+            date=session['creada'][:16].replace('T',' ')
+            # La evaluación es el padre; la aplicación es la emisión de
+            # folios, no otra copia del mismo cuestionario.
+            name=(f'Aplicación {date} · folios {session["cantidad_participantes"]}'
+                  if parent else
+                  f'{title} · aplicación histórica {date}')
             mode={'normal':'Normal + QR','ecologico':'Ecológico + QR',
                   'personalizado':'QR (anterior)'}.get(
                       session['modo'],session['modo'])
