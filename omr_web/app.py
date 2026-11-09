@@ -81,6 +81,9 @@ class EditPayload(BaseModel):
 
 
 def create_app(data_dir: Path | None = None, *, start_workers=True):
+    if os.getenv("OMR_WEB_MODE","pilot")!="pilot":
+        raise RuntimeError(
+            "La licencia central no está integrada: modo producción bloqueado.")
     root = Path(data_dir or os.getenv("OMR_WEB_DATA", "datos"))
     web = FastAPI(title="OMR · Centro de control", version="0.1.0")
     engine = WebService(root, start_workers=start_workers)
@@ -275,6 +278,10 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     @web.get("/api/applications/{sid}/sheets")
     def list_sheets(sid: str,todos:bool=False,user=Depends(user_of)):
         return engine.list_sheets(user,sid,include_done=todos)
+
+    @web.post("/api/applications/{sid}/claim-next")
+    def claim_next(sid:str,user=Depends(write_user)):
+        return engine.claim_next(user,sid)
 
     @web.get("/api/sheets/{sheet_id}")
     def sheet(sheet_id: str,user=Depends(user_of)):
