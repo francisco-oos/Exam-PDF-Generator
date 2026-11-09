@@ -82,22 +82,23 @@ def test_inicio_presenta_una_sola_ventana_y_tres_modalidades():
         controls = list(_descendants(editor))
         radios = [w for w in controls if isinstance(w, ttk.Radiobutton)]
         labels = [w.cget("text") for w in radios]
-        assert any(label.startswith("Normal") for label in labels)
+        assert any(label.startswith("Tradicional") for label in labels)
         assert any(label.startswith("Ecológico") for label in labels)
         assert any(label.startswith("Con folio y QR") for label in labels)
 
-        qr_button = next(w for w in controls
-            if isinstance(w, tk.Button) and w.cget("text") == "Preparar hojas con folio y QR")
-        normal = next(w for w in radios if w.cget("text").startswith("Normal"))
+        normal = next(w for w in radios if w.cget("text").startswith("Tradicional"))
         folio = next(w for w in radios if w.cget("text").startswith("Con folio y QR"))
         normal.invoke()
-        assert qr_button.winfo_manager() == ""
         folio.invoke()
-        assert qr_button.winfo_manager() == "grid"
-
+        # Generar folios forma parte del mismo botón de exportación.
         actions = [w.cget("text") for w in controls if isinstance(w, tk.Button)]
         assert "Calificar y entregar" in actions
-        assert "Generar cuadernillo, respuestas y acetato PDF" in actions
+        assert "Generar PDF de examen" in actions
+        assert "Generar PDFs de la modalidad elegida" in actions
+        assert "Preparar hojas con folio y QR" not in actions
+        text_buttons = [w.cget("text") for w in controls if isinstance(w, ttk.Button)]
+        assert "Cargar lista" in text_buttons
+        assert "Descargar plantilla de participantes" in text_buttons
     finally:
         try:
             root.destroy()
