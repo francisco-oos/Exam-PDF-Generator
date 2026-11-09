@@ -343,8 +343,23 @@ class OMRApp:
             f'Sin identificar: {report["sin_identificar"]} · Duplicadas: {report["duplicadas"]} · '
             f'Reimportadas: {report["repetidas"]} · '
             f'Reprocesadas: {report.get("reprocesadas",0)}')
+        problems=[d for d in report.get('detalles',[])
+                  if d.get('diagnostico') and d.get('estado')=='sin_identificar']
+        if problems:
+            reasons=sorted({d['diagnostico'] for d in problems})
+            summary+=' · Diagnóstico: '+'; '.join(reasons)
         self.feedback.set(summary)
         self.navigate('Revisión')
+        different=sorted({d['sesion_detectada'] for d in problems
+                          if d.get('sesion_detectada')})
+        if different:
+            messagebox.showwarning(
+                'Hojas de otra evaluación',
+                'El QR corresponde a una sesión diferente: '+
+                ', '.join(different)+
+                '. Abre esa evaluación desde Historial antes de volver a importar. '
+                'No se asignaron notas a otra persona.',
+                parent=self.window)
 
     def _table(self,columns,rows,on_select=None):
         frame=tk.Frame(self.stage,bg=LIGHT)
@@ -414,7 +429,11 @@ class OMRApp:
             sel=tree.selection()
             if not sel:return
             selected['id']=sel[0];p=lookup[sel[0]]
-            detail.set(f'{p["estado"].upper()} · página {p["pagina"]+1} · {len(p["dudas"])} observaciones')
+            reasons='; '.join(str(issue.get('razon',''))
+                              for issue in p['dudas'][:2])
+            detail.set(f'{p["estado"].upper()} · página {p["pagina"]+1} · '
+                       f'{len(p["dudas"])} observaciones'+
+                       (f' · {reasons}' if reasons else ''))
             if p['dudas'] and p['dudas'][0].get('pregunta'):
                 question.set(str(p['dudas'][0]['pregunta']))
             try:
