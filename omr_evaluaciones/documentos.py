@@ -262,6 +262,15 @@ class DocumentInbox:
             raise ValueError('Documento original ausente o alterado.')
         return source
 
+    def pages_for_session(self, sid):
+        if not SID_RE.fullmatch(sid):
+            raise ValueError('Aplicación inválida.')
+        with self.store.connect() as db:
+            return [dict(x) for x in db.execute("""
+                SELECT * FROM paginas_documentos_omr WHERE sesion_id=?
+                ORDER BY sha,pagina
+            """,(sid,))]
+
     def events(self, digest=None):
         with self.store.connect() as db:
             sql='SELECT * FROM eventos_documentos_omr'
