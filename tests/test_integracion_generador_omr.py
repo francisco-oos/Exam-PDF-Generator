@@ -333,3 +333,45 @@ def test_selector_de_revision_usa_preguntas_de_sesion_qr_y_guarda_indice_correct
     finally:
         try:parent.destroy()
         except tk.TclError:pass
+
+
+
+def test_alerta_cabos_checadores_muestra_evaluaciones_y_paginas():
+    from omr_evaluaciones.interfaz import describe_scan_inspection
+    inspected={
+        'total_paginas':4,'mezclado':True,
+        'grupos':[
+            {'sesion_id':'aaaaaa111111','evaluacion':'Cabos','paginas':[1,2]},
+            {'sesion_id':'bbbbbb222222','evaluacion':'Checadores','paginas':[3]},
+        ],
+        'no_identificadas':[
+            {'pagina':4,'sesion_id':None,'diagnostico':'QR ilegible'}
+        ],
+    }
+    message=describe_scan_inspection(inspected,'aaaaaa111111')
+    assert 'Cabos' in message and 'página(s) 1, 2' in message
+    assert 'Checadores' in message and 'página(s) 3' in message
+    assert 'OTRA EVALUACIÓN ABIERTA' in message
+    assert 'SIN IDENTIFICAR' in message and 'páginas 4' in message
+    assert 'NO se calificarán automáticamente' in message
+
+
+def test_escaneo_de_usuario_no_muestra_botones_de_simulacion(tmp_path):
+    from omr_evaluaciones.interfaz import OMRApp
+    try:
+        parent=tk.Tk()
+    except tk.TclError as exc:
+        pytest.skip('Entorno sin escritorio Tk: '+str(exc))
+    try:
+        parent.withdraw()
+        app=OMRApp(parent=parent,db_root=tmp_path/'omr',
+                   review_only=True,on_return=lambda:None)
+        app.navigate('Escanear PDF')
+        buttons=[w.cget('text') for w in _descendants(app.stage)
+                 if isinstance(w,tk.Button)]
+        assert 'Cargar PDF escaneado' in buttons
+        assert not any('Simular' in v or 'ficticio' in v for v in buttons)
+        app.return_to_generator()
+    finally:
+        try:parent.destroy()
+        except tk.TclError:pass
