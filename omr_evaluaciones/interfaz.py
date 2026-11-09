@@ -413,7 +413,11 @@ class OMRApp:
                         img=img.crop((max(0,min(xx)-120),max(0,min(yy)-85),
                                     min(img.width,max(xx)+115),min(img.height,max(yy)+90)))
                     except (ValueError,IndexError):pass
-                img.thumbnail((520,540))
+                # Aprovechar el espacio de revisión maximizado sin forzar
+                # reescalado hacia arriba ni alterar el escaneo original.
+                area_width = max(520, min(1150, self.window.winfo_width() - 790))
+                area_height = max(540, min(960, self.window.winfo_height() - 220))
+                img.thumbnail((area_width, area_height))
                 self.photo=ImageTk.PhotoImage(img,master=self.window)
                 image_label.configure(image=self.photo)
             except Exception as exc:detail.set('No se puede mostrar imagen: '+str(exc))
