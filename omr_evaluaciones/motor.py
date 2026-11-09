@@ -333,6 +333,44 @@ class OMRStore:
                 (compact_json(answers),compact_json(issues),status,page_id))
             db.execute('INSERT INTO revisiones(hoja_id,pregunta,decision,motivo,revisor,fecha) VALUES(?,?,?,?,?,?)',
                 (page_id,question,decision,reason.strip()[:600],reviewer.strip()[:90],utcnow()))
+    def capture_manual_sheet(self,page_id,decisions,reason,reviewer='Evaluador'):
+        """Captura completa y auditada para una hoja identificada, sin OCR ni suposiciones.
+
+        Las hojas sin QR requieren identify_page() (ID + folio exactos)
+        ANTES de guardar respuestas. Ninguna casilla 'sin revisar' se admite.
+        """
+        if not str(reason).strip() or not str(reviewer).strip():
+            raise ValueError('Indica justificación y nombre del evaluador.')
+        if not isinstance(decisions,(list,tuple)):
+            raise ValueError('Especifica todas las respuestas de la hoja.')
+        valid={'A','B','C','D','BLANCO'}
+        if any(choice not in valid for choice in decisions):
+            raise ValueError('Revisa todos los reactivos; usa BLANCO si no contestó.')
+        with self.connect() as db:
+            page=db.execute('SELECT * FROM hojas WHERE id=?',(page_id,)).fetchone()
+            if page is None:
+                raise ValueError('No existe la hoja seleccionada.')
+            if page['token'] is None:
+                raise ValueError('Primero identifica por ID y folio; no se asignan '
+                                 'respuestas a personas desconocidas.')
+            if page['estado'] in ('duplicado','descartada'):
+                raise ValueError('Resuelve antes la hoja duplicada o descartada.')
+            row=db.execute('SELECT preguntas_json FROM sesiones WHERE id=?',
+                           (page['sesion_id'],)).fetchone()
+            n=len(json.loads(row['preguntas_json']))
+            if len(decisions)!=n:
+                raise ValueError(f'Se requieren {n} respuestas verificadas.')
+            values=[None if choice=='BLANCO' else choice for choice in decisions]
+            db.execute('UPDATE hojas SET respuestas_json=?,dudas_json=?,estado=? WHERE id=?',
+                       (compact_json(values),'[]','validada',page_id))
+            db.executemany('''
+                INSERT INTO revisiones(hoja_id,pregunta,decision,motivo,revisor,fecha)
+                VALUES(?,?,?,?,?,?)
+            ''',[(page_id,k,decision,
+                  reason.strip()[:600],reviewer.strip()[:90],utcnow())
+                 for k,decision in enumerate(decisions,1)])
+        return n
+
     def identify_page(self,page_id,person_id,printed_folio,reason,reviewer='Evaluador'):
         '''Asocia una hoja sin QR solo tras verificar físicamente ID y folio.
 
