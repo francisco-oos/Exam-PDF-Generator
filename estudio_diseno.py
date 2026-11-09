@@ -160,7 +160,7 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
         ttk.Button(settings_inner, text='Elegir logotipo…', command=choose_logo).grid(sticky='ew', columnspan=2)
 
     section('02 · Participantes (opcional)',
-            'Carga una sola lista para identificar los documentos. Sin lista se genera examen genérico.')
+            'Con lista: QR y folio automáticos en AMBOS modos. Sin lista: nombre manuscrito, sin QR.')
     if 'lista_personal' in variables:
         tk.Label(settings_inner, text='Lista de participantes (CSV o XLSX)',
                  bg=WHITE, fg=NAVY).grid(sticky='w', columnspan=2)
@@ -183,15 +183,14 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
                      fg=LABEL,wraplength=300,justify='left').grid(
                          sticky='w',columnspan=2,pady=(1,6))
 
-    section('03 · Modalidad de impresión',
-            'Un único cuestionario; solo cambia cuántos cuadernillos y hojas imprimir.')
+    section('03 · Modalidad de cuadernillo',
+            'Solo cambia el cuadernillo. La lista activa automáticamente folios y QR en cualquiera de los dos modos.')
     exam_type = variables.get('modo_examen') or tk.StringVar(master=window,
         value='ecologico' if variables['reutilizable'].get() else 'normal')
     type_help = tk.StringVar(master=window)
     type_options = (
-        ('normal', 'Tradicional · cuadernillo y hoja de respuestas'),
+        ('normal', 'Normal · cuadernillo por persona si hay lista'),
         ('ecologico', 'Ecológico · un cuadernillo reutilizable'),
-        ('folio', 'Con folio y QR · hojas para calificar con escáner'),
     )
     for code,label in type_options:
         ttk.Radiobutton(settings_inner,text=label,variable=exam_type,
@@ -205,19 +204,17 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
         reusable=mode!='normal'
         if variables['reutilizable'].get()!=reusable:
             variables['reutilizable'].set(reusable)
-        descriptions={
-            'normal': 'Con lista: cuadernillo y hoja para cada persona. '
-                      'Sin lista: documentos sin identificación.',
-            'ecologico': 'Un cuadernillo reutilizable. Con lista: una hoja '
-                         'de respuestas identificada por participante.',
-            'folio': 'Con lista: folio, QR y marcas de registro en la misma '
-                     'hoja del examen, lista para escanear. Sin lista: PDF genérico sin QR.',
-        }
-        type_help.set(descriptions.get(mode,''))
+        hay_lista=bool(variables.get('lista_personal') and
+                       variables['lista_personal'].get().strip())
+        modo = ('Un cuadernillo reutilizable para el grupo.' if mode=='ecologico'
+                else 'Un cuadernillo por participante.' if hay_lista
+                else 'Un cuadernillo normal genérico.')
+        hoja = (' Cada hoja llevará nombre, folio y QR para escáner o acetato.'
+                if hay_lista else
+                ' La hoja conserva espacios en blanco, sin QR, para acetato.')
+        type_help.set(modo+hoja)
 
     def sync_type_from_booklet(*_):
-        if exam_type.get()=='folio':
-            return
         expected='ecologico' if variables['reutilizable'].get() else 'normal'
         if exam_type.get()!=expected:
             exam_type.set(expected)
@@ -225,6 +222,9 @@ def open_design_studio(parent: tk.Misc, *, datos_fn, variables: dict,
     traces.append((exam_type,exam_type.trace_add('write',update_type)))
     traces.append((variables['reutilizable'],
                    variables['reutilizable'].trace_add('write',sync_type_from_booklet)))
+    if 'lista_personal' in variables:
+        traces.append((variables['lista_personal'],
+                       variables['lista_personal'].trace_add('write',update_type)))
     update_type()
 
     section('04 · Página y tipografía', 'Ajusta la composición; no modifica las preguntas originales.')
