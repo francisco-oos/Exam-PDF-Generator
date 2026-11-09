@@ -962,7 +962,8 @@ class OMRApp:
             self._btn(self.stage,'Ir a Escanear PDF',
                       lambda:self.navigate('Escanear PDF'),True)
             return
-        selected={'sha':None,'page':None,'order':[],'rotations':{}}
+        selected={'sha':None,'page':None,'order':[],'rotations':{},
+                  'montaje':[]}
         top=tk.Frame(self.stage,bg=LIGHT)
         top.pack(fill='both',expand=True)
         docframe=tk.Frame(top,bg=LIGHT)
@@ -1177,6 +1178,47 @@ class OMRApp:
             ttk.Button(choose,text='Vincular sin calificar',
                        command=confirm).pack(pady=12)
 
+        montage_status=tk.StringVar(value='Montaje: 0 páginas de varios PDF.')
+        tk.Label(self.stage,textvariable=montage_status,bg=LIGHT,
+                 fg=INK).pack(anchor='w',pady=(4,0))
+
+        def add_to_montage(all_pages=False):
+            if selected['sha'] is None:
+                return
+            indices=(selected['order'] if all_pages else
+                     [selected['page']] if selected['page'] is not None else [])
+            selected['montaje'].extend(
+                (selected['sha'],index,selected['rotations'].get(index,0))
+                for index in indices)
+            montage_status.set(
+                f'Montaje: {len(selected["montaje"])} páginas '
+                'de uno o más PDF. Sin cambiar originales.')
+
+        def export_montage():
+            if not selected['montaje']:
+                messagebox.showinfo('Montaje vacío',
+                    'Añade páginas o documentos antes de exportar.',
+                    parent=self.window)
+                return
+            dest=filedialog.asksaveasfilename(
+                parent=self.window,initialfile='PDF_Combinado.pdf',
+                defaultextension='.pdf',filetypes=[('PDF','*.pdf')])
+            if not dest:return
+            try:
+                self.inbox.assemble(selected['montaje'],Path(dest))
+                self.feedback.set(
+                    f'PDF combinado: {len(selected["montaje"])} páginas '
+                    'sin modificar fuentes.')
+                messagebox.showinfo('Montaje exportado',
+                                    'Guardado en:\n'+dest,parent=self.window)
+            except (ValueError,OSError,ImportError) as exc:
+                messagebox.showerror('Error al combinar PDF',
+                                     str(exc),parent=self.window)
+
+        def clear_montage():
+            selected['montaje'].clear()
+            montage_status.set('Montaje: 0 páginas de varios PDF.')
+
         commands=[
             ('Subir página',lambda:rearrange(-1)),
             ('Bajar página',lambda:rearrange(1)),
@@ -1191,6 +1233,15 @@ class OMRApp:
             toolbar.pack(fill='x',pady=1)
             for label,command in commands[start:start+4]:
                 self._btn(toolbar,label,command)
+        montage_toolbar=tk.Frame(self.stage,bg=LIGHT)
+        montage_toolbar.pack(fill='x',pady=1)
+        for label,action in [
+            ('Añadir página al montaje',lambda:add_to_montage()),
+            ('Añadir PDF completo',lambda:add_to_montage(True)),
+            ('Exportar PDF combinado',export_montage),
+            ('Vaciar montaje',clear_montage),
+        ]:
+            self._btn(montage_toolbar,label,action)
         doctree.bind('<<TreeviewSelect>>',choose_doc)
         tree.bind('<<TreeviewSelect>>',show_page)
         doctree.selection_set(documents[0]['sha'])
