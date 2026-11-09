@@ -171,6 +171,17 @@ class OMRStore:
                decision TEXT NOT NULL,motivo TEXT NOT NULL,revisor TEXT NOT NULL,
                fecha TEXT NOT NULL,FOREIGN KEY(hoja_id) REFERENCES hojas(id));
             ''')
+            # Bitácora de cada lote importado: subir páginas en varias fechas
+            # no debe crear otro registro por persona ni perder el PDF original.
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS importaciones_paginas(
+                    sesion_id TEXT NOT NULL, archivo_sha TEXT NOT NULL,
+                    pagina INTEGER NOT NULL, hoja_id TEXT NOT NULL,
+                    accion TEXT NOT NULL, fecha TEXT NOT NULL,
+                    PRIMARY KEY(sesion_id,archivo_sha,pagina),
+                    FOREIGN KEY(sesion_id) REFERENCES sesiones(id)
+                )
+            """)
             # Migración aditiva: sesiones antiguas, escaneos y claves HMAC
             # continúan íntegros. No se fusionan dos bases de datos.
             fields={r['name'] for r in db.execute('PRAGMA table_info(sesiones)')}
@@ -312,51 +323,110 @@ class OMRStore:
                 FROM sesiones s ORDER BY s.creada DESC
             """)]
     def register_page(self,sid,source_sha,page_idx,image,token,answers,uncertain,state):
-        """No recalifica por duplicados; archiva cada página para inspección humana."""
-        if image is None or image.ndim!=3:raise ValueError('Imagen de página inválida.')
+        """Ingesta incremental: idempotente por PDF/página y folio.
+
+        - Mismo PDF/página: repetida, salvo mejora automática de pendientes
+          SIN decisiones humanas, entonces reprocesa en el registro anterior.
+        - Otro PDF con el mismo folio y respuestas/dudas equivalentes: ya
+          registrada, no duplica examen, participante ni trabajo.
+        - Folio idéntico pero respuestas distintas: conflicto duplicado para
+          revisión humana; nunca se reemplaza la calificación anterior.
+        """
+        if image is None or image.ndim!=3:
+            raise ValueError('Imagen de página inválida.')
         entry_id=uuid4().hex
         folder=self.root/'escaneos'/sid
         folder.mkdir(parents=True,exist_ok=True)
         target=folder/(entry_id+'.png')
-        if not cv2.imwrite(str(target),image):raise OSError('No fue posible archivar el escaneo.')
+
+        def archive():
+            if not cv2.imwrite(str(target),image):
+                raise OSError('No fue posible archivar el escaneo.')
+
         with self.connect() as db:
-            existing=db.execute('SELECT id FROM hojas WHERE sesion_id=? AND archivo_sha=? AND pagina=?',(sid,source_sha,page_idx)).fetchone()
-            if existing:
-                # Relectura controlada tras mejorar el algoritmo: una hoja
-                # antigua SIN_IDENTIFICAR puede repararse por HMAC sin importar
-                # el PDF como otra hoja. Las decisiones humanas nunca se pisan.
-                old=db.execute('SELECT * FROM hojas WHERE id=?',(existing['id'],)).fetchone()
-                reviewed=db.execute('SELECT COUNT(*) FROM revisiones WHERE hoja_id=?',
-                                    (existing['id'],)).fetchone()[0]
-                if (old['estado']=='sin_identificar' and old['token'] is None
-                        and token is not None and state in ('validada','revisar')
-                        and reviewed==0):
+            original=db.execute("""
+                SELECT * FROM hojas WHERE sesion_id=? AND archivo_sha=? AND pagina=?
+            """,(sid,source_sha,page_idx)).fetchone()
+            if original:
+                human=db.execute("""
+                    SELECT COUNT(*) FROM revisiones
+                    WHERE hoja_id=? AND revisor!='Motor OMR'
+                """,(original['id'],)).fetchone()[0]
+                prev_doubts=json.loads(original['dudas_json'])
+                better=(
+                    human==0 and token is not None and
+                    state in ('validada','revisar') and
+                    (original['token'] is None or original['token']==token) and
+                    (original['estado']=='sin_identificar' or
+                     (original['estado']=='revisar' and
+                      len(uncertain)<len(prev_doubts)))
+                )
+                if better:
                     other=db.execute("""
-                        SELECT COUNT(*) FROM hojas WHERE sesion_id=? AND token=?
-                        AND id<>? AND estado NOT IN ('descartada','duplicado')
-                    """,(sid,token,existing['id'])).fetchone()[0]
-                    status='duplicado' if other else state
+                        SELECT COUNT(*) FROM hojas
+                        WHERE sesion_id=? AND token=? AND id<>?
+                        AND estado NOT IN ('descartada','duplicado')
+                    """,(sid,token,original['id'])).fetchone()[0]
+                    result='duplicado' if other else state
+                    archive()
                     db.execute("""
                         UPDATE hojas SET token=?,imagen=?,respuestas_json=?,
                         dudas_json=?,estado=? WHERE id=?
                     """,(token,str(target),compact_json(answers),
-                         compact_json(uncertain),status,existing['id']))
+                         compact_json(uncertain),result,original['id']))
                     db.execute("""
-                        INSERT INTO revisiones(hoja_id,pregunta,decision,motivo,revisor,fecha)
+                        INSERT INTO revisiones(
+                            hoja_id,pregunta,decision,motivo,revisor,fecha)
                         VALUES(?,?,?,?,?,?)
-                    """,(existing['id'],None,'RELECTURA_AUTOMATICA',
-                         'QR/HMAC recuperado al reimportar original; evidencia original conservada',
+                    """,(original['id'],None,'RELECTURA_AUTOMATICA',
+                         'Mejora del lector sobre PDF ya importado; '
+                         'se conserva la evidencia anterior',
                          'Motor OMR',utcnow()))
-                    # El PDF original archivado se conserva, así como el
-                    # PNG previo; su ruta antigua ya no es la imagen activa.
-                    return existing['id'],'reprocesada_'+status
-                target.unlink(missing_ok=True)
-                return existing['id'],'repetida'
-            if token and db.execute("SELECT COUNT(*) FROM hojas WHERE sesion_id=? AND token=? AND estado NOT IN ('duplicado','descartada')",(sid,token)).fetchone()[0]>0:
-                state='duplicado'
-            db.execute('INSERT INTO hojas VALUES(?,?,?,?,?,?,?,?,?,?)',
-                (entry_id,sid,token,source_sha,page_idx,str(target),compact_json(answers),compact_json(uncertain),state,utcnow()))
+                    return original['id'],'reprocesada_'+result
+                return original['id'],'repetida'
+            if token:
+                previous=db.execute("""
+                    SELECT * FROM hojas WHERE sesion_id=? AND token=?
+                    AND estado NOT IN ('duplicado','descartada')
+                    ORDER BY creada,id LIMIT 1
+                """,(sid,token)).fetchone()
+                if previous:
+                    old_answers=json.loads(previous['respuestas_json'])
+                    old_doubts=json.loads(previous['dudas_json'])
+                    equivalent=(
+                        list(answers)==old_answers and
+                        {v.get('pregunta') for v in uncertain}==
+                        {v.get('pregunta') for v in old_doubts}
+                    )
+                    if equivalent:
+                        # PDF distinto, pero el MISMO folio/respuestas. El PDF
+                        # fuente está archivado por scan_document; no repetir
+                        # PNG ni crear una segunda hoja en la evaluación.
+                        db.execute("""
+                            INSERT OR IGNORE INTO importaciones_paginas
+                            (sesion_id,archivo_sha,pagina,hoja_id,accion,fecha)
+                            VALUES(?,?,?,?,?,?)
+                        """,(sid,source_sha,page_idx,previous['id'],
+                             'reimportada_sin_cambios',utcnow()))
+                        return previous['id'],'repetida'
+                    state='duplicado'
+            archive()
+            db.execute("""
+                INSERT INTO hojas(
+                    id,sesion_id,token,archivo_sha,pagina,imagen,
+                    respuestas_json,dudas_json,estado,creada)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+            """,(entry_id,sid,token,source_sha,page_idx,str(target),
+                 compact_json(answers),compact_json(uncertain),state,utcnow()))
+            db.execute("""
+                INSERT OR IGNORE INTO importaciones_paginas
+                (sesion_id,archivo_sha,pagina,hoja_id,accion,fecha)
+                VALUES(?,?,?,?,?,?)
+            """,(sid,source_sha,page_idx,entry_id,
+                 'duplicado_conflictivo' if state=='duplicado' else 'nuevo',
+                 utcnow()))
         return entry_id,state
+
     def pages(self,sid):
         with self.connect() as db:
             rows=db.execute('SELECT * FROM hojas WHERE sesion_id=? ORDER BY creada,id',(sid,)).fetchall()
