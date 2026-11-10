@@ -7,7 +7,7 @@ import sys
 import pytest
 
 from omr_web import doctor
-from omr_web.runtime import PROJECT_ROOT, data_directory
+from omr_web.runtime import PROJECT_ROOT, data_directory, config_file
 
 
 def test_piloto_por_defecto_separa_la_base_de_escritorio(monkeypatch):
@@ -47,3 +47,10 @@ def test_doctor_detecta_lan_sin_https(monkeypatch, tmp_path):
     report = doctor.diagnose()
     assert any(r["comprobacion"] == "HTTPS LAN" and r["estado"] == "error"
                for r in report)
+
+
+def test_rutas_de_certificados_relativas_no_dependen_de_cwd(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    assert config_file("datos/omr_web_piloto/omr/certs/server.pem") == (
+        PROJECT_ROOT / "datos/omr_web_piloto/omr/certs/server.pem").resolve()
+    assert config_file(None) is None

@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
-from .runtime import data_directory
+from .runtime import data_directory, config_file
 
 PACKAGES = (
     ("fastapi", "fastapi"),
@@ -97,9 +97,9 @@ def diagnose() -> list[dict[str, str]]:
     except (ValueError, OSError):
         add("Puerto", "error", f"Puerto {port!r} inválido u ocupado")
     if host not in ("127.0.0.1", "localhost", "::1"):
-        cert = os.getenv("OMR_WEB_CERT", "")
-        key = os.getenv("OMR_WEB_KEY", "")
-        ready = bool(cert and key and Path(cert).is_file() and Path(key).is_file())
+        cert = config_file(os.getenv("OMR_WEB_CERT"))
+        key = config_file(os.getenv("OMR_WEB_KEY"))
+        ready = bool(cert and key and cert.is_file() and key.is_file())
         add("HTTPS LAN", "ok" if ready else "error",
             "Certificado y clave local disponibles" if ready else
             "LAN requiere OMR_WEB_CERT y OMR_WEB_KEY válidos")

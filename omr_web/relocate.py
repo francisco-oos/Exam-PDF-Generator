@@ -12,7 +12,6 @@ import hashlib
 import json
 import sqlite3
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .runtime import data_directory
@@ -66,7 +65,9 @@ def plan_relocation(root: Path):
                 authentic = target.is_file() and _checksum(target) == row["sha"]
                 queue("documentos_omr", "ruta", row["sha"], row["ruta"], target,
                       authentic, "Falta PDF original o su SHA no coincide")
-        if "sesiones" in tables:
+        if "sesiones" in tables and any(
+            c[1] == "lote_path" for c in connection.execute("PRAGMA table_info(sesiones)")
+        ):
             for row in connection.execute("SELECT id,lote_path FROM sesiones"):
                 stored = row["lote_path"]
                 if not stored:

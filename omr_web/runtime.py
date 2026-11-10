@@ -21,3 +21,10 @@ def data_directory() -> Path:
     if not location.is_absolute():
         location = PROJECT_ROOT / location
     return location.resolve()
+
+def config_file(path: str | None) -> Path | None:
+    """Los certificados de servicios se resuelven desde el repositorio."""
+    if not path:
+        return None
+    file = Path(path).expanduser()
+    return (file if file.is_absolute() else PROJECT_ROOT / file).resolve()
