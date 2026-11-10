@@ -917,3 +917,144 @@ test_una_reserva_que_vencio_no_resucita_con_heartbeat.
 **Cliente con lease expirado:** la vista de reactivos no debe volver a habilitar Guardar decisión o Captura completa después de cambiar de pregunta si la renovación perdió su reserva. El renderizado calcula reservationActive en cada reconstrucción de la UI, deshabilita las acciones y los manejadores vuelven a verificar el token antes de enviar. El servidor conserva el control definitivo de versiones y responde 409.
 
 **Aplicaciones históricas/manuales/cerradas:** la interfaz no muestra enlaces de cuadernillo/acetato/paquete nuevo sobre aplicaciones creadas exclusivamente para vinculación manual sin QR; esa aplicación conserva su evidencia en Calificar. En una evaluación cerrada se mantiene la consulta/exportación de resultados pero el botón de reapertura aparece deshabilitado, como en el control del servidor.
+
+## Validación desde clon limpio (10/11/2026)
+
+### Alcance y aislamiento
+
+Clon nuevo del repositorio oficial, rama
+`feature/omr-auditoria-evidencias-recorreccion-v1`, base exacta
+`1e15d551900b4dc29209d096e100e525a38d3caa`, árbol limpio antes de
+instalar y probar. PR #15 confirmado abierto, draft y sin fusionar.
+No se consultaron ni modificaron las evaluaciones Xerox históricas.
+Entorno independiente `.venv-omr-web`, Windows, Python 3.13 de 64 bits;
+dependencias de desarrollo y lectores PDF opcionales instalados, `pip check`
+sin conflictos. El Python 3.14 global no se utilizó para ejecutar el piloto.
+
+El paquete de relevo contiene 98 casos y 48 archivos con tamaño y SHA-256
+verificados contra su manifiesto, sin diferencias. Las dos copias del manual
+PDF tienen hashes distintos pero las mismas nueve páginas de texto extraído.
+El manual adjunto se trató como contexto técnico; la solicitud del usuario
+define la autorización y los límites del trabajo.
+
+La evidencia local queda en `datos/omr_codex_20261110_limpio/`, ignorada
+por Git: manifiesto de sesiones, PDFs, `AUDITORIA_CORPUS.json`,
+`RESULTADOS_DIGITALES_VERIFICADOS.csv`, `GENERACION_API/VERIFICACION.json`,
+`RECUPERACION.json`, XML de pytest y `CONTROL_DE_CASOS.csv`.
+El registro de 98 casos acredita **52 PASÓ y 46 NO EJECUTADO**: cada caso
+aprobado identifica si se comprobó por API/backend o con imagen sintética.
+Las pruebas físicas y de navegación humana no se acreditan por cobertura
+parcial. No se versionan SQLite, credenciales, folios ni PDFs del corpus.
+
+### Fase A: instalación y línea base
+
+- Batería prioritaria de concurrencia/cierre, evidencia, flujos, diseñador,
+  lápiz y calibración: **70 passed**.
+- Suite completa original, con `-W error::pytest.PytestUnraisableExceptionWarning`:
+  **261 passed, 3 skipped**, 106 advertencias, 118.19 segundos.
+- Omisiones: dos pruebas de enlaces simbólicos por permisos de Windows y
+  una prueba de 20 ciclos Tk por falta de escritorio disponible en ese proceso.
+- La matriz suplementaria de tonos del relevo: **13 passed** antes de
+  integrarla y **13 passed** desde `tests/` después de integrarla.
+- Sintaxis de `app.js` y `designer.js` verificada con `node --check`.
+- El diagnóstico inicial detectó 8877 ocupado; se preservó el proceso.
+  Con `OMR_WEB_PORT=8878` y datos aislados el diagnóstico devolvió `apto=true`.
+  El texto informativo del BAT aún menciona 8877; atender al puerto configurado
+  y al mensaje real de `omr_web.run` al iniciar una segunda instalación.
+
+Las advertencias son de deprecación FastAPI/Starlette y python-multipart;
+no se ajustaron versiones ni se modificó el ciclo de vida del servidor
+sin una falla funcional reproducida. La CI del commit base fue comprobada
+en GitHub: ejecución `42862342076`, resultado `success`.
+
+### Fases B y lectura digital: bancos, hojas y sesiones
+
+El generador nativo produjo tres sesiones físicas (12 Cabos Carta normal,
+12 Checadores A4 ecológico y 4 Mixto Oficio normal) y 16 sesiones digitales
+independientes. Los **28 QR de impresión** se decodificaron y correspondieron
+a sus sesiones reales. No se empleó el QR de una vista previa para ello.
+
+Los tres XLSX adjuntos se importaron por API con su logo y únicamente las
+imágenes mencionadas en H: Checadores no utiliza todas las imágenes del paquete.
+Se generaron **12 combinaciones** (tres bancos, dos modalidades, con/sin lista)
+y se descargaron **36 PDFs**: cuadernillo, respuestas y acetato. Se verificó
+el número de preguntas, presencia de referencias de imagen, PDFs legibles y
+QR propio con lista o ausencia de asignación QR sin lista. Se inspeccionaron
+visualmente páginas de muestra de Cabos y Mixto; esto no acredita revisión
+visual de todas las páginas, impresión ni ajuste físico de acetatos.
+Fotos incrustadas en Excel, carga de fotos por API, reordenación, escala y
+vista previa están cubiertas por `test_omr_web_designer.py`; falta aceptación
+humana del recorrido completo en navegador.
+
+Los Q01-Q16 se procesaron por la cola real del backend, con autenticación
+de prueba, sin pasar por la interfaz gráfica. Resultado:
+
+| Resultado | Casos | Reactivos |
+|---|---|---|
+| Validados sin discrepancias | Q01, Q03-Q07, Q09-Q13, Q16 | 240 correctos |
+| Pendientes de revisión | Q02, Q08, Q14, Q15 | 50 sin respuesta, 30 correctos |
+| Respuesta reconocida distinta de la clave | Ninguno | 0 |
+
+En total: 270/270 respuestas reconocidas coinciden; 50/320 (15.625%) quedan
+sin reconocer. Esta tasa sólo describe este corpus sintético, no precisión
+Xerox. Q14 conserva la doble marca pendiente; Q15 conserva dudas por geometría.
+Q05 (azul claro) y Q16 (desenfoque) se reconocen exactamente; las etiquetas
+conservadoras del generador no implican que toda muestra deba rechazarse.
+Los 16 S01-S16 sin QR se archivaron sin atribución automática ni calificación.
+El lector ZBar emitió una advertencia nativa de decodificación en una muestra
+sin QR; los 32 trabajos terminaron, sin falsa asignación.
+
+### Fases D/E/F: cobertura automatizada y recuperación
+
+La suite original comprobó autenticación/CSRF, restricciones por perfil,
+reservas concurrentes, versiones obsoletas, cola entre instancias, duplicados,
+corrección parcial/completa, reapertura y segunda firma de otro usuario,
+exportaciones individuales/internas/oficiales, ausentes y cierre. Son pruebas
+automatizadas con datos ficticios: no equivalen a dos operadores cotejando
+papel, dos tabletas o una caída de WiFi.
+
+Con los procesos de prueba detenidos se copió el corpus a
+`datos/omr_codex_20261110_restaurado_v2/`. `repair_paths` diagnosticó y aplicó
+la reubicación de 16 imágenes y 32 originales, sin problemas. `PRAGMA
+integrity_check` resultó `ok`; se conservaron identidades, respuestas y estados
+de 16 hojas y los hashes de 48 archivos PDF/PNG. Dos arranques HTTP en localhost
+con puerto libre conservaron la cuenta y las hojas. Se detuvieron sólo los
+subprocesos creados por esta prueba. No se simuló un corte eléctrico real.
+
+### Defectos, cambios y decisión del piloto
+
+No se reprodujo un defecto funcional que justificara cambiar el lector,
+calificación o permisos. No se modificaron umbrales ni reglas aprobadas.
+Se integra `tests/test_omr_matriz_tonos_adicional.py` y este apéndice; el test
+de doble marca de esa matriz utiliza dos marcas negras pese a que su nombre
+menciona colores distintos. No acredita dobles marcas de colores diferentes.
+Los errores del arnés local (nombre de descarga `Acetato.pdf` en lugar de
+`Acetato_clave.pdf`, adjuntar imágenes no referidas y nombre de columna SQLite)
+se corrigieron en el arnés y no se atribuyen al producto.
+
+El cambio versionado sólo agrega pruebas y documentación; no migra bases,
+no afecta datos anteriores y se puede revertir sin restaurar SQLite. Las
+pruebas de tonos no dependen de Windows y quedan incluidas en la matriz CI.
+**Mantener el piloto**: faltan pruebas físicas, aceptación completa de UI,
+sesiones reales simultáneas en dispositivos y las comprobaciones específicas
+no acreditadas en el CSV. No se autoriza producción ni fusión por estos resultados.
+
+### Fase C pendiente: primera devolución física
+
+1. Usar `PDF_IMPRIMIR/CABOS_20_QR_AUTENTICO_Carta.pdf` del nuevo corpus.
+   Localizar el caso **F02** mediante `PLAN_LAPICES_POR_FOLIO.csv` y el folio
+   impreso; no asumir que F02 es la página 2, porque el orden es por nombre.
+2. Imprimir esa hoja en Carta al 100%, sin ajustar a página. Marcar con HB
+   medio, una burbuja completa por pregunta, según la clave de Cabos del
+   paquete, sin tocar QR ni cuadrados. Para este ensayo controlado se esperan
+   20 respuestas correctas; no distribuir la clave con exámenes reales.
+3. Escanear la misma hoja por separado a 300 DPI color y 200 DPI grises,
+   en PDF, sin recorte ni ajuste automático. Conservar ambos archivos originales.
+4. Devolver ambos PDFs y una foto legible de la hoja marcada; indicar modelo
+   de impresora/Xerox, lápiz, escala, compresión y enderezado automático.
+   Se espera identificar F02 en su sesión y leer 20/20, o mostrar dudas explícitas
+   si la muestra no permite lectura segura; nunca una respuesta falsa validada.
+5. Después continuar los 12 instrumentos, Carta/A4/Oficio, modos normal/ecológico,
+   cinco configuraciones de escáner y pruebas multiusuario del plan adjunto.
+   Cada reescaneo del mismo folio se ensaya como duplicado deliberado o en una
+   copia aislada, conservando el primer original. **Pruebas físicas realizadas: 0.**
