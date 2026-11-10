@@ -36,7 +36,14 @@
            encodeURIComponent(examId)+'/images/'+encodeURIComponent(q.imagen)+'">Ver actual</a>':'')+
       '<input type="file" accept=".png,.jpg,.jpeg" data-image="'+i+'">'+
       (q.pendingImage?'<span class="hint">Pendiente: '+h(q.pendingImage.name)+'</span>':'')+
-      '</label></div>'+
+      '</label></div><div class="cols">'+
+      meta('ancho_imagen_mm','Ancho foto (30–165 mm)',
+        q.ancho_imagen_mm??106,'number','min="30" max="165" step="1"')+
+      meta('alto_imagen_mm','Alto foto (15–90 mm)',
+        q.alto_imagen_mm??62,'number','min="15" max="90" step="1"')+
+      choose('alineacion_imagen','Alineación foto',
+        ['LEFT','CENTER','RIGHT'],q.alineacion_imagen||'CENTER')+
+      '</div><p class="hint">El PDF conserva la proporción, sin deformar el dibujo.</p>'+
       (q.imagen?'<label class="check"><input type="checkbox" data-remove-image>Quitar imagen actual</label>':'')+
       '<div class="actions"><button type="button" class="ghost" data-remove-q="'+i+
       '">Eliminar pregunta</button></div></details>';
@@ -74,9 +81,13 @@
       color_respuestas:draft.color_respuestas,
       color_acetato:draft.color_acetato,
       quitar_logo:!!draft.quitarLogo&&!pendingLogo,
+      logo_ancho_mm:Number(draft.logo_ancho_mm??23),
       preguntas:draft.preguntas.map(q=>({
         tema:q.tema,pregunta:q.pregunta,opciones:q.opciones,
         correcta:q.correcta,
+        ancho_imagen_mm:Number(q.ancho_imagen_mm??106),
+        alto_imagen_mm:Number(q.alto_imagen_mm??62),
+        alineacion_imagen:q.alineacion_imagen||'CENTER',
         imagen:q.quitarImagen?null:q.sourceIndex
       }))
     };
@@ -86,7 +97,7 @@
     if(!panel||!draft)return;
     panel.innerHTML='<h2>Diseñar cuestionario · revisión '+h(draft.revision)+'</h2>'+
       '<p class="hint">La edición queda en la biblioteca. Aplicaciones ya impresas mantienen su propia versión y QR.</p>'+
-      '<div class="designerLayout"><div class="designerControls"><div class="cols">'+
+      '<div class="designerControls"><div class="cols">'+
       meta('nombre','Nombre en biblioteca',draft.nombre)+
       meta('titulo','Título del examen',draft.titulo)+
       meta('empresa','Empresa',draft.empresa)+
@@ -111,20 +122,16 @@
       (pendingLogo?'<p class="hint">Logotipo pendiente: '+h(pendingLogo.name)+'</p>':'')+
       (draft.logo?'<label class="check"><input id="removeLogo" type="checkbox" '+
         (draft.quitarLogo?'checked':'')+'>Quitar logotipo</label>':'')+
+      '</div><div class="cols">'+
+      meta('logo_ancho_mm','Ancho logotipo (10–28 mm)',
+        draft.logo_ancho_mm??23,'number','min="10" max="28" step="1"')+
       '</div><h3>Preguntas y respuestas</h3>'+
       '<p class="hint">Cada pregunta admite cuatro opciones, una respuesta correcta y una imagen. El acetato siempre usa esa clave.</p>'+
       '<div id="questionRows">'+draft.preguntas.map(fileQuestion).join('')+'</div>'+
       '<div class="actions"><button type="button" class="ghost" id="addQuestion">Añadir pregunta</button>'+
       '<button type="button" class="primary" id="saveDesign">Guardar diseño</button></div>'+
-      '<p class="hint">Las fotos y el logotipo recién cargados se incorporan al pulsar Guardar diseño; entonces aparecerán en la vista PDF. Los colores de título, subtítulo, respuestas y acetato son independientes.</p>'+
-      '</div><aside class="designerPreview"><h3>Vista previa PDF real</h3>'+
-      '<div class="actions">'+['Cuadernillo','Respuestas','Acetato'].map(v=>
-        '<button type="button" class="secondary" data-preview="'+v+'">'+
-        (v==='Respuestas'?'Hoja de respuestas':v)+'</button>').join('')+'</div>'+
-      '<label class="check"><input type="checkbox" id="previewPersonal">'+
-      'Mostrar un participante y QR de EJEMPLO (no emite folios)</label>'+
-      '<p class="hint">Sin lista, las hojas son genéricas sin QR. En ambas modalidades la geometría de burbujas y acetato coincide.</p>'+
-      '<iframe id="pdfPreview" class="pdfPreview" title="Vista de impresión del examen"></iframe></aside></div>';
+      '<p class="hint">La vista previa incluye temporalmente fotos y logo seleccionados; sólo Guardar diseño los conserva en la biblioteca.</p>'+
+      '</div>';
     all(panel,'[data-remove-q]').forEach(button=>button.onclick=()=>{
       readEditor();
       if(draft.preguntas.length===1){alertBox('Necesitas conservar una pregunta.',true);return;}
@@ -135,7 +142,8 @@
       if(draft.preguntas.length>=100){alertBox('Máximo 100 preguntas.',true);return;}
       draft.preguntas.push({tema:'',pregunta:'',opciones:['','','',''],
         correcta:'A',imagen:null,sourceIndex:null,quitarImagen:false,
-        pendingImage:null});
+        pendingImage:null,ancho_imagen_mm:106,
+        alto_imagen_mm:62,alineacion_imagen:'CENTER'});
       showEditor();
       all(panel,'.questionEditor').at(-1)?.setAttribute('open','');
     };
@@ -171,13 +179,10 @@
       const input=sel(row,'[data-image]');
       if(input)input.value='';
     });
-    all(panel,'[data-preview]').forEach(button=>button.onclick=()=>{
-      activeView=button.dataset.preview;preview();
+    all(panel,'[data-meta]').forEach(field=>{
+      field.addEventListener('input',()=>schedulePreview());
+      field.addEventListener('change',()=>schedulePreview());
     });
-    sel(panel,'#previewPersonal').checked=!!sel(root,'#rosterInput')?.value.trim();
-    sel(panel,'#previewPersonal').onchange=()=>preview();
-    all(panel,'[data-meta]').forEach(field=>
-      field.addEventListener('change',()=>preview()));
     const modeGen=sel(root,'#applicationMode'),paperGen=sel(root,'#applicationPaper');
     if(modeGen)modeGen.value=draft.modo;
     if(paperGen)paperGen.value=draft.papel;
