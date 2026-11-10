@@ -630,6 +630,8 @@
     const p=report.participantes.find(x=>x.id===state.selectedResult);
     const area=byId("resultDetail");
     if(!area||!p?.hoja_id)return;
+    // El perfil auditor consulta resultados sin claves ni acetato.
+    if(!canExport())state.resultAcetate=false;
     const sheetId=p.hoja_id;
     const history=await api("/sheets/"+encodeURIComponent(sheetId)+"/history");
     const doc="/api/sheets/"+encodeURIComponent(sheetId);
@@ -676,8 +678,9 @@
         '<button class="secondary" id="reopenSheet" '+(!valid?'disabled':'')+
         '>Abrir re-corrección</button></div>':'')+
       '</div><div class="panel"><h3>Evidencia con acetato</h3>'+
-      '<label class="check"><input id="resultAcetate" type="checkbox" '+
-        (state.resultAcetate?'checked':'')+'> Superponer acetato</label>'+
+      (canExport()?'<label class="check"><input id="resultAcetate" type="checkbox" '+
+        (state.resultAcetate?'checked':'')+'> Superponer acetato</label>':
+        '<p class="hint">Vista original sin clave de respuestas.</p>')+
       '<p class="hint">Verde: respuestas correctas del acetato, no lectura automática. El PNG original queda intacto.</p>'+
       '<img class="scanImage" id="resultImage" alt="Hoja física para confrontar resultado" src="'+imageSrc()+'">'+
       '<div class="hint" id="resultImageHint"></div></div></div>'+
@@ -703,7 +706,8 @@
     img.onerror=()=>{byId("resultImageHint").textContent=
       "No se pudo cargar la capa. Se intentará mostrar el escaneo original.";
       img.onerror=null;img.src=doc+"/image";};
-    byId("resultAcetate").onchange=e=>{
+    const acetateControl=byId("resultAcetate");
+    if(acetateControl)acetateControl.onchange=e=>{
       state.resultAcetate=e.target.checked;
       img.src=imageSrc()+"&v="+Date.now();
       if(byId("auditPdfDownload"))byId("auditPdfDownload").href=
