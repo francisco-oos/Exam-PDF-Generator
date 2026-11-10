@@ -441,3 +441,41 @@ notas por proximidad. Pruebas sintéticas en
 `tests/test_omr_grid_calibration.py`, incluyendo doble marca,
 geometría actual, geometría comprimida y rejilla inválida. Ninguna
 imagen identificable del usuario se agregó al repositorio.
+
+
+### Prueba de imágenes en Excel y en el diseñador web
+
+El importador admite tres rutas, siempre con PNG/JPEG de hasta 4 MB por imagen:
+
+1. **Columna Imagen del XLSX**: escribir el nombre exacto (por ejemplo,
+   equipo.png) en la columna H de la pestaña Preguntas y seleccionar
+   ese archivo en el campo Imágenes de reactivos. No introducir rutas
+   completas de Windows ni de otras carpetas. Si sobra una foto
+   seleccionada o falta una foto referenciada, mostrar error 422.
+2. **Foto pegada en Excel**: admite un dibujo PNG/JPEG anclado a la
+   misma fila del reactivo, desde la fila 2. Completa internamente
+   la referencia en H. Rechaza fotos fuera de una fila de reactivo,
+   dos fotos para el mismo reactivo o imagen incrustada que compite
+   con un nombre escrito; nunca adivina la asociación.
+3. **Foto seleccionada en la interfaz web**: una imagen por reactivo
+   desde Diseñar cuestionario. El archivo pendiente se conserva
+   aunque se agreguen o eliminen otras preguntas antes de Guardar
+   diseño. Quitar imagen y Quitar logotipo descartan selecciones
+   pendientes. La vista PDF incorpora la fotografía después de guardar.
+
+**Salida:** las imágenes de los reactivos se incrustan en el Cuadernillo,
+no sobre las burbujas de la hoja de respuestas. El logo sí aparece
+en la cabecera del Cuadernillo y de la Hoja OMR (con o sin QR).
+El Acetato muestra las respuestas correctas, no las fotos.
+Los recursos se conservan como BLOB con SHA-256 en la biblioteca.
+
+**Regresión:** tests/test_omr_web_designer.py verifica imports por nombre,
+fotos incrustadas de varias filas (sin intercambiar), edición con
+adjuntos web, PDF real y vista previa, archivo corrupto, referencia
+ausente y foto sobrante. src/evaluaciones/core.py cierra el iterador
+XML ante errores para liberar el archivo XLSX en Windows. El importador
+recupera las imágenes insertadas aunque openpyxl cierre su stream.
+
+No sustituye la comprobación física de impresión 100%, visor Edge/Chrome,
+superposición de acetato y escaneo Xerox; hacerla en copia aislada,
+sin modificar la base principal ni las calificaciones oficiales.
