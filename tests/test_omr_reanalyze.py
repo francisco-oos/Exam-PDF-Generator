@@ -49,7 +49,7 @@ def test_reanalyze_archived_pdf_improves_only_machine_reading(tmp_path):
     sid=svc.store.create_session(
         "Evaluación ficticia",
         [{"tema":"Equipo","pregunta":"Reactivo 1","correcta":"A"},
-         {"tema":"Equipo","pregunta":"Reactivo 2","correcta":"A"}],
+         {"tema":"Equipo","pregunta":"Reactivo 2","correcta":"B"}],
         [{"id":"P001","nombre":"Persona de prueba"}],"Carta")
     source=make_scan(svc.store,sid,tmp_path)
     with TestClient(app) as client:
@@ -106,7 +106,7 @@ def test_reanalyze_archived_pdf_improves_only_machine_reading(tmp_path):
         assert after[0]["token"]==original_token
         assert after[0]["imagen"]!=old_image
         assert Path(old_image).is_file(), "Se conserva evidencia previa"
-        assert after[0]["respuestas"]==["A","A"]
+        assert after[0]["respuestas"]==["A","B"]
         assert after[0]["dudas"]==[]
 
         # La segunda relectura no debe duplicar la hoja.
@@ -121,19 +121,19 @@ def test_reanalyze_archived_pdf_improves_only_machine_reading(tmp_path):
         with svc.store.connect() as db:
             db.execute("""UPDATE hojas SET estado='revisar',
                 respuestas_json=?,dudas_json=? WHERE id=?""",(
-                json.dumps([None,"A"]),
+                json.dumps([None,"B"]),
                 json.dumps([{"pregunta":1,"razon":"Duda humana"}]),
                 original_id))
         svc.store.review(original_id,1,"B","Marca cotejada con original",
                          reviewer="Auxiliar")
         manually_reviewed=svc.store.pages(sid)[0]
-        assert manually_reviewed["respuestas"]==["B","A"]
+        assert manually_reviewed["respuestas"]==["B","B"]
         assert manually_reviewed["estado"]=="validada"
         final=client.post(f"/api/documents/{digest}/reanalyze",headers=header)
         svc._process_pending()
         result=client.get("/api/jobs/"+final.json()["trabajo_id"]).json()
         assert result["estado"]=="terminado"
-        assert svc.store.pages(sid)[0]["respuestas"]==["B","A"]
+        assert svc.store.pages(sid)[0]["respuestas"]==["B","B"]
         assert len(svc.store.pages(sid))==1
         assert result["resultado"]["aplicaciones"][0]["reprocesadas"]==0
     svc.close()
