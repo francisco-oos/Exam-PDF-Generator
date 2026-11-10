@@ -114,6 +114,17 @@ class WebService:
                   id TEXT PRIMARY KEY, nombre TEXT NOT NULL,
                   ruta TEXT NOT NULL, modo TEXT NOT NULL,
                   papel TEXT NOT NULL, creado TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS web_auditoria_revision(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  hoja_id TEXT NOT NULL, tipo TEXT NOT NULL,
+                  pregunta INTEGER, anterior TEXT, nueva TEXT,
+                  aciertos_antes INTEGER, aciertos_despues INTEGER,
+                  motivo TEXT NOT NULL, usuario_id TEXT NOT NULL,
+                  fecha TEXT NOT NULL,
+                  FOREIGN KEY(hoja_id) REFERENCES hojas(id),
+                  FOREIGN KEY(usuario_id) REFERENCES web_usuarios(id));
+                CREATE INDEX IF NOT EXISTS idx_auditoria_hoja
+                  ON web_auditoria_revision(hoja_id,id);
             """)
             # Reiniciar trabajos interrumpidos sin perder sus originales
             # (la importación OMR ya es idempotente).
@@ -475,6 +486,115 @@ class WebService:
             db.execute("""INSERT OR REPLACE INTO web_aprobaciones VALUES(?,?,?,?)""",
                        (sheet_id,user["id"],utcnow(),revision))
             self._event(db,user["id"],sheet_id,"APROBAR","Validación del coordinador")
+
+    def reopen_validated(self,user,sheet_id,question,reason):
+        """Reabrir un reactivo sin destruir la nota, el original ni la bitácora."""
+        self.require(user,roles={"admin","coordinador"})
+        reason=str(reason or "").strip()
+        if len(reason)<10:
+            raise WebError("Motivo obligatorio (mínimo 10 caracteres).",422)
+        if type(question) is not int:
+            raise WebError("Reactivo inválido.",422)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            page=db.execute("SELECT * FROM hojas WHERE id=?",(sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            if page["estado"]!="validada" or not page["token"]:
+                raise WebError("Sólo se reabren hojas identificadas y validadas.",409)
+            answers=json.loads(page["respuestas_json"])
+            if not 1<=question<=len(answers):
+                raise WebError("Reactivo fuera de rango.",422)
+            lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
+                             (sheet_id,)).fetchone()
+            if lease and lease["vence"]>int(time.time()):
+                raise WebError("Libera la reserva de revisión antes de reabrir.",409)
+            questions=json.loads(db.execute(
+                "SELECT preguntas_json FROM sesiones WHERE id=?",
+                (page["sesion_id"],)).fetchone()["preguntas_json"])
+            correct=sum(a==q["correcta"] for a,q in zip(answers,questions))
+            previous=answers[question-1] or "BLANCO"
+            issues=[{"pregunta":question,
+                     "razon":"Aclaración abierta: requiere cotejo humano."}]
+            db.execute("UPDATE hojas SET estado='revisar',dudas_json=? WHERE id=?",
+                       (compact_json(issues),sheet_id))
+            db.execute("DELETE FROM web_reclamos WHERE hoja_id=?",(sheet_id,))
+            db.execute("DELETE FROM web_aprobaciones WHERE hoja_id=?",(sheet_id,))
+            db.execute("""INSERT INTO web_auditoria_revision(
+                hoja_id,tipo,pregunta,anterior,nueva,aciertos_antes,
+                aciertos_despues,motivo,usuario_id,fecha)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (sheet_id,"REAPERTURA",question,previous,None,correct,None,
+                 reason[:600],user["id"],utcnow()))
+            db.execute("""INSERT INTO revisiones(
+                hoja_id,pregunta,decision,motivo,revisor,fecha)
+                VALUES(?,?,?,?,?,?)""",
+                (sheet_id,question,"REAPERTURA",reason[:600],
+                 user["nombre"],utcnow()))
+            self._event(db,user["id"],sheet_id,"REAPERTURA",
+                        f"Pregunta {question}; nota previa {correct}/{len(questions)}; "
+                        f"motivo: {reason}")
+        return {"hoja_id":sheet_id,"sesion_id":page["sesion_id"],
+                "pregunta":question,"estado":"revisar",
+                "aciertos_anteriores":correct,
+                "mensaje":"Resultado suspendido hasta guardar una nueva decisión."}
+
+    def sheet_history(self,user,sheet_id):
+        """Bitácora anterior y actual por hoja, nunca expone claves."""
+        self.require(user,roles={"admin","coordinador","auditor"})
+        with self.store.connect() as db:
+            page=db.execute("SELECT sesion_id FROM hojas WHERE id=?",
+                            (sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            detailed=[dict(x) for x in db.execute("""
+                SELECT h.id,h.tipo,h.pregunta,h.anterior,h.nueva,
+                       h.aciertos_antes,h.aciertos_despues,h.motivo,h.fecha,
+                       u.nombre AS operador,u.usuario AS cuenta
+                FROM web_auditoria_revision h
+                JOIN web_usuarios u ON u.id=h.usuario_id
+                WHERE h.hoja_id=? ORDER BY h.id
+            """,(sheet_id,))]
+            legacy=[dict(x) for x in db.execute("""
+                SELECT id,pregunta,decision,motivo,revisor,fecha
+                FROM revisiones WHERE hoja_id=? ORDER BY id
+            """,(sheet_id,))]
+            approval=db.execute("""
+                SELECT a.fecha,a.revision,u.nombre AS operador
+                FROM web_aprobaciones a JOIN web_usuarios u
+                  ON u.id=a.usuario_id WHERE a.hoja_id=?
+            """,(sheet_id,)).fetchone()
+        return {"hoja_id":sheet_id,"cambios":detailed,
+                "registros_historicos":legacy,
+                "aprobacion":dict(approval) if approval else None}
+
+    def results_with_evidence(self,user,sid):
+        self.require(user,roles={"admin","coordinador","auditor"},sid=sid)
+        report=self.store.results(sid)
+        pages=self.store.pages(sid)
+        session=report["sesion"]
+        by_person={}
+        for person in session["personal"]:
+            scanned=[page for page in pages
+                     if page["token"]==person["token"] and
+                     page["estado"] not in ("descartada","duplicado")]
+            by_person[person["id"]]=scanned[0]["id"] if len(scanned)==1 else None
+        with self.store.connect() as db:
+            approvals={x["hoja_id"]:dict(x) for x in db.execute(
+                "SELECT hoja_id,fecha,revision FROM web_aprobaciones")}
+        return {"sesion_id":sid,"promedio":report["promedio"],
+                "validados":report["validados"],"pendientes":report["pendientes"],
+                "ausentes":report["ausentes"],
+                "participantes":[{
+                    "id":p["id"],"folio":p["folio"],"nombre":p["nombre"],
+                    "estado":p["estado"],"aciertos":p["aciertos"],
+                    "porcentaje":p["porcentaje"],"preguntas":p["preguntas"],
+                    "temas":p["temas"],"areas_mejora":p["areas_mejora"],
+                    "hoja_id":by_person.get(p["id"]),
+                    "aprobacion":approvals.get(by_person.get(p["id"])),
+                } for p in report["participantes"]]}
 
     def list_events(self,user,sid):
         self.require(user,sid=sid)
