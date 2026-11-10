@@ -170,7 +170,7 @@
       '<button data-go="resultados" class="secondary">Resultados</button></div></div>':"");
     onButton(content,"[data-sid]",async e=>{state.sid=e.currentTarget.dataset.sid;await applications();});
     onButton(content,"[data-go]",e=>navigate(e.currentTarget.dataset.go));
-    if(state.sid){
+    if(state.sid && canExport()){
       const base="/api/applications/"+encodeURIComponent(state.sid)+"/files/";
       byId("appFiles").innerHTML=["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
         "Paquetes_individuales.zip"].map(n=>

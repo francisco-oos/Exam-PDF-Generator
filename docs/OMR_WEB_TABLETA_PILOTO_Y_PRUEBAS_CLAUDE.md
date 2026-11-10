@@ -129,6 +129,10 @@ $env:OMR_WEB_KEY = "datos/omr/certs/server.key"
 
 - Roles: `admin`, `coordinador`, `capturista`, `auditor`.
   Los permisos por aplicación se verifican en el backend.
+- Descargas de material de impresión (incluidos acetato con clave, PDFs de
+  participantes, paquetes y manifiesto) reservadas a administrador o
+  coordinador asignado; capturistas y auditores reciben 403 incluso si
+  conocen el enlace. La API de aplicaciones no expone rutas del servidor.
 - Sesión HttpOnly, SameSite Strict y token CSRF. Contraseñas PBKDF2-SHA256
   con sal, cambio obligatorio de claves temporales.
 - Las correcciones se registran en `revisiones` y `web_eventos`.

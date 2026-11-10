@@ -234,7 +234,10 @@ class WebService:
 
     def visible_sessions(self, user):
         self.require(user)
-        sessions=self.store.sessions()
+        # La ubicación local de salida no forma parte del contrato de la API.
+        # Evitar exponer rutas absolutas del equipo servidor a navegadores.
+        sessions=[{k:v for k,v in row.items() if k!="lote_path"}
+                  for row in self.store.sessions()]
         if user["rol"] == "admin":
             return sessions
         with self.store.connect() as db:

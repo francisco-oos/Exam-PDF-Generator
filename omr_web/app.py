@@ -255,11 +255,12 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
 
     @web.get("/api/applications/{sid}/files/{filename}")
     def download_material(sid: str,filename: str,user=Depends(user_of)):
-        engine.require(user,sid=sid)
         if filename not in FILE_NAMES:
             raise WebError("Archivo no permitido.",404)
-        if filename=="Clave_docente.pdf":
-            engine.require(user,roles={"admin","coordinador"})
+        # Cualquier material descargable del lote puede revelar la clave
+        # (acetato), identidades de participantes o los PDF completos.
+        # La asignación a capturistas nunca equivale a permiso de impresión.
+        engine.require(user,roles={"admin","coordinador"},sid=sid)
         session=engine.store.session(sid)
         folder=Path(session.get("lote_path") or "")
         if not folder.is_absolute():

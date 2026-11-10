@@ -288,6 +288,69 @@ def test_importacion_excel_y_emision_ecologica_de_folios_desde_web(server):
     assert len(c.get("/api/applications").json())==1
 
 
+def test_material_impresion_aislado_por_rol_y_sin_rutas_de_servidor(server):
+    """Ningún capturista/auditor recibe acetato, folios PDF ni paquetes."""
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    app,admin_client,admin_headers=server
+    service=app.state.engine
+    workbook=Workbook()
+    worksheet=workbook.active
+    worksheet.title="Preguntas"
+    worksheet.append(["Tema","Pregunta","A","B","C","D","Correcta","Imagen"])
+    worksheet.append(["Seguridad","¿Qué hacer?","Comprobar",
+                      "Ignorar","Cerrar","Esperar","A",""])
+    content=BytesIO()
+    workbook.save(content)
+    created=admin_client.post(
+        "/api/library/import?name=Control+de+material&title=Prueba+de+permisos",
+        headers=admin_headers,
+        files={"file":("preguntas.xlsx",content.getvalue(),
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert created.status_code==200,created.text
+    applied=admin_client.post("/api/applications",headers=admin_headers,json={
+        "cuestionario_id":created.json()["cuestionario_id"],
+        "nombre":"Aplicación privada",
+        "modalidad":"normal","papel":"Carta",
+        "participantes":[{"id":"P001","nombre":"Participante Ficticio"}]})
+    assert applied.status_code==200,applied.text
+    sid=applied.json()["sid"]
+    url="/api/applications/"+sid+"/files/"
+    assert "lote_path" not in admin_client.get("/api/applications").text
+    for filename in ("Hoja_respuestas.pdf","Acetato_clave.pdf",
+                     "Paquetes_individuales.zip"):
+        response=admin_client.get(url+filename)
+        assert response.status_code==200,(filename,response.text[:120])
+    admin=service.authenticate(admin_client.cookies.get("omr_sid"))
+    for role,expected in (("capturista",403),("auditor",403),
+                          ("coordinador",200)):
+        username="test_"+role
+        temp="ClaveTemporalPrivada1234!"
+        final="ClavePermanentePrivada1234!"
+        user_id=service.add_user(admin,username,role,temp,role)
+        service.assign(admin,user_id,sid)
+        with TestClient(app) as client:
+            assert client.post("/api/login",json={
+                "usuario":username,"password":temp}).status_code==200
+            updated=client.post("/api/change-password",
+                headers={"X-CSRF-Token":client.cookies.get("omr_csrf")},
+                json={"anterior":temp,"nueva":final})
+            assert updated.status_code==200,updated.text
+            assert client.post("/api/login",json={
+                "usuario":username,"password":final}).status_code==200
+            assert "lote_path" not in client.get("/api/applications").text
+            for filename in ("Acetato_clave.pdf","Hoja_respuestas.pdf",
+                             "Paquetes_individuales.zip","manifest.json"):
+                result=client.get(url+filename)
+                if role=="coordinador" and filename=="manifest.json":
+                    assert result.status_code in (200,404)
+                else:
+                    assert result.status_code==expected,(role,filename,result.status_code)
+            if role=="capturista":
+                assert client.get("/api/applications/"+sid+"/questions").status_code==200
+
+
 def test_revisor_solo_ve_respuestas_no_clave_ni_folios_ajenos(server):
     app,c,headers=server
     svc=app.state.engine
