@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from omr_evaluaciones.documentos import sha_file
 from .service import WebError, WebService
+from .designer import import_exam, serialize_exam, update_exam, preview_exam, resource, import_roster
 
 MAX_UPLOAD = 100 * 1024 * 1024
 FILE_NAMES = frozenset({
@@ -191,53 +192,77 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         from biblioteca import list_exams
         return list_exams(engine.library)
 
-    @web.post("/api/library/import")
-    async def import_questionnaire(file:UploadFile=File(...),name:str="",
-                                   title:str="",user=Depends(write_user)):
-        """Importa un Excel de preguntas existente sin alterar otros exámenes.
-
-        No confía en rutas enviadas desde el teléfono. Limita peso y
-        expansión XLSX antes de analizar la plantilla del generador.
-        """
+    @web.get("/api/templates/{kind}")
+    def templates(kind:str,user=Depends(user_of)):
         engine.require(user,roles={"admin"})
-        if not file.filename or not file.filename.lower().endswith(".xlsx"):
-            raise WebError("Se requiere una plantilla de preguntas XLSX.")
-        from tempfile import TemporaryDirectory
-        from zipfile import ZipFile,BadZipFile
-        from src.evaluaciones.core import read_questions
-        from biblioteca import save_exam
-        with TemporaryDirectory(prefix="omr_import_") as temporary:
-            book=Path(temporary)/"Preguntas.xlsx"
-            total=0
-            with book.open("wb") as dst:
-                while True:
-                    part=await file.read(1024*1024)
-                    if not part:break
-                    total+=len(part)
-                    if total>8*1024*1024:
-                        raise WebError("La plantilla supera 8 MB.",413)
-                    dst.write(part)
-            try:
-                with ZipFile(book) as archive:
-                    members=archive.infolist()
-                    if (len(members)>180 or
-                        sum(item.file_size for item in members)>25*1024*1024 or
-                        any("externalLink" in item.filename for item in members)):
-                        raise WebError("Contenido XLSX no permitido.")
-            except BadZipFile as exc:
-                raise WebError("Excel no válido.") from exc
-            questions=read_questions(book)
-            if not questions:
-                raise WebError("No se encontraron preguntas.")
-            exam_id=save_exam(
-                engine.library,
-                nombre=name.strip() or Path(file.filename).stem[:100],
-                titulo=title.strip() or name.strip() or "Evaluación de conocimientos",
-                empresa="",grupo="",subtitulo="Evaluación de conocimientos",
-                instrucciones="Selecciona una sola respuesta por pregunta.",
-                questions=questions,tamano_papel="Carta")
-        await file.close()
-        return {"cuestionario_id":exam_id,"preguntas":len(questions)}
+        names={"preguntas":"Plantilla_Cuestionario.xlsx",
+               "personal":"Plantilla_Personal_OMR.xlsx"}
+        if kind not in names:
+            raise WebError("Plantilla desconocida.",404)
+        path=Path(__file__).resolve().parent.parent/"plantillas"/names[kind]
+        return FileResponse(path,filename=names[kind])
+
+    @web.post("/api/library/import")
+    async def import_questionnaire(
+            file:UploadFile=File(...),name:str="",title:str="",
+            images:list[UploadFile]=File(default=[]),
+            logo:UploadFile|None=File(default=None),
+            empresa:str=Form(""),grupo:str=Form(""),subtitulo:str=Form(""),
+            instrucciones:str=Form("Selecciona una sola respuesta por pregunta."),
+            papel:str=Form("Carta"),letra:float=Form(9),
+            modo:str=Form("ecologico"),
+            color_titulo:str=Form("#213A4C"),
+            color_subtitulo:str=Form("#5E7180"),
+            color_respuestas:str=Form("#213A4C"),
+            color_acetato:str=Form("#167341"),
+            user=Depends(write_user)):
+        engine.require(user,roles={"admin"})
+        if modo not in ("normal","ecologico"):
+            raise WebError("Modalidad no permitida.",422)
+        return await import_exam(
+            engine.library,file,name=name,title=title,images=images,logo=logo,
+            meta={"empresa":empresa,"grupo":grupo,"subtitulo":subtitulo,
+                  "instrucciones":instrucciones,"papel":papel,"letra":letra,
+                  "modo":modo,"color_titulo":color_titulo,
+                  "color_subtitulo":color_subtitulo,
+                  "color_respuestas":color_respuestas,
+                  "color_acetato":color_acetato})
+
+    @web.get("/api/library/{exam_id}")
+    def library_detail(exam_id:str,user=Depends(user_of)):
+        engine.require(user,roles={"admin"})
+        try:
+            return serialize_exam(engine.library,exam_id)
+        except ValueError as error:
+            raise WebError(str(error),404) from error
+
+    @web.post("/api/library/{exam_id}/edit")
+    async def library_edit(exam_id:str,payload:str=Form(...),
+                           images:list[UploadFile]=File(default=[]),
+                           logo:UploadFile|None=File(default=None),
+                           user=Depends(write_user)):
+        engine.require(user,roles={"admin"})
+        return await update_exam(engine.library,exam_id,payload,images,logo)
+
+    @web.post("/api/library/{exam_id}/preview")
+    def library_preview(exam_id:str,config:dict,view:str="Cuadernillo",
+                        user=Depends(write_user)):
+        engine.require(user,roles={"admin"})
+        content=preview_exam(engine.library,exam_id,config,view)
+        return Response(content,media_type="application/pdf",
+                        headers={"Cache-Control":"no-store"})
+
+    @web.get("/api/library/{exam_id}/images/{image_name}")
+    def library_image(exam_id:str,image_name:str,user=Depends(user_of)):
+        engine.require(user,roles={"admin"})
+        data,mime=resource(engine.library,exam_id,image_name)
+        return Response(data,media_type=mime,
+                        headers={"Cache-Control":"no-store"})
+
+    @web.post("/api/roster/import")
+    async def roster_import(file:UploadFile=File(...),user=Depends(write_user)):
+        engine.require(user,roles={"admin"})
+        return await import_roster(file)
 
     @web.get("/api/applications")
     def applications(user=Depends(user_of)):
