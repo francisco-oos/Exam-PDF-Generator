@@ -437,6 +437,8 @@ class WebService:
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Identifica o resuelve antes esta hoja.",409)
             if page["estado"]=="validada":
+                if user["rol"]=="capturista":
+                    raise WebError("Una hoja validada requiere revisión del coordinador.",409)
                 raise WebError(
                     "La hoja ya fue validada: abre una re-corrección "
                     "autorizada desde Resultados.",409)
