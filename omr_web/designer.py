@@ -123,6 +123,13 @@ def recover_embedded_question_images(sheet:Path,images_dir:Path) -> set[str]:
             created.add(name.lower())
             seen_rows.add(row)
         if photos:
+            # Esta es una COPIA temporal. Ya recuperamos las fotos como
+            # archivos individuales, y al guardar openpyxl volvería a
+            # leer los streams cerrados de las formas incrustadas.
+            # Descartar los dibujos SOLO del XLSX temporal evita 500
+            # en Python 3.11–3.13, sin tocar la plantilla original.
+            for tab in book.worksheets:
+                tab._images.clear()
             book.save(sheet)
         return created
     finally:
