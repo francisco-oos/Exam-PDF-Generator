@@ -36,3 +36,11 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;colo
 code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color:#738693;background:#f5f9fa;border-radius:10px}
 @media(max-width:1050px){.scanBox,.cols,.authLayout{grid-template-columns:1fr}.hero{padding:10px}.authLayout{gap:14px;min-height:auto}.kpiList{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:690px){main{padding:12px}.top{padding:12px;align-items:flex-start}.brand strong{font-size:15px}.brand small{font-size:10px}.pill{display:none}.right{gap:5px}.nav{flex-wrap:nowrap;overflow:auto}.nav button{white-space:nowrap;padding:10px 12px}.panel{padding:15px}.kpiList{grid-template-columns:repeat(2,1fr)}.scanBox{grid-template-columns:1fr}.scanImage{max-height:50vh}.tableWrap{max-width:100%}.authCard{padding:22px}.hero h1{font-size:32px}}
+
+/* Editor web: formularios editables y PDF real responsive en laptop/tableta. */
+.questionEditor{border:1px solid #d7e4e9;border-radius:11px;margin:10px 0;padding:12px;background:#fafcfd}
+.questionEditor summary{cursor:pointer;line-height:1.55}
+.questionEditor[open]{background:#fff;box-shadow:0 5px 12px #1d45540a}
+.pdfPreview{display:block;width:100%;height:min(75vh,820px);min-height:460px;border:1px solid #d5e1e7;border-radius:10px;background:#f7f9fa}
+.check{display:flex;align-items:center;gap:10px}.check input{width:auto}
+@media(max-width:690px){.pdfPreview{min-height:400px;height:65vh}}

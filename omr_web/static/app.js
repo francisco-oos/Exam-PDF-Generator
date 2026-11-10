@@ -59,7 +59,7 @@
     byId("authPanel").hidden=true;
     byId("workspace").hidden=false;
     byId("logout").hidden=false;
-    byId("identity").textContent=me.nombre+" · "+me.rol;
+    byId("identity").textContent=me.nombre+" · "+(me.rol==="capturista"?"Auxiliar de calificación":me.rol==="admin"?"Administrador":me.rol);
     document.querySelectorAll(".nav [data-view]").forEach(b=>{
       b.hidden=((b.dataset.view==="usuarios"||b.dataset.view==="biblioteca"||
                  b.dataset.view==="bandeja")&&!isAdmin())||
@@ -356,60 +356,11 @@
     }catch(err){el.textContent=err.message;}
   }
   async function library(){
-    if(!isAdmin())throw Error("Solo el administrador emite folios.");
-    const exams=await api("/library");
-    renderTitle("Diseñar e imprimir","Importa un Excel de preguntas o usa un cuestionario guardado. Solo esta acción emite folios nuevos.");
-    content.innerHTML+='<form class="panel" id="importQuestions"><h3>Incorporar preguntas a la biblioteca</h3>'+
-      '<div class="cols"><label>Nombre de biblioteca<input name="name" placeholder="Ej. Checadores C" required></label>'+
-      '<label>Título de impresión<input name="title" placeholder="Evaluación de conocimientos"></label></div>'+
-      '<label>Excel de preguntas<input name="file" type="file" accept=".xlsx" required></label>'+
-      '<button class="secondary">Importar cuestionario XLSX</button></form>';
-    byId("importQuestions").onsubmit=async e=>{
-      e.preventDefault();const fd=new FormData(e.target),name=fd.get("name"),title=fd.get("title");
-      const file=fd.get("file");
-      if(!(file instanceof File)||!file.name.toLowerCase().endsWith(".xlsx")){
-        alertBox("Selecciona un Excel XLSX.",true);return;
-      }
-      const form=new FormData();form.append("file",file);
-      const query="?name="+encodeURIComponent(name)+"&title="+encodeURIComponent(title);
-      try{const res=await api("/library/import"+query,{method:"POST",body:form});
-        alertBox("Cuestionario importado: "+res.preguntas+" preguntas.");await library();
-      }catch(err){alertBox(err.message,true);}
-    };
-    if(!exams.length){
-      content.innerHTML+='<div class="panel empty">No hay cuestionarios todavía. Importa primero uno desde Excel.</div>';
-      return;
-    }
-    content.innerHTML+='<form id="createForm" class="panel"><label>Cuestionario guardado<select name="cuestionario">'+
-      exams.map(x=>'<option value="'+h(x.id)+'">'+h(x.nombre)+' · '+x.total+' preguntas (revisión '+x.revision+')</option>').join("")+
-      '</select></label><div class="cols"><label>Nombre de la aplicación<input name="nombre" placeholder="Ej. Cabos turno C"></label>'+
-      '<label>Modalidad<select name="modalidad"><option value="ecologico">Ecológico, cuadernillo reutilizable</option><option value="normal">Normal, individual</option></select></label></div>'+
-      '<label>Papel<select name="papel"><option>Carta</option><option>A4</option><option>Oficio</option></select></label>'+
-      '<label>Participantes (una persona por línea: ID,Nombre; también acepta tabulaciones de Excel)<textarea name="participantes" rows="9" placeholder="001,Persona Uno\n002,Persona Dos" required></textarea></label>'+
-      '<button class="primary">Emitir folios y generar documentos</button>'+
-      '<p class="hint">No generes otra aplicación para continuar escaneando hojas ya impresas.</p></form>'+
-      '<div id="created"></div>';
-    byId("createForm").onsubmit=async e=>{
-      e.preventDefault();
-      const form=e.target;const people=form.participantes.value.split(/\r?\n/)
-        .map(line=>line.trim()).filter(Boolean).map(line=>{
-          const parts=line.includes("\t")?line.split("\t"):line.split(",");
-          return {id:(parts[0]||"").trim(),nombre:(parts.slice(1).join(" ")||"").trim()};
-        });
-      if(!people.length){alertBox("Falta la lista de participantes.",true);return;}
-      const button=form.querySelector("button");button.disabled=true;
-      try{
-        const resp=await api("/applications",{method:"POST",body:{
-          cuestionario_id:form.cuestionario.value,nombre:form.nombre.value,
-          modalidad:form.modalidad.value,papel:form.papel.value,participantes:people}});
-        state.sid=resp.sid;await refreshApps();
-        byId("created").innerHTML='<div class="panel"><h3>Aplicación generada: <code>'+h(resp.sid)+'</code></h3>'+
-          '<div class="actions">'+resp.archivos.map(filename=>
-          '<a class="secondary" href="/api/applications/'+h(resp.sid)+'/files/'+h(filename)+'">'+h(filename)+'</a>').join("")+
-          '</div><p class="hint">Imprimir al 100 % sin escalar; guardar los folios generados.</p></div>';
-        alertBox("Aplicación emitida correctamente.");
-      }catch(err){alertBox(err.message,true);}finally{button.disabled=false;}
-    };
+    if(!isAdmin())throw Error("Solo el administrador crea evaluaciones.");
+    renderTitle("Diseñar e imprimir",
+      "Las modalidades Normal y Ecológico conservan las hojas y el acetato originales.");
+    await window.OMRDesigner.start({api,alertBox,root:content,
+      onCreated:async sid=>{state.sid=sid;await refreshApps();}});
   }
   async function documents(){
     if(!isAdmin())throw Error("Solo el administrador ve originales mezclados.");
@@ -468,7 +419,7 @@
       '<h3>Crear usuario</h3><label>Usuario<input name="usuario" required></label>'+
       '<label>Nombre<input name="nombre" required></label>'+
       '<label>Contraseña temporal de al menos 12 caracteres<input type="password" name="password" minlength="12" required></label>'+
-      '<label>Rol<select name="rol"><option value="capturista">Capturista</option>'+
+      '<label>Rol<select name="rol"><option value="auxiliar">Auxiliar de calificación</option>'+
       '<option value="coordinador">Coordinador</option><option value="auditor">Auditor</option></select></label>'+
       '<button class="primary">Crear cuenta</button></form>'+
       '<form id="assignForm" class="panel"><h3>Asignar evaluación</h3>'+
