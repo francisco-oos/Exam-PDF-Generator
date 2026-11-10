@@ -1296,10 +1296,18 @@ def _recognize(gray,paper,questions_count):
             answers.append(None)
             continue
         strong=(v>=73 and q>=75 and c>=.54)
+        # Grafito lápiz medio (ligeramente más claro que 180): admitimos
+        # SOLO un relleno homogéneo, nítido y aislado de las otras tres
+        # burbujas. Una marca de 190 o más clara, tachones y marcas
+        # parcialmente rellenas siguen pendientes de cotejo físico.
+        pencil=(v>=68 and q>=68 and c>=.72 and
+                second<=13 and v-second>=55 and
+                v>=3.8*max(second,1.))
         other_mark=(second>=31 and q2>=47 and c2>=.16)
         separated=(v-second>=47 and
                    (second<=12 or v>=2.15*second))
-        if strong and separated and not other_mark:
+        if (strong and separated and not other_mark) or (
+                pencil and not other_mark):
             answers.append(ANSWER_CHOICES[winner])
         else:
             answers.append(None)
