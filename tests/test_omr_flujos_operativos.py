@@ -155,3 +155,44 @@ def test_hojas_sin_identificar_bloquean_cierre_aun_con_lista_aprobada(sample):
     assert summary["sin_identificar"]==1 and not summary["listo"]
     with pytest.raises(WebError,match="Cierre bloqueado"):
         svc.close_application(admin,sid)
+
+
+def test_archivos_exportados_se_nombran_por_folio_y_no_acumulan_temporales(sample):
+    from fastapi.testclient import TestClient
+    from omr_web.app import create_app
+    svc,admin,sid,people=sample
+    for index,person in enumerate(people):
+        sheet=register(svc,sid,person,40+index,["A","C","D"])
+        svc.approve(admin,sheet)
+    app=create_app(svc.root,start_workers=False)
+    try:
+        with TestClient(app) as client:
+            login=client.post("/api/login",json={
+                "usuario":"adminprueba","password":"ClaveDefinitivaAdmin2026!"})
+            assert login.status_code==200
+            response1=client.get(
+                f"/api/applications/{sid}/participants/{people[0]['id']}/result")
+            response2=client.get(
+                f"/api/applications/{sid}/participants/{people[1]['id']}/result")
+            assert response1.status_code==200 and response2.status_code==200
+            name1=response1.headers["content-disposition"]
+            name2=response2.headers["content-disposition"]
+            assert name1!=name2
+            assert "PARTICIPANTE_PROVISIONAL" in name1
+            assert "PARTICIPANTE_PROVISIONAL" in name2
+            audited=client.get(
+                f"/api/applications/{sid}/participants/{people[0]['id']}/result?auditado=true")
+            assert audited.status_code==200
+            assert "INTERNO_AUDITADO_PROVISIONAL" in audited.headers["content-disposition"]
+            zipped=client.get(f"/api/applications/{sid}/export")
+            assert zipped.status_code==200
+            assert "Resultados_PROVISIONAL_" in zipped.headers["content-disposition"]
+            assert not list(svc.outputs.glob("*.pdf"))
+            assert not list(svc.outputs.glob("*.zip"))
+            assert svc.close_application(admin,sid)["estado"]=="cerrada"
+            final=client.get(
+                f"/api/applications/{sid}/participants/{people[0]['id']}/result")
+            assert "PARTICIPANTE_DEFINITIVO" in final.headers["content-disposition"]
+            assert not list(svc.outputs.glob("*.pdf"))
+    finally:
+        app.state.engine.close()

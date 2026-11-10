@@ -851,3 +851,16 @@ aprobaciones simultáneas y cierre con hojas desconocidas. Se ejecutan
 con una base temporal ficticia, sin tocar Xerox. Las lecturas reales de
 grafito/hojas Xerox y las interfaces en tableta quedan por verificar
 físicamente antes del merge.
+
+
+### Descargas individuales seguras y limpieza de temporales
+
+Al exportar un PDF personal, el nombre es ahora único por folio,
+distingue PARTICIPANTE/INTERNO_AUDITADO y PROVISIONAL/DEFINITIVO.
+Dos participantes ya no descargan por defecto el mismo nombre
+Resultado_sesion.pdf. El enlace de la ficha recalca provisional
+si la aplicación no está cerrada. Los ZIP/PDF creados en web_exportaciones
+para atender una solicitud se eliminan SOLO después de servir la respuesta;
+los originales de escáner, PNG evidenciales, lotes de impresión, SQLite y
+respaldos NO se eliminan. Los temporales viejos de versiones anteriores
+no se purgan automáticamente. Regresión: test_archivos_exportados_se_nombran_por_folio_y_no_acumulan_temporales.

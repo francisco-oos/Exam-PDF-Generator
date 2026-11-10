@@ -16,6 +16,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from omr_evaluaciones.documentos import sha_file
@@ -591,7 +592,8 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             prefix+="PROVISIONAL_"
         return FileResponse(path,filename=prefix+sid+".zip",
                             media_type="application/zip",
-                            headers={"Cache-Control":"no-store"})
+                            headers={"Cache-Control":"no-store"},
+                            background=BackgroundTask(path.unlink,missing_ok=True))
 
     @web.get("/api/applications/{sid}/participants/{person_id}/result")
     def participant_result(sid:str,person_id:str,auditado:bool=False,user=Depends(user_of)):
@@ -614,9 +616,17 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
                                 evidence_pdf=evidence_pdf)
         except ValueError as exc:
             raise WebError(str(exc),404) from exc
-        return FileResponse(target,filename="Resultado_"+sid+".pdf",
+        # Evitar que resultados de distintos participantes terminen con
+        # exactamente el mismo nombre en Descargas de Windows.
+        folio=re.sub(r"[^A-Za-z0-9_-]+","_",str(participant.get("folio") or person_id))
+        folio=folio.strip("_")[:55] or "FOLIO"
+        estado="DEFINITIVO" if report["estado_cierre"]=="cerrada" else "PROVISIONAL"
+        tipo="INTERNO_AUDITADO" if auditado else "PARTICIPANTE"
+        name=f"Resultado_{folio}_{tipo}_{estado}.pdf"
+        return FileResponse(target,filename=name,
                             media_type="application/pdf",
-                            headers={"Cache-Control":"no-store"})
+                            headers={"Cache-Control":"no-store"},
+                            background=BackgroundTask(target.unlink,missing_ok=True))
 
     static_dir=Path(__file__).resolve().parent/"static"
     @web.get("/")

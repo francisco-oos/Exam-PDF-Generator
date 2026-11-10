@@ -130,6 +130,8 @@
     }catch(e){alertBox(e.message,true);}
   });
   byId("logout").addEventListener("click",async()=>{
+    if(state.sheet&&state.lease&&!confirm(
+      "¿Salir y liberar la hoja en revisión? Las decisiones sin guardar no se conservarán."))return;
     try{await releaseCurrentSheet();}catch(err){alertBox("No se pudo liberar la hoja: "+err.message,true);return;}
     try{await api("/logout",{method:"POST"});}catch{}
     window.location.reload();
@@ -252,6 +254,10 @@
       }catch(err){alertBox(err.message,true);}
     };
     byId("reviewApp").onchange=async e=>{
+      if(state.sheet&&state.lease&&!confirm(
+        "Cambiar de evaluación liberará la hoja actual. ¿Continuar? Los cambios sin guardar no se conservarán.")){
+        e.target.value=state.sid;return;
+      }
       try{await releaseCurrentSheet();}
       catch(err){alertBox("No se pudo liberar la hoja: "+err.message,true);e.target.value=state.sid;return;}
       state.sid=e.target.value;await reviewQueue();
@@ -798,10 +804,11 @@
       '<div class="actions">'+
       (canExport()?'<a class="secondary" href="/api/applications/'+
         encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
-        '/result">PDF para participante</a>'+
+        '/result">PDF para participante · '+
+        (report.estado_cierre==="cerrada"?"DEFINITIVO":"PROVISIONAL")+'</a>'+
         '<a class="secondary" href="/api/applications/'+
         encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
-        '/result?auditado=true">PDF interno con acetato</a>':'')+
+        '/result?auditado=true">PDF interno auditado</a>':'')+
       ''+
       '</div>'+
       (canExport()?'<details class="advancedDownload"><summary>Descarga técnica adicional (solo hoja)</summary>'+
