@@ -481,3 +481,31 @@ def test_excel_imagenes_ambiguas_no_se_asocian_al_reactivo_equivocado(server):
        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert response.status_code==422,response.text
     assert "más de una foto" in response.text
+
+
+def test_dos_fotos_excel_en_filas_distintas_no_se_intercambian(server):
+    from openpyxl.drawing.image import Image as XlsxImage
+    app,c,headers=server
+    wb=load_workbook(BytesIO(workbook("")))
+    sheet=wb["Preguntas"]
+    sheet.append(["Seguridad","Segunda pregunta","Uno","Dos","Tres","Cuatro",
+                  "C",""])
+    sheet.add_image(XlsxImage(BytesIO(picture("#EE3344"))),"H2")
+    sheet.add_image(XlsxImage(BytesIO(picture("#22AA55"))),"H3")
+    output=BytesIO();wb.save(output);wb.close()
+    response=c.post("/api/library/import?name=Fotos+dobles&title=Evaluacion",
+        headers=headers,files={"file":("preguntas.xlsx",output.getvalue(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert response.status_code==200,response.text
+    exam_id=response.json()["cuestionario_id"]
+    details=c.get("/api/library/"+exam_id).json()
+    assert [q["imagen"] for q in details["preguntas"]]==[
+        "pregunta_001.png","pregunta_002.png"]
+    assert c.get("/api/library/"+exam_id+"/images/pregunta_001.png").content==picture("#EE3344")
+    assert c.get("/api/library/"+exam_id+"/images/pregunta_002.png").content==picture("#22AA55")
+    pdf=c.post("/api/library/"+exam_id+"/preview?view=Cuadernillo",
+               headers=headers,json={})
+    assert pdf.status_code==200,pdf.text[:150]
+    colors=_pdf_embeds_colors(pdf.content)
+    assert _near_color(colors,(0xEE,0x33,0x44)),colors
+    assert _near_color(colors,(0x22,0xAA,0x55)),colors
