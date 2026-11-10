@@ -556,10 +556,20 @@ class WebService:
                 raise WebError("Solo se aprueban hojas validadas.",409)
             lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
                              (sheet_id,)).fetchone()
-            if lease and lease["vence"]>time.time() and lease["usuario_id"]!=user["id"]:
-                raise WebError("La hoja sigue en revisión por otro operador.",409)
+            if lease and lease["vence"]>time.time():
+                raise WebError("La hoja sigue reservada. Debe liberarse antes de aprobar.",409)
+            current=db.execute("SELECT 1 FROM web_aprobaciones WHERE hoja_id=?",
+                               (sheet_id,)).fetchone()
+            if current:
+                raise WebError("Esta hoja ya cuenta con aprobación 2/2; no se sustituye.",409)
+            last=db.execute("""SELECT usuario_id FROM web_auditoria_revision
+                WHERE hoja_id=? AND tipo='CORRECCION' ORDER BY id DESC LIMIT 1""",
+                (sheet_id,)).fetchone()
+            if last and last["usuario_id"]==user["id"]:
+                raise WebError("La aprobación 2/2 debe hacerla OTRO administrador "
+                               "o coordinador distinto de quien corrigió la hoja.",409)
             revision=int(lease["revision"]) if lease else 0
-            db.execute("""INSERT OR REPLACE INTO web_aprobaciones VALUES(?,?,?,?)""",
+            db.execute("""INSERT INTO web_aprobaciones VALUES(?,?,?,?)""",
                        (sheet_id,user["id"],utcnow(),revision))
             self._event(db,user["id"],sheet_id,"APROBAR","Validación del coordinador")
 
@@ -664,6 +674,10 @@ class WebService:
         with self.store.connect() as db:
             approvals={x["hoja_id"]:dict(x) for x in db.execute(
                 "SELECT hoja_id,fecha,revision FROM web_aprobaciones")}
+            last_corrections={}
+            for correction in db.execute("""SELECT hoja_id,usuario_id
+                FROM web_auditoria_revision WHERE tipo='CORRECCION' ORDER BY id"""):
+                last_corrections[correction["hoja_id"]]=correction["usuario_id"]
         return {"sesion_id":sid,"promedio":report["promedio"],
                 "estado_cierre":report["sesion"]["estado"],
                 "validados":report["validados"],"pendientes":report["pendientes"],
@@ -675,6 +689,8 @@ class WebService:
                     "temas":p["temas"],"areas_mejora":p["areas_mejora"],
                     "hoja_id":by_person.get(p["id"]),
                     "aprobacion":approvals.get(by_person.get(p["id"])),
+                    "requiere_otro_aprobador":bool(
+                        last_corrections.get(by_person.get(p["id"]))==user["id"]),
                 } for p in report["participantes"]]}
 
     def resolve_duplicate(self,user,sheet_id,reason):

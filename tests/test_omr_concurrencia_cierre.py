@@ -206,7 +206,15 @@ def test_guardar_ultima_decision_libera_reserva_atomica(tmp_path):
         svc.save_decisions(admin,sheet,claim["lease"],saved["revision"],
                            [{"pregunta":1,"decision":"B"}],"Intento tardío")
     assert exc.value.status==409
-    svc.approve(admin,sheet)
+    with pytest.raises(WebError,match="OTRO administrador"):
+        svc.approve(admin,sheet)
+    svc.add_user(admin,"adminsegundo","Supervisor","ClaveTemporalSupervisor123!","admin")
+    login_token,_,_=svc.login("adminsegundo","ClaveTemporalSupervisor123!")
+    temporal=svc.authenticate(login_token)
+    svc.change_password(temporal,"ClaveTemporalSupervisor123!","ClaveDefinitivaSupervisor123!")
+    login_token,_,_=svc.login("adminsegundo","ClaveDefinitivaSupervisor123!")
+    supervisor=svc.authenticate(login_token)
+    svc.approve(supervisor,sheet)
     assert svc.closure_summary(admin,sid)["listo"]
     svc.close()
 

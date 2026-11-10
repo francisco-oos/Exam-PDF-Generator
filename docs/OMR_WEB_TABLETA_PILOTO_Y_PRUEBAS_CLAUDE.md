@@ -785,3 +785,69 @@ producción antes de cerrar CI y esta aceptación física.**
 **Reanálisis mientras alguien revisa:** si existe un lease activo para una hoja, el motor no sustituye sus respuestas/dudas ni aplica mejora automática sobre ese mismo PDF. Devuelve `repetida`; el operador conserva la versión visible. Se puede reanalizar después de liberar o expirar la reserva, siempre que todavía no se hayan guardado decisiones humanas.
 
 **Entrega provisional y definitiva:** el motor de escritorio conserva su modo histórico de exportación. En la WEB, el ZIP y su Excel se rotulan PROVISIONALES mientras la evaluación sigue abierta, aunque todas las marcas estén legibles; después de cierre y aprobación se rotulan DEFINITIVOS. El manifiesto incorpora `estado_evaluacion` y `entrega`. El reporte personal también advierte cuándo el resultado sigue provisional. No se alteran las columnas existentes ni se elimina un folio faltante.
+
+
+## Auditoría de descargas y simulaciones de operación (10/11/2026)
+
+**Menos redundancia visible, sin eliminar formatos ni API.** La tarea
+Crear evaluación contiene los PDF de impresión: Cuadernillo, Hoja de
+respuestas, Acetato y Paquetes individuales. Calificar → Resultados
+concentra ZIP oficial (provisional hasta cierre) y ZIP interno con
+bitácoras/evidencias. Cada persona ofrece UNA entrada a su ficha, con
+PDF individual limpio para entregar y PDF interno auditado para cotejo.
+El PDF de la sola hoja se conserva en un desplegable avanzado para
+investigación, no junto al PDF individual como tercera opción equivalente.
+Nunca entregar acetato o ZIP interno como reporte individual.
+
+**Inicio por tarea:** admin elige Crear o Calificar; auxiliar solo
+Calificar; auditor histórico solo Consultar. Los menús se filtran por
+perfil y tarea, conservando las validaciones del servidor. Cambiar de
+sección, de aplicación o de hoja libera explícitamente la reserva
+previa, con confirmación si hay trabajo pendiente. Si falla la
+liberación, se permanece en la revisión. No se repite la emisión de
+folios para completar escaneos de otra jornada.
+
+**Aprobación 2/2 independiente:** una calificación validada por el motor
+puede aprobarla un humano admin/coordinador. Si hubo CORRECCION humana,
+quien hizo la última corrección NO puede firmar su segunda aprobación.
+Un segundo admin/coordinador autorizado debe hacerlo. Se prohíbe
+sobrescribir una firma vigente por otro clic o sesión concurrente.
+Al reabrir, se suspende la nota, se anula firma anterior y se audita
+la transición; hace falta corregir y volver a aprobar.
+
+### Matriz de escenarios (automáticos + aceptación física)
+
+| Caso | Entrada y estado esperado |
+|---|---|
+| F01 | Normal con lista: QR por participante y calificación de sesión correcta |
+| F02 | Ecológico con lista: cuadernillo común, hojas QR individuales |
+| F03 | Normal sin lista: universal sin QR; calificación manual con acetato |
+| F04 | Ecológico sin lista: universal sin QR; no crear sesión ficticia |
+| F05 | PDF sin QR identificable: bandeja, motivo, captura íntegra manual |
+| F06 | QR ilegible: retener evidencia, no inventar identidad |
+| F07 | Lápiz tenue: duda pendiente hasta elegir A/B/C/D/BLANCO |
+| F08 | Dos marcas o borrones: cotejo humano y motivo escrito |
+| F09 | Corrección parcial: guarda versión, mantiene lease mientras hay dudas |
+| F10 | Dos auxiliares reclaman mismo folio: segundo 409 y sin sobrescritura |
+| F11 | Pestaña vieja guarda: 409 y se conserva última decisión |
+| F12 | Cambiar tarea/hoja: liberar reserva sin eliminar corrección ya guardada |
+| F13 | Dos administradores suben PDF idéntico: SHA dedupe y cola serial |
+| F14 | Folio en PDFs distintos: conflicto auditable, no cambiar nota anterior |
+| F15 | Reanálisis mientras se revisa: no sustituir selección/imagen reservada |
+| F16 | Rectificación aprobada: suspender nota, abrir duda, bitácora antes/después |
+| F17 | Misma cuenta corrige y pretende aprobar: 409 y segunda firma requerida |
+| F18 | Dos administradores aprueban al tiempo: una firma, otra recibe 409 |
+| F19 | Personas ausentes/sin identificar: lista íntegra y cierre bloqueado |
+| F20 | Cerrada: ningún reescaneo modifica notas, ZIP oficial definitivo |
+| F21 | Antes de cerrar: resultados y expedientes etiquetados provisionales |
+| F22 | Informe individual vs interno: rutas, roles y contenido distintos |
+| F23 | Reinicio durante cola: retomar trabajos sin dos procesamientos a la vez |
+| F24 | Copia Xerox reubicada: verificar SHA y rutas seguras antes de iniciar |
+
+Las nuevas regresiones están en tests/test_omr_flujos_operativos.py:
+ausentes, dudas de grafito, dobles marcas, edición simultánea, corrección
+parcial, pestaña vieja, rectificación tras aprobar, segunda firma,
+aprobaciones simultáneas y cierre con hojas desconocidas. Se ejecutan
+con una base temporal ficticia, sin tocar Xerox. Las lecturas reales de
+grafito/hojas Xerox y las interfaces en tableta quedan por verificar
+físicamente antes del merge.

@@ -729,8 +729,10 @@
           h(p.id)+'">'+(canExport()?'Ver resultado y descargar':'Ver evidencia')+'</button>':
           '<span class="hint">Sin escaneo</span>')+
         (canExport()&&report.estado_cierre==="abierta"&&p.estado==="validado"&&!p.aprobacion&&p.hoja_id?
-          '<button type="button" class="secondary" data-approve="'+h(p.hoja_id)+
-          '">Aprobar 2/2</button>':'')+
+          (p.requiere_otro_aprobador?
+            '<span class="tag warn">Otra cuenta debe aprobar 2/2</span>':
+            '<button type="button" class="secondary" data-approve="'+h(p.hoja_id)+
+            '">Aprobar 2/2</button>'):'')+
         ''+
         '</div></td></tr>').join("")+'</tbody></table></div>'+
       '<section id="resultDetail"></section>';
