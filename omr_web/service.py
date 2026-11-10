@@ -518,7 +518,7 @@ class WebService:
                if (folder/f).is_file()]
         session_file=folder/"Sesion_OMR.txt"
         if session_file.is_file():
-            match=re.search(r"\\b[0-9a-f]{12}\\b",
+            match=re.search(r"\b[0-9a-f]{12}\b",
                             session_file.read_text(encoding="utf-8"))
             if not match:
                 raise WebError("La aplicación generada no tiene sesión válida.",500)
