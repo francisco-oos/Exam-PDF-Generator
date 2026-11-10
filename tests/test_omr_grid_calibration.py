@@ -88,3 +88,59 @@ def test_acetato_y_resaltado_calibrados_sobre_fila_real_20():
     wrong=round((227+19*19.3)*(200/72))
     assert not np.any(high[wrong-12:wrong+12,150:500] !=
                       normal[wrong-12:wrong+12,150:500])
+
+
+
+def test_xerox_filogramas_lapiz_texturizado_y_filas_comprimidas():
+    """Grafito HB 88% de cobertura: media ~67/255, percentil alto ~74.
+
+    Es la situación donde el centro de la marca real supera claramente
+    los cuatro blancos, aunque su media sea inferior al umbral fuerte.
+    No hay datos privados; la cuadrícula se dibuja a 50 px/fila.
+    """
+    scale=200/72
+    w,h=PAPERS["Carta"]
+    gray=np.full((round(h*scale),round(w*scale)),255,dtype=np.uint8)
+    rng=np.random.default_rng(20261110)
+    r=round(4.7*scale)
+    yy,xx=np.ogrid[-r:r+1,-r:r+1]
+    inner=(xx*xx+yy*yy)<r*r
+    for i in range(20):
+        y=round(595+i*50)
+        for j in range(4):
+            x=round((73+23*j)*scale+(4+2*j))
+            cv2.circle(gray,(x,y),round(7.7*scale),
+                       155,3,lineType=cv2.LINE_AA)
+            if j==i%4:
+                patch=gray[y-r:y+r+1,x-r:x+r+1]
+                values=np.where(rng.random(inner.sum())<.88,
+                                181,238).astype(np.uint8)
+                patch[inner]=values
+    answers,issues,levels=_recognize(gray,"Carta",20)
+    assert answers==["ABCD"[i%4] for i in range(20)]
+    assert not issues
+    assert len(levels)==20
+
+
+def test_xerox_lapiz_texturizado_doble_no_se_decide_por_aproximacion():
+    """Dos rellenos del mismo gris medio nunca se autocalifican."""
+    scale=200/72
+    w,h=PAPERS["Carta"]
+    gray=np.full((round(h*scale),round(w*scale)),255,dtype=np.uint8)
+    r=round(4.7*scale)
+    yy,xx=np.ogrid[-r:r+1,-r:r+1]
+    inner=(xx*xx+yy*yy)<r*r
+    rng=np.random.default_rng(1404)
+    for j in range(4):
+        x=round((73+23*j)*scale)
+        y=round(227*scale)
+        cv2.circle(gray,(x,y),round(7.7*scale),155,3)
+        if j in (0,2):
+            patch=gray[y-r:y+r+1,x-r:x+r+1]
+            patch[inner]=np.where(rng.random(inner.sum())<.88,
+                                  181,238).astype(np.uint8)
+    answers,issues,levels=_recognize(gray,"Carta",1)
+    assert answers==[None]
+    assert len(issues)==1
+    assert issues[0]["pregunta"]==1
+    assert "Dos marcas" in issues[0]["razon"]
