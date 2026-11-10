@@ -360,7 +360,15 @@
             cambios:[{pregunta:state.question,decision:byId("decision").value}],
             motivo:byId("reason").value}});
         state.revision=result.revision;
-        alertBox("Corrección guardada con auditoría.");
+        alertBox(result.reserva_liberada?
+          "Hoja validada y liberada. Pendiente de aprobación 2/2.":
+          "Corrección guardada con auditoría; la hoja sigue reservada.");
+        if(result.reserva_liberada){
+          state.sheet=null;state.lease=null;
+          area.innerHTML='<div class="panel"><h3>Revisión guardada</h3>'+
+            '<p>La hoja quedó validada y fue liberada. El coordinador podrá aprobarla en Resultados.</p></div>';
+          await queueTable();return;
+        }
         state.sheet=await api("/sheets/"+sheet.id);
         const following=state.sheet.dudas.filter(x=>Number.isInteger(x.pregunta));
         const next=following.find(x=>x.pregunta>state.question)||following[0];
@@ -405,6 +413,12 @@
               motivo:form.querySelector("#fullReason").value}});
           state.revision=result.revision;
           alertBox("Hoja completa auditada y guardada.");
+          if(result.reserva_liberada){
+            state.sheet=null;state.lease=null;
+            area.innerHTML='<div class="panel"><h3>Captura guardada</h3>'+
+              '<p>Hoja validada y liberada; falta aprobación 2/2 en Resultados.</p></div>';
+            await queueTable();return;
+          }
           state.sheet=await api("/sheets/"+state.sheet.id);
           await renderSheet();await queueTable();
         }catch(err){alertBox(err.message,true);}
@@ -632,7 +646,9 @@
           '<p class="hint">Evaluación cerrada: los escaneos nuevos no modificarán las notas.</p>')+
         '</div>':'')+
       (canExport()?'<div class="actions"><a class="secondary" href="/api/applications/'+
-       encodeURIComponent(state.sid)+'/export">ZIP de resultados</a>'+
+       encodeURIComponent(state.sid)+'/export">'+
+       (report.estado_cierre==="cerrada"?"ZIP de resultados definitivos":
+       "ZIP de resultados PROVISIONALES")+'</a>'+
        '<a class="ghost" href="/api/applications/'+encodeURIComponent(state.sid)+
        '/export?internal=true">Expediente con evidencias auditadas</a></div>':'')+
       '<p class="hint">Selecciona un participante para confrontar su escaneo con el acetato. '+

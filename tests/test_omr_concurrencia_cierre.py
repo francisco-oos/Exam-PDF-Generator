@@ -187,3 +187,25 @@ def test_api_conciliacion_presenta_faltantes_y_cierre_protegido(tmp_path):
         closed=client.post(f"/api/applications/{sid}/close",headers=headers)
         assert closed.status_code==409
     svc.close()
+
+
+def test_guardar_ultima_decision_libera_reserva_atomica(tmp_path):
+    svc=WebService(tmp_path,start_workers=False)
+    admin=_admin(svc)
+    sid,people=_session(svc)
+    sheet,_=svc.store.register_page(
+        sid,"9"*64,0,_image(),people[0]["token"],
+        [None],[{"pregunta":1,"razon":"Grafito tenue"}],"revisar")
+    claim=svc.claim(admin,sheet)
+    saved=svc.save_decisions(admin,sheet,claim["lease"],claim["revision"],
+                             [{"pregunta":1,"decision":"A"}],
+                             "Comprobación física de marca")
+    assert saved["estado"]=="validada" and saved["reserva_liberada"]
+    assert svc.closure_summary(admin,sid)["revisiones_activas"]==0
+    with pytest.raises(WebError) as exc:
+        svc.save_decisions(admin,sheet,claim["lease"],saved["revision"],
+                           [{"pregunta":1,"decision":"B"}],"Intento tardío")
+    assert exc.value.status==409
+    svc.approve(admin,sheet)
+    assert svc.closure_summary(admin,sid)["listo"]
+    svc.close()

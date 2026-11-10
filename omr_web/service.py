@@ -475,6 +475,12 @@ class WebService:
                 raise WebError("Hoja inexistente.",404)
             self.require(user,sid=page["sesion_id"])
             self._assert_open(db,page["sesion_id"])
+            # Una hoja ya validada es inmutable salvo reapertura formal,
+            # incluso si su antiguo lease fue liberado tras guardar.
+            if page["estado"]=="validada":
+                if user["rol"]=="capturista":
+                    raise WebError("Una hoja validada requiere revisión del coordinador.",409)
+                raise WebError("Reabre una corrección autorizada desde Resultados.",409)
             lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
                              (sheet_id,)).fetchone()
             if (not lease or lease["usuario_id"]!=user["id"] or
@@ -485,12 +491,6 @@ class WebService:
                 raise WebError("La hoja cambió. Actualízala antes de guardar.",409)
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Identifica o resuelve antes esta hoja.",409)
-            if page["estado"]=="validada":
-                if user["rol"]=="capturista":
-                    raise WebError("Una hoja validada requiere revisión del coordinador.",409)
-                raise WebError(
-                    "La hoja ya fue validada: abre una re-corrección "
-                    "autorizada desde Resultados.",409)
             answers=json.loads(page["respuestas_json"])
             issues=json.loads(page["dudas_json"])
             original=list(answers)
@@ -529,12 +529,17 @@ class WebService:
                 dudas_json=?,estado=? WHERE id=?""",
                 (compact_json(answers),compact_json(issues),status,sheet_id))
             new_revision=lease["revision"]+1
+            # La reserva sólo se mantiene durante correcciones parciales.
+            # Al guardar la última duda, liberar atómicamente: no retener
+            # otra tableta cinco minutos ni impedir la aprobación 2/2.
+            new_expiry=now+300 if status=="revisar" else 0
             db.execute("""UPDATE web_reclamos SET revision=?,vence=?
-                WHERE hoja_id=?""",(new_revision,now+300,sheet_id))
+                WHERE hoja_id=?""",(new_revision,new_expiry,sheet_id))
             db.execute("DELETE FROM web_aprobaciones WHERE hoja_id=?", (sheet_id,))
             self._event(db,user["id"],sheet_id,"CORRECCION",
                         f"{len(changes)} reactivos; motivo: {reason}")
-        return {"revision":new_revision,"estado":status,"pendientes":len(issues)}
+        return {"revision":new_revision,"estado":status,"pendientes":len(issues),
+                "reserva_liberada":status=="validada"}
 
     def approve(self,user,sheet_id):
         self.require(user,roles={"admin","coordinador"})
