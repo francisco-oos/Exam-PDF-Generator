@@ -459,6 +459,13 @@ def test_cinco_capturistas_procesan_50_hojas_sin_duplicados(tmp_path):
                 user,sheet_id,claim["lease"],claim["revision"],
                 [{"pregunta":1,"decision":"A"}],"Revisión de prueba")
             assert saved["estado"]=="validada"
+            if not processed:
+                # La reserva sigue vigente, pero una hoja validada ya no
+                # permite que el capturista cambie respuestas de nuevo.
+                with pytest.raises(WebError,match="requiere revisión del coordinador"):
+                    service.save_decisions(
+                        user,sheet_id,claim["lease"],saved["revision"],
+                        [{"pregunta":1,"decision":"B"}],"Edición posterior")
             service.release(user,sheet_id,claim["lease"])
             processed.append(sheet_id)
         return processed
@@ -476,10 +483,6 @@ def test_cinco_capturistas_procesan_50_hojas_sin_duplicados(tmp_path):
         assert count==50
     with pytest.raises(WebError,match="requiere revisión del coordinador"):
         service.claim(users[0],sheet_ids[0])
-    with pytest.raises(WebError,match="requiere revisión del coordinador"):
-        service.save_decisions(
-            users[0],sheet_ids[0],"lease_vieja",1,
-            [{"pregunta":1,"decision":"B"}],"Cambio no autorizado")
     service.close()
 
 
