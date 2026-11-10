@@ -445,9 +445,41 @@
     content.innerHTML+='<div class="panel"><div class="tableWrap"><table><thead><tr><th>Archivo</th><th>Páginas</th><th>Pendientes</th><th>Ingresos</th><th></th></tr></thead><tbody>'+
       (docs.length?docs.map(d=>'<tr><td>'+h(d.nombre)+'<br><code>'+h(d.sha.slice(0,18))+'…</code></td>'+
       '<td>'+d.paginas+'</td><td>'+d.pendientes+'</td><td>'+d.veces_recibido+'</td>'+
-      '<td><button class="secondary" data-doc="'+h(d.sha)+'">Ver páginas</button></td></tr>').join(""):
+      '<td><div class="actions"><button class="secondary" data-doc="'+h(d.sha)+'">Ver páginas</button>'+
+      '<button class="ghost" data-reanalyze="'+h(d.sha)+'">Reanalizar</button></div></td></tr>').join(""):
       '<tr><td colspan="5">Todavía no hay PDF archivados.</td></tr>')+
-      '</tbody></table></div></div><div id="documentPages"></div>';
+      '</tbody></table></div></div>'+
+      '<div id="reanalysisStatus"></div><div id="documentPages"></div>';
+    onButton(content,"[data-reanalyze]",async e=>{
+      const digest=e.currentTarget.dataset.reanalyze;
+      const button=e.currentTarget;
+      if(!confirm("¿Volver a leer las marcas del PDF archivado con el motor actual? "+
+        "No se reemplazarán correcciones humanas ni se duplicarán folios."))return;
+      button.disabled=true;
+      try{
+        const job=await api("/documents/"+digest+"/reanalyze",{method:"POST"});
+        alertBox("Reanálisis iniciado. Folios y originales protegidos.");
+        const output=byId("reanalysisStatus");
+        const follow=async()=>{
+          try{
+            const result=await api("/jobs/"+job.trabajo_id);
+            output.innerHTML='<div class="panel"><h3>Reanálisis del PDF archivado</h3>'+
+              '<p>Estado: <b>'+h(result.estado)+'</b></p>'+
+              (result.estado==="terminado"?
+                '<p class="hint">Compara las dudas anteriores y posteriores por hoja. '+
+                'Una mejora sólo se aplica si no hay decisiones humanas.</p>'+
+                '<pre>'+h(JSON.stringify(result.resultado.aplicaciones,null,2))+'</pre>':
+                result.error?'<p class="tag bad">'+h(result.error)+'</p>':'')+
+              '</div>';
+            if(["pendiente","procesando"].includes(result.estado)&&
+               state.view==="bandeja")setTimeout(follow,1300);
+            if(result.estado==="terminado")await refreshApps();
+          }catch(err){output.textContent="Reanálisis: "+err.message;}
+        };
+        await follow();
+      }catch(err){alertBox(err.message,true);}
+      finally{button.disabled=false;}
+    });
     onButton(content,"[data-doc]",async e=>{
       try{
         const digest=e.currentTarget.dataset.doc;

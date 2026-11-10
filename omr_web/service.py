@@ -665,6 +665,32 @@ class WebService:
         self.wake()
         return jid
 
+    def reanalyze_archive(self,user,digest):
+        """Reprocesa el PDF ya archivado, nunca el archivo local del usuario.
+
+        Solo administradores. register_page conserva id/folio, evidencia y
+        correcciones humanas; la lectura automática solo sustituye una
+        pendiente cuando reduce el número de dudas. No aceptar un SHA sin
+        comprobar que el PDF inmutable aún existe e integra su hash.
+        """
+        self.require(user,roles={"admin"})
+        try:
+            source=self.inbox.original(digest)
+        except (ValueError,OSError) as exc:
+            raise WebError(str(exc),422) from exc
+        # Evitar doble envío si el administrador hace clic repetidamente.
+        with self.store.connect() as db:
+            current=db.execute("""
+                SELECT id FROM web_trabajos
+                WHERE ruta=? AND estado IN ('pendiente','procesando')
+                ORDER BY creado DESC LIMIT 1
+            """,(str(source),)).fetchone()
+        if current:
+            return {"trabajo_id":current["id"],"estado":"pendiente",
+                    "reutilizado":True}
+        jid=self.add_job(user,source)
+        return {"trabajo_id":jid,"estado":"pendiente","reutilizado":False}
+
     def job(self,user,jid):
         self.require(user)
         with self.store.connect() as db:
@@ -737,16 +763,41 @@ class WebService:
             except WebError:
                 withheld+=len(group["paginas"])
                 continue
+            # Comparación de la misma página anterior y posterior.
+            # La mejora del motor no debe atribuir cambios a otra sesión
+            # de un PDF mezclado ni alterar las decisiones del personal.
+            scoped=set(i-1 for i in group["paginas"])
+            previous={
+                page["pagina"]:page
+                for page in self.store.pages(group["sesion_id"])
+                if page["archivo_sha"]==sha and page["pagina"] in scoped
+            }
             report=scan_document(
                 self.store,group["sesion_id"],archived,
-                page_indices=[i-1 for i in group["paginas"]])
+                page_indices=list(scoped))
             self.inbox.mark_processed(sha,group["sesion_id"],report,
                                       operator=user["nombre"])
+            following={
+                page["pagina"]:page
+                for page in self.store.pages(group["sesion_id"])
+                if page["archivo_sha"]==sha and page["pagina"] in scoped
+            }
+            comparison=[{
+                "pagina":i+1,
+                "antes":len(previous[i]["dudas"]) if i in previous else None,
+                "despues":len(following[i]["dudas"]) if i in following else None,
+                "estado":following[i]["estado"] if i in following else "no encontrada",
+                "mejora_aplicada":any(d["pagina"]==i+1 and
+                                     str(d["estado"]).startswith("reprocesada_")
+                                     for d in report["detalles"]),
+            } for i in sorted(scoped)]
             imported.append({"sesion_id":group["sesion_id"],
                              "paginas":len(group["paginas"]),
                              "validadas":report["validadas"],
                              "revisar":report["revisar"],
-                             "repetidas":report["repetidas"]})
+                             "repetidas":report["repetidas"],
+                             "reprocesadas":report["reprocesadas"],
+                             "comparacion":comparison})
         return {"sha":sha,"total":inspection["total_paginas"],
                 "sin_identificar":len(inspection["no_identificadas"]),
                 "no_autorizadas":withheld,"aplicaciones":imported}

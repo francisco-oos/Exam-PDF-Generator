@@ -458,6 +458,11 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         engine.retry_job(user,job_id)
         return {"ok":True}
 
+    @web.post("/api/documents/{digest}/reanalyze")
+    def reanalyze_document(digest:str,user=Depends(write_user)):
+        """Relectura administrativa sobre copia SHA archivada, con auditoría."""
+        return engine.reanalyze_archive(user,digest)
+
     @web.get("/api/documents")
     def documents(user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador"})
