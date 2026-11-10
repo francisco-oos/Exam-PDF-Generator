@@ -291,3 +291,12 @@ def test_una_reserva_que_vencio_no_resucita_con_heartbeat(sample):
         svc.renew(owner,sheet,lease["lease"])
     assert stale.value.status==409
     svc.release(admin,sheet,acquired["lease"])
+
+
+def test_despues_de_expirar_no_se_reactiva_el_boton_al_cambiar_pregunta():
+    from pathlib import Path
+    script=(Path(__file__).resolve().parents[1]/
+            "omr_web"/"static"/"app.js").read_text(encoding="utf-8")
+    assert 'const reservationActive=Boolean(state.lease)' in script
+    assert "(!reservationActive?'disabled':'')" in script
+    assert 'if(!state.lease){alertBox("La reserva expiró.' in script

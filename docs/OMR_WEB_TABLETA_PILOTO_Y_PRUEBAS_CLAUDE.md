@@ -913,3 +913,5 @@ se libera de inmediato. La lista de hojas se actualiza cada 4.5 segundos
 en pantalla de revisión para reflejar ocupaciones ajenas. Pruebas
 test_renovar_reserva_lenta_sin_cambiar_revision_ni_otra_cuenta y
 test_una_reserva_que_vencio_no_resucita_con_heartbeat.
+
+**Cliente con lease expirado:** la vista de reactivos no debe volver a habilitar Guardar decisión o Captura completa después de cambiar de pregunta si la renovación perdió su reserva. El renderizado calcula reservationActive en cada reconstrucción de la UI, deshabilita las acciones y los manejadores vuelven a verificar el token antes de enviar. El servidor conserva el control definitivo de versiones y responde 409.

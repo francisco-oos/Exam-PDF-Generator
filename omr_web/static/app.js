@@ -387,6 +387,7 @@
   async function renderSheet(){
     const sheet=state.sheet;if(!sheet)return;
     const area=byId("sheetArea");if(!area)return;
+    const reservationActive=Boolean(state.lease);
     const q=sheet.preguntas[state.question-1];
     const pending=sheet.dudas.filter(x=>Number.isInteger(x.pregunta));
     const pendingIds=new Set(pending.map(x=>x.pregunta));
@@ -441,9 +442,13 @@
       (disputed?'<option value="" selected>— Selecciona una decisión —</option>':'')+
       ["A","B","C","D","BLANCO"].map(c=>'<option '+(!disputed&&c===value?'selected':'')+'>'+c+'</option>').join("")+
       '</select></label><label>Justificación<textarea id="reason" placeholder="Ej. Dos marcas o grafito tenue; decisión cotejada contra el papel"></textarea></label>'+
-      '<div class="actions"><button class="primary" id="saveChoice">Guardar decisión</button>'+
-      '<button class="secondary" id="captureWhole">Captura completa</button>'+
-      '<button class="ghost" id="releaseSheet">Liberar hoja</button></div>'+
+      (!reservationActive?'<p class="pendingReason">La reserva ya no está activa. Para continuar sin sobrescribir a otro operador vuelve a tomar la hoja desde la cola.</p>':'')+
+      '<div class="actions"><button class="primary" id="saveChoice" '+
+      (!reservationActive?'disabled':'')+'>Guardar decisión</button>'+
+      '<button class="secondary" id="captureWhole" '+
+      (!reservationActive?'disabled':'')+'>Captura completa</button>'+
+      '<button class="ghost" id="releaseSheet" '+
+      (!reservationActive?'disabled':'')+'>Liberar hoja</button></div>'+
       '<p class="hint">No elijas la respuesta solo por el acetato: comprueba la marca física. Toda decisión deja auditoría.</p></div></div>';
     byId("questionSelect").onchange=e=>{
       state.question=Number(e.target.value);renderSheet();
@@ -460,6 +465,7 @@
     };
     showSheetVisual();
     byId("saveChoice").onclick=async()=>{
+      if(!state.lease){alertBox("La reserva expiró. Toma la hoja nuevamente.",true);return;}
       if(!byId("decision").value){
         alertBox("Selecciona A, B, C, D o BLANCO tras revisar la marca física.",true);
         return;
@@ -488,6 +494,7 @@
       }catch(err){alertBox(err.message,true);}
     };
     byId("captureWhole").onclick=async()=>{
+      if(!state.lease){alertBox("La reserva expiró. Toma la hoja nuevamente.",true);return;}
       const area=byId("sheetArea");
       if(!area)return;
       const questions=state.sheet.preguntas,original=state.sheet.respuestas;
@@ -511,6 +518,7 @@
       area.append(form);form.scrollIntoView({behavior:"smooth",block:"start"});
       form.querySelector("#cancelFull").onclick=()=>form.remove();
       form.querySelector("#submitFull").onclick=async()=>{
+        if(!state.lease){alertBox("La reserva expiró. Toma la hoja nuevamente.",true);return;}
         const changes=[...form.querySelectorAll("[data-q]")].map(field=>({
           pregunta:Number(field.dataset.q),decision:field.value}));
         if(changes.some(x=>x.decision==="SIN REVISAR")){
