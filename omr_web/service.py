@@ -245,8 +245,12 @@ class WebService:
         self.require(user)
         # La ubicación local de salida no forma parte del contrato de la API.
         # Evitar exponer rutas absolutas del equipo servidor a navegadores.
-        sessions=[{k:v for k,v in row.items() if k!="lote_path"}
-                  for row in self.store.sessions()]
+        sessions=[
+            {k:v for k,v in row.items() if k!="lote_path"}|
+            {"calificacion_manual":bool(
+                (row.get("nombre_evaluacion") or "").startswith("MANUAL ·")
+                and row["modo"]=="personalizado")}
+            for row in self.store.sessions()]
         if user["rol"] == "admin":
             return sessions
         with self.store.connect() as db:
@@ -311,6 +315,9 @@ class WebService:
         return {
             "id":sheet_id,"sesion_id":row["sesion_id"],
             "evaluacion":sess.get("nombre_evaluacion") or sess["titulo"],
+            "calificacion_manual":bool(
+                (sess.get("nombre_evaluacion") or "").startswith("MANUAL ·")
+                and sess["modo"]=="personalizado"),
             "biblioteca":source or "Cuestionario histórico sin vínculo",
             "revision_biblioteca":sess.get("revision_biblioteca"),
             "participante":person["nombre"] if person else "Sin identificar",

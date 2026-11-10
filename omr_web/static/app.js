@@ -147,7 +147,7 @@
     renderTitle("Panel de operación","Una sola base central. Toda hoja conserva su aplicación, folio y evidencia.");
     content.innerHTML+='<div class="kpiList">'+[
       ["Aplicaciones",state.apps.length],["Folios emitidos",total],
-      ["Hojas por revisar",pend],["Con sesión QR",state.apps.filter(x=>x.cantidad_participantes).length]
+      ["Hojas por revisar",pend],["Con sesión QR",state.apps.filter(x=>x.cantidad_participantes&&!x.calificacion_manual).length]
     ].map(x=>'<div class="panel"><div class="metric">'+x[1]+'</div><div class="muted">'+x[0]+'</div></div>').join("")+'</div>'+
     '<div class="panel"><h2>¿Qué necesitas hacer?</h2><div class="actions">'+
     '<button class="primary" data-go="revision">Tomar siguiente hoja</button>'+
@@ -162,7 +162,7 @@
       "Una aplicación conserva sus QR, participantes y escaneos de distintas jornadas.");
     content.innerHTML+='<div class="panel"><div class="tableWrap"><table><thead><tr><th>Evaluación</th><th>Modo</th><th>Participantes</th><th>Hojas</th><th>Pendientes</th><th>Acciones</th></tr></thead><tbody>'+
       (state.apps.length?state.apps.map(x=>'<tr><td><b>'+h(x.nombre_evaluacion||x.titulo)+'</b><br><code>'+h(x.id)+'</code></td>'+
-        '<td>'+h(x.modo)+'</td><td>'+x.cantidad_participantes+'</td><td>'+x.hojas_escaneadas+'</td><td>'+x.hojas_pendientes+
+        '<td>'+h(x.calificacion_manual?"Manual · acetato":x.modo)+'</td><td>'+x.cantidad_participantes+'</td><td>'+x.hojas_escaneadas+'</td><td>'+x.hojas_pendientes+
         '</td><td><button class="secondary" data-sid="'+h(x.id)+'">Abrir</button></td></tr>').join(""):
         '<tr><td colspan="6">Todavía no hay aplicaciones.</td></tr>')+
     '</tbody></table></div></div>'+
@@ -278,7 +278,7 @@
       '<p>Pregunta seleccionada · versión '+state.revision+'</p></div><span class="tag warn">'+
       h(sheet.estado)+'</span></div>'+
       '<div class="questionBox"><b>Participante:</b> '+h(sheet.participante)+
-      ' · <b>Folio:</b> '+h(sheet.folio||"Sin identificar")+'<p class="hint">'+
+      ' · <b>Folio'+(sheet.calificacion_manual?' interno':'')+':</b> '+h(sheet.folio||"Sin identificar")+'<p class="hint">'+
       h(sheet.evaluacion)+' · Biblioteca: '+h(sheet.biblioteca)+
       (sheet.revision_biblioteca?' · Revisión '+h(sheet.revision_biblioteca):'')+
       '</p></div><label>Reactivo del examen<select id="questionSelect">'+questions+'</select></label>'+

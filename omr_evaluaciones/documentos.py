@@ -241,9 +241,10 @@ class DocumentInbox:
                      WHERE p.sha=d.sha AND (
                        p.estado IN ('pendiente','identificada',
                                     'conflicto_identidad','conflicto_duplicado')
-                       OR (p.estado='manual_pendiente' AND
-                           COALESCE((SELECT h.estado FROM hojas h
-                                     WHERE h.id=p.hoja_id),'')!='validada')
+                       OR (p.estado IN ('procesada','reimportada','manual_pendiente')
+                           AND COALESCE((SELECT h.estado FROM hojas h
+                                         WHERE h.id=p.hoja_id),'') IN
+                               ('revisar','sin_identificar','duplicado'))
                      )) AS pendientes,
                     (SELECT COUNT(*) FROM ingresos_documentos_omr i
                      WHERE i.sha=d.sha) AS veces_recibido
