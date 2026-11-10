@@ -22,7 +22,9 @@ from omr_evaluaciones.documentos import sha_file
 from omr_evaluaciones.expedientes import export_session_bundle, participant_receipt
 from .service import WebError, WebService
 from .evidencia import audit_evidence_pdf, detailed_history_pdf, resolve_archive_image
-from .designer import import_exam, serialize_exam, update_exam, preview_exam, resource, import_roster
+from .designer import (
+    import_exam, serialize_exam, update_exam, preview_exam,
+    preview_with_uploads, resource, import_roster)
 
 MAX_UPLOAD = 100 * 1024 * 1024
 FILE_NAMES = frozenset({
@@ -217,7 +219,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             empresa:str=Form(""),grupo:str=Form(""),subtitulo:str=Form(""),
             instrucciones:str=Form("Selecciona una sola respuesta por pregunta."),
             papel:str=Form("Carta"),letra:float=Form(9),
-            modo:str=Form("ecologico"),
+            logo_ancho_mm:float=Form(23),modo:str=Form("ecologico"),
             color_titulo:str=Form("#213A4C"),
             color_subtitulo:str=Form("#5E7180"),
             color_respuestas:str=Form("#213A4C"),
@@ -230,6 +232,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             engine.library,file,name=name,title=title,images=images,logo=logo,
             meta={"empresa":empresa,"grupo":grupo,"subtitulo":subtitulo,
                   "instrucciones":instrucciones,"papel":papel,"letra":letra,
+                  "logo_ancho_mm":logo_ancho_mm,
                   "modo":modo,"color_titulo":color_titulo,
                   "color_subtitulo":color_subtitulo,
                   "color_respuestas":color_respuestas,
@@ -256,6 +259,19 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
                         user=Depends(write_user)):
         engine.require(user,roles={"admin"})
         content=preview_exam(engine.library,exam_id,config,view)
+        return Response(content,media_type="application/pdf",
+                        headers={"Cache-Control":"no-store"})
+
+    @web.post("/api/library/{exam_id}/preview-live")
+    async def library_preview_live(
+            exam_id:str,config:str=Form(...),
+            images:list[UploadFile]=File(default=[]),
+            logo:UploadFile|None=File(default=None),
+            view:str="Cuadernillo",user=Depends(write_user)):
+        """Previo a guardar: usar solo fotos temporales y no emitir folios."""
+        engine.require(user,roles={"admin"})
+        content=await preview_with_uploads(
+            engine.library,exam_id,config,view,images,logo)
         return Response(content,media_type="application/pdf",
                         headers={"Cache-Control":"no-store"})
 
