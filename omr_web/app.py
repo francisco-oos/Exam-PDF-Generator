@@ -555,6 +555,14 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         engine.require(user,roles={"admin","coordinador","auditor"},sid=sid)
         return engine.results_with_evidence(user,sid)
 
+    @web.get("/api/applications/{sid}/closure")
+    def closure_summary(sid:str,user=Depends(user_of)):
+        return engine.closure_summary(user,sid)
+
+    @web.post("/api/applications/{sid}/close")
+    def close_application(sid:str,user=Depends(write_user)):
+        return engine.close_application(user,sid)
+
     @web.get("/api/applications/{sid}/events")
     def events(sid:str,user=Depends(user_of)):
         return engine.list_events(user,sid)

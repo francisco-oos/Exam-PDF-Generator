@@ -345,6 +345,13 @@ class OMRStore:
                 raise OSError('No fue posible archivar el escaneo.')
 
         with self.connect() as db:
+            # Serializar la comprobación del folio y su inserción incluso cuando
+            # dos administradores importan PDFs diferentes a la vez.
+            db.execute("BEGIN IMMEDIATE")
+            session_state=db.execute("SELECT estado FROM sesiones WHERE id=?",
+                                     (sid,)).fetchone()
+            if session_state is None or session_state["estado"]!="abierta":
+                raise ValueError("Evaluación inexistente o cerrada: no se modifica su calificación.")
             original=db.execute("""
                 SELECT * FROM hojas WHERE sesion_id=? AND archivo_sha=? AND pagina=?
             """,(sid,source_sha,page_idx)).fetchone()

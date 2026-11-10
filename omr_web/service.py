@@ -7,6 +7,7 @@ No hay sincronización de SQLite a través de red ni segunda base de resultados.
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import hmac
 import json
 import os
@@ -30,6 +31,43 @@ from omr_evaluaciones.motor import (
 
 VALID_ROLES = {"admin", "coordinador", "capturista", "auditor"}
 IDENTITY = re.compile(r"^[A-Za-z0-9_.-]{3,40}$")
+
+
+@contextmanager
+def exclusive_scan_queue(lockfile: Path):
+    """Candado de proceso para una cola SQLite compartida, Linux y Windows.
+
+    El lock del SO se libera también si el proceso termina abruptamente.
+    Un segundo worker espera sin bloquear el servidor web ni las revisiones.
+    """
+    lockfile.parent.mkdir(parents=True, exist_ok=True)
+    with lockfile.open("a+b") as handle:
+        if os.name=="nt":
+            import msvcrt
+            handle.seek(0)
+            if not handle.read(1):
+                handle.seek(0)
+                handle.write(b"0")
+                handle.flush()
+            while True:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(),msvcrt.LK_NBLCK,1)
+                    break
+                except OSError:
+                    time.sleep(0.2)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(),msvcrt.LK_UNLCK,1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
 
 
 class WebError(Exception):
@@ -126,10 +164,13 @@ class WebService:
                 CREATE INDEX IF NOT EXISTS idx_auditoria_hoja
                   ON web_auditoria_revision(hoja_id,id);
             """)
-            # Reiniciar trabajos interrumpidos sin perder sus originales
-            # (la importación OMR ya es idempotente).
-            db.execute("UPDATE web_trabajos SET estado='pendiente' "
-                       "WHERE estado='procesando'")
+            # Sólo el worker que tenga el candado global puede recuperar
+            # trabajos interrumpidos: otra instancia podría estar procesando.
+            columns={r["name"] for r in db.execute("PRAGMA table_info(web_trabajos)")}
+            if "archivo_sha" not in columns:
+                db.execute("ALTER TABLE web_trabajos ADD COLUMN archivo_sha TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_web_trabajos_sha "
+                       "ON web_trabajos(archivo_sha,estado)")
         if self._executor:
             self.wake()
 
@@ -270,6 +311,12 @@ class WebService:
                 (user["id"],))}
         return [x for x in sessions if x["id"] in allowed]
 
+    @staticmethod
+    def _assert_open(db, sid):
+        session=db.execute("SELECT estado FROM sesiones WHERE id=?",(sid,)).fetchone()
+        if not session or session["estado"]!="abierta":
+            raise WebError("La evaluación está cerrada; requiere una nueva autorización.",409)
+
     def questions(self, user, sid):
         self.require(user, sid=sid)
         sess=self.store.session(sid)
@@ -353,6 +400,7 @@ class WebService:
             if not page:
                 raise WebError("Hoja inexistente.", 404)
             self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Hoja sin identidad válida o en conflicto.", 409)
             if page["estado"]=="validada" and user["rol"]=="capturista":
@@ -426,6 +474,7 @@ class WebService:
             if not page:
                 raise WebError("Hoja inexistente.",404)
             self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
             lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
                              (sheet_id,)).fetchone()
             if (not lease or lease["usuario_id"]!=user["id"] or
@@ -496,6 +545,7 @@ class WebService:
             if not page:
                 raise WebError("Hoja inexistente.",404)
             self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
             if page["estado"]!="validada":
                 raise WebError("Solo se aprueban hojas validadas.",409)
             lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
@@ -521,6 +571,7 @@ class WebService:
             if not page:
                 raise WebError("Hoja inexistente.",404)
             self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
             if page["estado"]!="validada" or not page["token"]:
                 raise WebError("Sólo se reabren hojas identificadas y validadas.",409)
             answers=json.loads(page["respuestas_json"])
@@ -608,6 +659,7 @@ class WebService:
             approvals={x["hoja_id"]:dict(x) for x in db.execute(
                 "SELECT hoja_id,fecha,revision FROM web_aprobaciones")}
         return {"sesion_id":sid,"promedio":report["promedio"],
+                "estado_cierre":report["sesion"]["estado"],
                 "validados":report["validados"],"pendientes":report["pendientes"],
                 "ausentes":report["ausentes"],
                 "participantes":[{
@@ -618,6 +670,63 @@ class WebService:
                     "hoja_id":by_person.get(p["id"]),
                     "aprobacion":approvals.get(by_person.get(p["id"])),
                 } for p in report["participantes"]]}
+
+    def closure_summary(self,user,sid):
+        """Pre-cierre: ningún ausente se disfraza de calificado."""
+        self.require(user,roles={"admin","coordinador"},sid=sid)
+        report=self.store.results(sid)
+        pages=report["hojas"]
+        with self.store.connect() as db:
+            approval={row["hoja_id"] for row in db.execute(
+                "SELECT hoja_id FROM web_aprobaciones")}
+            active=db.execute("""SELECT COUNT(*) FROM web_reclamos wr
+                JOIN hojas h ON h.id=wr.hoja_id
+                WHERE h.sesion_id=? AND wr.vence>?""",
+                (sid,int(time.time()))).fetchone()[0]
+            processing=db.execute("""SELECT COUNT(*) FROM web_trabajos
+                WHERE estado IN ('pendiente','procesando')""").fetchone()[0]
+        missing=[]
+        for person in report["participantes"]:
+            matched=[p for p in pages if p["token"]==person["token"]
+                     and p["estado"]!="descartada"]
+            valid=[p for p in matched if p["estado"]=="validada"]
+            if not matched:
+                reason="SIN_ESCANEO"
+            elif any(p["estado"]=="duplicado" for p in matched) or len(valid)>1:
+                reason="DUPLICADO_POR_RESOLVER"
+            elif len(valid)!=1:
+                reason="REVISION_PENDIENTE"
+            elif valid[0]["id"] not in approval:
+                reason="APROBACION_PENDIENTE"
+            else:
+                continue
+            missing.append({"id":person["id"],"folio":person["folio"],
+                            "nombre":person["nombre"],"motivo":reason,
+                            "estado":"pendiente"})
+        unidentified=sum(p["estado"]=="sin_identificar" for p in pages)
+        return {"sesion_id":sid,"estado":report["sesion"]["estado"],
+                "total_lista":len(report["participantes"]),
+                "validados":report["validados"],"faltantes":missing,
+                "cantidad_pendientes":len(missing),
+                "sin_identificar":unidentified,
+                "revisiones_activas":active,"trabajos_en_cola":processing,
+                "listo":not (missing or unidentified or active or processing)}
+
+    def close_application(self,user,sid):
+        """Cierre irreversible del piloto, solamente con lista conciliada."""
+        self.require(user,roles={"admin","coordinador"},sid=sid)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._assert_open(db,sid)
+            summary=self.closure_summary(user,sid)
+            if not summary["listo"]:
+                raise WebError("Cierre bloqueado: hay folios sin escaneo, "
+                               "correcciones, aprobaciones o tareas pendientes. "
+                               "Consulta la conciliación antes de entregar.",409)
+            db.execute("UPDATE sesiones SET estado='cerrada' WHERE id=?",(sid,))
+            self._event(db,user["id"],None,"CIERRE_EVALUACION",
+                        "Lista conciliada: "+str(summary["total_lista"])+" personas")
+        return {**summary,"estado":"cerrada","listo":True}
 
     def list_events(self,user,sid):
         self.require(user,sid=sid)
@@ -806,11 +915,33 @@ class WebService:
 
     def add_job(self,user,source):
         self.require(user,roles={"admin","coordinador"})
+        source=Path(source)
+        if not source.is_file():
+            raise WebError("El PDF de ingreso no está disponible.",404)
+        digest=hashlib.sha256()
+        with source.open("rb") as fp:
+            for chunk in iter(lambda:fp.read(1024*1024),b""):
+                digest.update(chunk)
+        sha=digest.hexdigest()
         jid=uuid4().hex
+        reused=False
         with self.store.connect() as db:
-            db.execute("""INSERT INTO web_trabajos VALUES(?,?,?,?,?,?,?,?)""",
-                       (jid,user["id"],str(source),"pendiente","{}","",
-                        utcnow(),utcnow()))
+            db.execute("BEGIN IMMEDIATE")
+            old=db.execute("""SELECT id FROM web_trabajos
+                WHERE archivo_sha=? AND estado IN ('pendiente','procesando')
+                ORDER BY creado,id LIMIT 1""",(sha,)).fetchone()
+            if old:
+                jid=old["id"]
+                reused=True
+            else:
+                db.execute("""INSERT INTO web_trabajos
+                    (id,operador_id,ruta,estado,resultado,error,creado,actualizado,archivo_sha)
+                    VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (jid,user["id"],str(source),"pendiente","{}","",
+                     utcnow(),utcnow(),sha))
+        if reused and source.resolve().is_relative_to(self.incoming.resolve()):
+            # El ingreso repetido temporal nunca sustituye al PDF archivado.
+            source.unlink(missing_ok=True)
         self.wake()
         return jid
 
@@ -849,9 +980,15 @@ class WebService:
                 raise WebError("Trabajo inexistente.",404)
             if user["rol"]!="admin" and row["operador_id"]!=user["id"]:
                 raise WebError("Trabajo ajeno.",403)
+        with self.store.connect() as db:
+            position=(1+db.execute("""SELECT COUNT(*) FROM web_trabajos
+                WHERE estado='pendiente' AND
+                      (creado < ? OR (creado=? AND id < ?))""",
+                (row["creado"],row["creado"],jid)).fetchone()[0]
+                if row["estado"]=="pendiente" else None)
         return {"id":jid,"estado":row["estado"],"error":row["error"],
                 "resultado":json.loads(row["resultado"]),
-                "creado":row["creado"]}
+                "posicion_cola":position,"creado":row["creado"]}
 
     def wake(self):
         if self._executor and self._wake_lock.acquire(blocking=False):
@@ -859,33 +996,38 @@ class WebService:
 
     def _process_pending(self):
         try:
-            while True:
+            # El ThreadPoolExecutor es por instancia; este candado protege
+            # también contra dos procesos uvicorn o administradores simultáneos.
+            with exclusive_scan_queue(self.root/"omr"/"web_cola.lock"):
                 with self.store.connect() as db:
                     db.execute("BEGIN IMMEDIATE")
-                    row=db.execute("""SELECT * FROM web_trabajos
-                        WHERE estado='pendiente' ORDER BY creado,id LIMIT 1""").fetchone()
-                    if not row:
-                        break
-                    db.execute("UPDATE web_trabajos SET estado='procesando', "
-                               "actualizado=? WHERE id=?",(utcnow(),row["id"]))
-                try:
-                    result=self._process_file(row)
+                    # Bajo lock global no existe otro worker vivo procesando.
+                    # Solo aquí se recuperan tareas de un proceso caído.
+                    db.execute("UPDATE web_trabajos SET estado='pendiente' "
+                               "WHERE estado='procesando'")
+                while True:
                     with self.store.connect() as db:
-                        db.execute("""UPDATE web_trabajos SET estado='terminado',
-                            resultado=?,error='',actualizado=? WHERE id=?""",
-                            (compact_json(result),utcnow(),row["id"]))
-                except Exception as exc:
-                    with self.store.connect() as db:
-                        db.execute("""UPDATE web_trabajos SET estado='error',
-                            error=?,actualizado=? WHERE id=?""",
-                            (str(exc)[:550],utcnow(),row["id"]))
+                        db.execute("BEGIN IMMEDIATE")
+                        row=db.execute("""SELECT * FROM web_trabajos
+                            WHERE estado='pendiente' ORDER BY creado,id LIMIT 1""").fetchone()
+                        if not row:
+                            break
+                        db.execute("UPDATE web_trabajos SET estado='procesando', "
+                                   "actualizado=? WHERE id=?",(utcnow(),row["id"]))
+                    try:
+                        result=self._process_file(row)
+                        with self.store.connect() as db:
+                            db.execute("""UPDATE web_trabajos SET estado='terminado',
+                                resultado=?,error='',actualizado=? WHERE id=?""",
+                                (compact_json(result),utcnow(),row["id"]))
+                    except Exception as exc:
+                        with self.store.connect() as db:
+                            db.execute("""UPDATE web_trabajos SET estado='error',
+                                error=?,actualizado=? WHERE id=?""",
+                                (str(exc)[:550],utcnow(),row["id"]))
         finally:
-            # En operación normal wake() adquirió el lock. Las pruebas y
-            # recuperación explícita permiten ejecutar la cola sin executor.
             if self._wake_lock.locked():
                 self._wake_lock.release()
-            # Si llegó un trabajo justo después de comprobar la cola vacía,
-            # su add_job no pudo adquirir el candado. Volver a despertarla.
             if self._executor:
                 with self.store.connect() as db:
                     pending=db.execute("SELECT 1 FROM web_trabajos "
