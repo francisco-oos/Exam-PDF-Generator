@@ -155,6 +155,22 @@
         if(remove)remove.checked=false;
       }
     };
+    const removeLogo=sel(panel,'#removeLogo');
+    if(removeLogo)removeLogo.onchange=e=>{
+      draft.quitarLogo=e.target.checked;
+      if(e.target.checked){
+        pendingLogo=null;
+        sel(panel,'#designerLogo').value='';
+      }
+    };
+    all(panel,'[data-remove-image]').forEach(box=>box.onchange=e=>{
+      if(!e.target.checked)return;
+      const row=e.target.closest('[data-question]');
+      const index=Number(row.dataset.question);
+      draft.preguntas[index].pendingImage=null;
+      const input=sel(row,'[data-image]');
+      if(input)input.value='';
+    });
     all(panel,'[data-preview]').forEach(button=>button.onclick=()=>{
       activeView=button.dataset.preview;preview();
     });
