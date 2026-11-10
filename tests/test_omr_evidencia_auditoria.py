@@ -245,6 +245,10 @@ def test_expediente_zip_incluye_evidencia_auditada_sin_sustituir_original(tmp_pa
                 assert "PILOTO" in text
                 assert "Persona ficticia 4" in text
             assert "Evidencias_Ordenadas.pdf" in names
+            assert "Bitacora_Revisiones_Detallada.pdf" in names
+            with fitz.open(stream=zipped.read(
+                    "Bitacora_Revisiones_Detallada.pdf"),filetype="pdf") as history:
+                assert "Bitacora detallada" in history[0].get_text()
             import json
             manifest=json.loads(zipped.read("Manifiesto.json"))
             assert audited[0] in manifest["archivos_sha256"]
