@@ -421,6 +421,33 @@ class WebService:
             self._event(db,user["id"],sheet_id,"RECLAMAR","Revisión temporal")
         return {"lease":token,"revision":rev,"vence_en_segundos":ttl}
 
+    def renew(self,user,sheet_id,lease_token,*,ttl=300):
+        """Renueva una reserva activa sin cambiar respuestas, revisión ni auditoría.
+
+        Una pestaña desconectada deja de renovarse y expira. Ni otra cuenta,
+        ni un token obsoleto, ni una hoja validada pueden revivir el candado.
+        """
+        self.require(user,roles={"admin","coordinador","capturista"})
+        now=int(time.time())
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            page=db.execute("SELECT sesion_id,estado FROM hojas WHERE id=?",
+                            (sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
+            lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
+                             (sheet_id,)).fetchone()
+            if (page["estado"]!="revisar" or not lease or
+                lease["usuario_id"]!=user["id"] or lease["vence"]<=now or
+                not hmac.compare_digest(lease["token_hash"],checksum(lease_token))):
+                raise WebError("Reserva caducada o perteneciente a otra sesión. "
+                               "Conserva tus apuntes y vuelve a tomar la hoja.",409)
+            db.execute("UPDATE web_reclamos SET vence=? WHERE hoja_id=?",
+                       (now+ttl,sheet_id))
+        return {"vence_en_segundos":ttl,"revision":lease["revision"]}
+
     def claim_next(self,user,sid):
         """Repartir trabajo sin que dos personas reciban la misma hoja.
 

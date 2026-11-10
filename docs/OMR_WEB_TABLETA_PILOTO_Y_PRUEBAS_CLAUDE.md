@@ -896,3 +896,20 @@ deshabilitado hasta la confirmación, y el servidor exige rol autorizado,
 evaluación abierta, hoja validada, ausencia de otro lease y (si hubo
 corrección manual) persona distinta del último corrector. La confirmación
 visual no sustituye la comprobación en papel físico.
+
+
+### Revisión prolongada y actualización compartida
+
+Una hoja pendiente usa lease de 5 minutos. Mientras el navegador
+conserve la misma hoja de revisión, el frontend envía un heartbeat
+autenticado cada 45 segundos a POST /api/sheets/{id}/renew, que extiende
+5 minutos desde la última renovación. No modifica respuestas, versión,
+puntajes ni historial. Si otro navegador robó la sesión, el token cambió
+o expiró, la API responde 409 y NO se revive la reserva anterior.
+El frontend informa al usuario, deshabilita los botones de guardar y
+conserva visibles sus decisiones sin guardar para cotejo. La siguiente
+persona puede reclamar tras expiración; al cerrar sesión/cambiar tarea
+se libera de inmediato. La lista de hojas se actualiza cada 4.5 segundos
+en pantalla de revisión para reflejar ocupaciones ajenas. Pruebas
+test_renovar_reserva_lenta_sin_cambiar_revision_ni_otra_cuenta y
+test_una_reserva_que_vencio_no_resucita_con_heartbeat.

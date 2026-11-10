@@ -241,3 +241,53 @@ def test_la_segunda_firma_se_presenta_solo_tras_cotejar_la_ficha():
     assert 'id="secondReviewConfirm"' in script
     assert 'id="approveFromEvidence"' in script
     assert 'confirmation.checked' in script
+
+
+def test_renovar_reserva_lenta_sin_cambiar_revision_ni_otra_cuenta(sample):
+    import time
+    svc,admin,sid,people=sample
+    sheet=register(svc,sid,people[0],51,[None,"C","D"],[
+        {"pregunta":1,"razon":"Grafito tenue"}],"revisar")
+    first=second_user(svc,admin,"auxiliarlento",sid=sid)
+    other=second_user(svc,admin,"auxiliarajeno",sid=sid)
+    lease=svc.claim(first,sheet,ttl=60)
+    with svc.store.connect() as db:
+        # Quedan pocos segundos: renovar debe ampliar la reserva.
+        db.execute("UPDATE web_reclamos SET vence=? WHERE hoja_id=?",
+                   (int(time.time())+2,sheet))
+    saved=svc.renew(first,sheet,lease["lease"])
+    assert saved["revision"]==lease["revision"]
+    assert saved["vence_en_segundos"]==300
+    with svc.store.connect() as db:
+        expires=db.execute("SELECT vence FROM web_reclamos WHERE hoja_id=?",
+                           (sheet,)).fetchone()["vence"]
+        assert expires>time.time()+200
+    with pytest.raises(WebError) as denied:
+        svc.renew(other,sheet,lease["lease"])
+    assert denied.value.status==409
+    result=svc.save_decisions(first,sheet,lease["lease"],lease["revision"],
+         [{"pregunta":1,"decision":"A"}],"Cotejo tras lectura prolongada")
+    assert result["reserva_liberada"]
+    with pytest.raises(WebError) as released:
+        svc.renew(first,sheet,lease["lease"])
+    assert released.value.status==409
+
+
+def test_una_reserva_que_vencio_no_resucita_con_heartbeat(sample):
+    import time
+    svc,admin,sid,people=sample
+    sheet=register(svc,sid,people[0],52,[None,"C","D"],[
+        {"pregunta":1,"razon":"Marca dudosa"}],"revisar")
+    owner=second_user(svc,admin,"auxvencido",sid=sid)
+    lease=svc.claim(owner,sheet)
+    with svc.store.connect() as db:
+        db.execute("UPDATE web_reclamos SET vence=? WHERE hoja_id=?",
+                   (int(time.time())-1,sheet))
+    with pytest.raises(WebError) as expired:
+        svc.renew(owner,sheet,lease["lease"])
+    assert expired.value.status==409
+    acquired=svc.claim(admin,sheet)
+    with pytest.raises(WebError) as stale:
+        svc.renew(owner,sheet,lease["lease"])
+    assert stale.value.status==409
+    svc.release(admin,sheet,acquired["lease"])

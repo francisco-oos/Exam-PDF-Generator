@@ -460,6 +460,10 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     def claim(sheet_id:str,user=Depends(write_user)):
         return engine.claim(user,sheet_id)
 
+    @web.post("/api/sheets/{sheet_id}/renew")
+    def renew(sheet_id:str,data:LeasePayload,user=Depends(write_user)):
+        return engine.renew(user,sheet_id,data.lease)
+
     @web.post("/api/sheets/{sheet_id}/release")
     def release(sheet_id:str,data:LeasePayload,user=Depends(write_user)):
         engine.release(user,sheet_id,data.lease)

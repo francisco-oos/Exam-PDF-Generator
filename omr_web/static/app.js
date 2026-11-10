@@ -6,7 +6,7 @@
   const state = {user:null, apps:[], sid:null, view:"inicio", sheet:null,
                  lease:null, revision:0, question:1,
                  highlight:true, acetate:false, resultAcetate:true,
-                 selectedResult:null, jobs:[], timer:null, flow:null, jobsWatch:0};
+                 selectedResult:null, jobs:[], timer:null, flow:null, jobsWatch:0, reviewWatch:0, leaseWatch:0};
   const h = value => String(value ?? "").replace(/[&<>"']/g,
     c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const cookie = name => {
@@ -33,7 +33,9 @@
            opts.body?JSON.stringify(opts.body):undefined,credentials:"same-origin"});
     if(!response.ok){
       const obj=await response.json().catch(()=>({error:response.statusText}));
-      throw Error(obj.error||obj.detail||"Error HTTP "+response.status);
+      const error=Error(obj.error||obj.detail||"Error HTTP "+response.status);
+      error.status=response.status;
+      throw error;
     }
     return response.status===204?{}:await response.json();
   }
@@ -93,6 +95,39 @@
       method:"POST",body:{lease:state.lease}});
     state.sheet=null;
     state.lease=null;
+    state.leaseWatch++;
+  }
+  function watchCurrentLease(){
+    const id=state.sheet?.id,token=state.lease;
+    if(!id||!token)return;
+    const watcher=++state.leaseWatch;
+    const active=()=>watcher===state.leaseWatch&&
+      state.sheet?.id===id&&state.lease===token&&state.view==="revision";
+    const renew=async()=>{
+      if(!active())return;
+      try{
+        await api("/sheets/"+encodeURIComponent(id)+"/renew",{
+          method:"POST",body:{lease:token}});
+      }catch(err){
+        if(!active())return;
+        if(err.status===409||err.status===403){
+          state.lease=null;
+          state.leaseWatch++;
+          alertBox("La reserva terminó. Los cambios anteriores siguen guardados; anota las decisiones sin guardar y vuelve a tomar la hoja.",true);
+          const area=byId("sheetArea");
+          if(area){
+            area.insertAdjacentHTML("afterbegin",'<div class="panel"><strong>Reserva expirada</strong><p>Las respuestas no guardadas se mantienen visibles para que puedas cotejarlas, pero ya no puedes enviarlas desde esta sesión.</p></div>');
+            area.querySelectorAll("#saveChoice,#captureWhole,#submitFull,#releaseSheet").forEach(b=>b.disabled=true);
+          }
+          return;
+        }
+        alertBox("No se pudo renovar la reserva por la red. Reintentando...",true);
+        if(active())setTimeout(renew,15000);
+        return;
+      }
+      if(active())setTimeout(renew,45000);
+    };
+    setTimeout(renew,45000);
   }
   async function boot(){
     try{
@@ -248,6 +283,7 @@
         const claim=await api("/applications/"+state.sid+"/claim-next",{method:"POST"});
         state.lease=claim.lease;state.revision=claim.revision;
         state.sheet=await api("/sheets/"+claim.hoja_id);
+        watchCurrentLease();
         const first=state.sheet.dudas.find(x=>typeof x.pregunta==="number");
         state.question=first?.pregunta||1;
         await renderSheet();await queueTable();
@@ -262,7 +298,15 @@
       catch(err){alertBox("No se pudo liberar la hoja: "+err.message,true);e.target.value=state.sid;return;}
       state.sid=e.target.value;await reviewQueue();
     };
-    await queueTable();
+    const watcher=++state.reviewWatch;
+    async function refreshReviewQueue(){
+      if(watcher!==state.reviewWatch||state.view!=="revision")return;
+      try{await queueTable();}
+      catch(err){alertBox("No se pudo actualizar la cola: "+err.message,true);}
+      if(watcher===state.reviewWatch&&state.view==="revision")
+        setTimeout(refreshReviewQueue,4500);
+    }
+    await refreshReviewQueue();
   }
   async function queueTable(){
     const list=await api("/applications/"+state.sid+"/sheets");
@@ -309,6 +353,7 @@
     const claim=await api("/sheets/"+id+"/claim",{method:"POST"});
     state.lease=claim.lease;state.revision=claim.revision;
     state.sheet=await api("/sheets/"+id);
+    watchCurrentLease();
     const q=state.sheet.dudas.find(x=>typeof x.pregunta==="number");
     state.question=q?.pregunta||1;
     await renderSheet();
