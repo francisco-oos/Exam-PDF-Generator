@@ -269,3 +269,40 @@ def test_expediente_zip_incluye_evidencia_auditada_sin_sustituir_original(tmp_pa
                 zipped.read(audited[0])).hexdigest()
         assert hashlib.sha256(original.read_bytes()).hexdigest()==sha_before
     svc.close()
+
+
+
+def test_worktree_copia_reutiliza_imagen_archivada_con_ruta_absoluta_anterior(tmp_path):
+    """Mover una copia no permite leer fuera de root ni rompe PDF/overlay."""
+    import shutil
+    origin=tmp_path/"anterior"
+    copy=tmp_path/"nuevo_worktree"
+    one=create_app(origin,start_workers=False)
+    store=one.state.engine.store
+    one.state.engine.setup(one.state.engine._setup_token,"admintest",
+                           "Admin Test","ContraseñaTemporal123456!")
+    sid,sheet=_new_session(one.state.engine)
+    original_path=Path(store.pages(sid)[0]["imagen"])
+    assert original_path.is_file()
+    one.state.engine.close()
+    shutil.copytree(origin,copy)
+    relocated=create_app(copy,start_workers=False)
+    with TestClient(relocated) as c:
+        head=_login(c,"admintest","ContraseñaTemporal123456!")
+        assert c.get("/api/sheets/"+sheet+"/image").status_code==200
+        assert c.get("/api/sheets/"+sheet+"/overlay?acetato=true").status_code==200
+        audit=c.get("/api/sheets/"+sheet+"/evidence?acetato=true")
+        assert audit.status_code==200,audit.text[:200]
+        assert audit.content.startswith(b"%PDF")
+        # El otro directorio puede desaparecer sin inutilizar el worktree.
+        shutil.rmtree(origin)
+        assert c.get("/api/sheets/"+sheet+"/image").status_code==200
+        assert c.get("/api/sheets/"+sheet+"/overlay?acetato=true").status_code==200
+        assert c.get("/api/sheets/"+sheet+"/evidence").status_code==200
+        moved=copy/"omr"/"escaneos"/sid/(sheet+".png")
+        assert moved.is_file()
+        # El original guardado en SQLite sigue sin tocarse.
+        with relocated.state.engine.store.connect() as db:
+            assert db.execute("SELECT imagen FROM hojas WHERE id=?",
+                              (sheet,)).fetchone()[0]==str(original_path)
+    relocated.state.engine.close()
