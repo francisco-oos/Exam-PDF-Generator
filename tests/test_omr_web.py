@@ -379,6 +379,38 @@ def test_revisor_solo_ve_respuestas_no_clave_ni_folios_ajenos(server):
     reviewer.close()
 
 
+def test_exportaciones_pdf_individual_y_zip_provisional_sin_error_500(server):
+    app,c,headers=server
+    svc=app.state.engine
+    sid=svc.store.create_session("Evaluación ficticia",
+       [{"tema":"Seguridad","pregunta":"¿Qué hacer?","correcta":"A"}],
+       [{"id":"739","nombre":"Persona ficticia"}],"Carta")
+    # Sin hoja revisada el resultado debe ser PROVISIONAL, no 500.
+    pdf=c.get("/api/applications/"+sid+"/participants/739/result")
+    assert pdf.status_code==200,pdf.text[:200]
+    assert pdf.content.startswith(b"%PDF-")
+    package=c.get("/api/applications/"+sid+"/export")
+    assert package.status_code==200,package.text[:200]
+    assert package.content.startswith(b"PK")
+    package_internal=c.get("/api/applications/"+sid+"/export?internal=true")
+    assert package_internal.status_code==200
+    assert package_internal.content.startswith(b"PK")
+
+
+def test_overlay_con_solo_acetato_sin_resaltar_y_privacidad_auxiliar(server):
+    app,c,headers=server
+    svc=app.state.engine
+    sid,sheet_id=make_pending(svc)
+    visible=c.get("/api/sheets/"+sheet_id)
+    assert visible.status_code==200
+    assert "biblioteca" in visible.json()
+    output=c.get("/api/sheets/"+sheet_id+"/overlay?pregunta=1&acetato=true&resaltar=false")
+    assert output.status_code==200,output.text[:150]
+    assert output.headers["content-type"].startswith("image/jpeg")
+    output2=c.get("/api/sheets/"+sheet_id+"/overlay?pregunta=1&acetato=false&resaltar=true")
+    assert output2.status_code==200
+
+
 def test_certificado_tls_local_no_exponer_clave(tmp_path,monkeypatch):
     from omr_web.certificate import main
     monkeypatch.setenv("OMR_WEB_DATA",str(tmp_path))

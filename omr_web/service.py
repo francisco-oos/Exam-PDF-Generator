@@ -298,8 +298,23 @@ class WebService:
             lease=db.execute("SELECT revision,usuario_id,vence FROM web_reclamos "
                              "WHERE hoja_id=?", (sheet_id,)).fetchone()
         sess=self.store.session(row["sesion_id"])
+        person=next((p for p in sess["personal"] if p["token"]==row["token"]),None)
+        source=None
+        if sess.get("cuestionario_id") and self.library.is_file():
+            # Solo metadatos no confidenciales: nunca devolver preguntas,
+            # respuestas correctas ni acetato a capturistas.
+            from biblioteca import db_connect
+            with db_connect(self.library) as conn:
+                lib=conn.execute("SELECT nombre FROM cuestionarios WHERE id=?",
+                    (sess["cuestionario_id"],)).fetchone()
+                source=lib["nombre"] if lib else None
         return {
             "id":sheet_id,"sesion_id":row["sesion_id"],
+            "evaluacion":sess.get("nombre_evaluacion") or sess["titulo"],
+            "biblioteca":source or "Cuestionario histórico sin vínculo",
+            "revision_biblioteca":sess.get("revision_biblioteca"),
+            "participante":person["nombre"] if person else "Sin identificar",
+            "folio":person["folio"] if person else None,
             "estado":row["estado"],"pagina":row["pagina"]+1,
             "respuestas":json.loads(row["respuestas_json"]),
             "dudas":json.loads(row["dudas_json"]),

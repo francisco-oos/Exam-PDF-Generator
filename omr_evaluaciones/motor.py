@@ -964,12 +964,16 @@ def render_review_with_acetato(original_bgr, paper, questions, *,
             continue
         options=coordinates[n-1]
         coords=[(round(x*factor),round((height-y)*factor)) for x,y in options]
-        left=min(x for x,y in coords)-35
-        right=max(x for x,y in coords)+35
-        top=min(y for x,y in coords)-27
-        bottom=max(y for x,y in coords)+27
-        draw.rectangle((left,top,right,bottom),outline=(242,147,23,255),
-                       width=max(4,round(2*factor)))
+        # Marcar la FILA sin tapar lápiz ni círculos: un marco fino
+        # separado de los bordes en lugar de un rectángulo grueso.
+        left=min(x for x,y in coords)-round(12*factor)
+        right=max(x for x,y in coords)+round(12*factor)
+        top=min(y for x,y in coords)-round(11*factor)
+        bottom=max(y for x,y in coords)+round(11*factor)
+        draw.rounded_rectangle((left,top,right,bottom),
+                               radius=round(4*factor),
+                               outline=(230,123,16,225),
+                               width=max(2,round(.75*factor)))
     return Image.alpha_composite(background,overlay).convert('RGB')
 
 

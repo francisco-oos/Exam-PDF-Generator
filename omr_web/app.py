@@ -340,7 +340,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
 
     @web.get("/api/sheets/{sheet_id}/overlay")
     def sheet_overlay(sheet_id:str,pregunta:int=1,acetato:bool=False,
-                      user=Depends(user_of)):
+                      resaltar:bool=True,user=Depends(user_of)):
         """Resalta el reactivo, nunca modifica el PDF ni el PNG original.
 
         El acetato con respuestas CORRECTAS está reservado a coordinador/admin;
@@ -368,7 +368,8 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         try:
             picture=render_review_with_acetato(
                 bitmap,sess["papel"],sess["preguntas"],
-                show_acetato=acetato,issue_numbers=[pregunta],
+                show_acetato=acetato,
+                issue_numbers=[pregunta] if resaltar else [],
                 already_aligned=True)
         except ValueError as exc:
             raise WebError(str(exc),422) from exc

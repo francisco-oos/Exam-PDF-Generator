@@ -4,7 +4,8 @@
   const byId = id => document.getElementById(id);
   const content = byId("content");
   const state = {user:null, apps:[], sid:null, view:"inicio", sheet:null,
-                 lease:null, revision:0, question:1, jobs:[], timer:null};
+                 lease:null, revision:0, question:1,
+                 highlight:true, acetate:false, jobs:[], timer:null};
   const h = value => String(value ?? "").replace(/[&<>"']/g,
     c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const cookie = name => {
@@ -230,6 +231,21 @@
     state.question=q?.pregunta||1;
     await renderSheet();
   }
+  function showSheetVisual(){
+    const sheet=state.sheet, img=byId("sheetImage");
+    if(!sheet||!img)return;
+    const base="/api/sheets/"+encodeURIComponent(sheet.id);
+    const overlay=state.highlight||state.acetate;
+    img.onerror=()=>{
+      // Si el PNG original está disponible, no dejar un recuadro roto.
+      if(overlay){img.onerror=null;img.src=base+"/image";}
+      else alertBox("No se pudo mostrar la imagen de la hoja.",true);
+    };
+    img.src=overlay?
+      base+"/overlay?pregunta="+state.question+
+      "&resaltar="+state.highlight+"&acetato="+state.acetate+
+      "&v="+state.revision:base+"/image";
+  }
   async function renderSheet(){
     const sheet=state.sheet;if(!sheet)return;
     const area=byId("sheetArea");if(!area)return;
@@ -239,13 +255,22 @@
       '<option value="'+item.numero+'"'+(item.numero===state.question?" selected":"")+'>'+
       String(item.numero).padStart(2,"0")+" · "+h(item.pregunta.slice(0,90))+"</option>").join("");
     area.innerHTML='<div class="scanBox">'+
-      '<div class="panel"><h3>Hoja física y marcas</h3><p class="hint">Imagen original archivada. El recuadro naranja destaca la pregunta seleccionada.</p>'+
-      '<img class="scanImage" alt="Hoja escaneada" id="sheetImage" src="/api/sheets/'+h(sheet.id)+
-      '/image"><div class="actions"><button class="ghost" id="showOverlay">Resaltar reactivo</button></div></div>'+
+      '<div class="panel"><h3>Hoja física y marcas</h3><p class="hint">El visor nunca cambia la evidencia original. El contorno naranja señala la pregunta, las marcas verdes corresponden al acetato.</p>'+
+      '<img class="scanImage" alt="Hoja escaneada" id="sheetImage">'+
+      '<div class="actions overlayControls"><label class="check"><input type="checkbox" id="highlightToggle" '+
+      (state.highlight?'checked':'')+'> Resaltar reactivo</label>'+
+      (["admin","coordinador"].includes(state.user?.rol)?
+      '<label class="check"><input type="checkbox" id="acetateToggle" '+
+      (state.acetate?'checked':'')+'> Superponer acetato</label>':'')+
+      '</div></div>'+
       '<div class="panel"><div class="cardTitle"><div><h3>Corregir respuesta</h3>'+
       '<p>Pregunta seleccionada · versión '+state.revision+'</p></div><span class="tag warn">'+
       h(sheet.estado)+'</span></div>'+
-      '<label>Reactivo del examen<select id="questionSelect">'+questions+'</select></label>'+
+      '<div class="questionBox"><b>Participante:</b> '+h(sheet.participante)+
+      ' · <b>Folio:</b> '+h(sheet.folio||"Sin identificar")+'<p class="hint">'+
+      h(sheet.evaluacion)+' · Biblioteca: '+h(sheet.biblioteca)+
+      (sheet.revision_biblioteca?' · Revisión '+h(sheet.revision_biblioteca):'')+
+      '</p></div><label>Reactivo del examen<select id="questionSelect">'+questions+'</select></label>'+
       '<div class="questionBox"><b>'+h(q?.tema||"")+'</b><br>'+h(q?.pregunta||"")+'</div>'+
       '<p class="muted">Lectura automática: <b>'+h(value)+'</b> · dudas restantes: '+sheet.dudas.length+'</p>'+
       '<label>Decisión A/B/C/D o BLANCO<select id="decision">'+
@@ -258,11 +283,13 @@
     byId("questionSelect").onchange=e=>{
       state.question=Number(e.target.value);renderSheet();
     };
-    byId("showOverlay").onclick=()=>{
-      const img=byId("sheetImage");
-      img.src="/api/sheets/"+encodeURIComponent(sheet.id)+"/overlay?pregunta="+
-        state.question+"&v="+Date.now();
+    byId("highlightToggle").onchange=e=>{
+      state.highlight=e.target.checked;showSheetVisual();
     };
+    if(byId("acetateToggle"))byId("acetateToggle").onchange=e=>{
+      state.acetate=e.target.checked;showSheetVisual();
+    };
+    showSheetVisual();
     byId("saveChoice").onclick=async()=>{
       try{
         const result=await api("/sheets/"+sheet.id+"/decisions",{
