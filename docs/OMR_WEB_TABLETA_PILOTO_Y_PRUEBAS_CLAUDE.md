@@ -1058,3 +1058,56 @@ no acreditadas en el CSV. No se autoriza producción ni fusión por estos result
    cinco configuraciones de escáner y pruebas multiusuario del plan adjunto.
    Cada reescaneo del mismo folio se ensaya como duplicado deliberado o en una
    copia aislada, conservando el primer original. **Pruebas físicas realizadas: 0.**
+
+
+## Ajuste de flujo de creación, listas y emisión (10/11/2026, piloto)
+
+Se revisaron las capturas de uso real: la plantilla de personal aparecía en dos
+lugares; la primera sección de importación mezclaba preguntas, personal y fotos;
+cada clic en «Generar documentos» podía emitir una aplicación/folio QR distinto.
+
+**Organización de la pantalla:**
+- Importar preguntas: único Excel XLSX (columna H Imagen); la fotografía
+  INCRUSTADA y anclada a la fila de la pregunta se extrae automáticamente.
+  Si H contiene sólo el NOMBRE del PNG/JPG, se debe adjuntar el archivo en
+  «Solo si tu Excel contiene nombres de imagen». No pedir los archivos dos veces.
+  La foto puede editarse después por pregunta en el diseñador; tamaño, proporción,
+  alineación y vista previa permanecen allí.
+- Biblioteca: seleccionar revisión guardada.
+- Diseño: empresa, título, imágenes, colores, tamaño y vista previa siempre visible.
+- Personal a evaluar (opcional): único lugar para descargar plantilla XLSX,
+  cargar CSV/XLSX y revisar ID/nombre/área/grupo/turno.
+- Emitir: nombre, normal/ecológico y papel; muestra cantidad de participantes
+  tomada de la sección anterior.
+
+**Emisión idempotente:** el cliente genera solicitud_id UUID y la envía a
+POST /api/applications. La tabla aditiva web_emisiones registra usuario, huella
+del payload y resultado. El candado global web_emision.lock protege reintentos
+concurrentes de la misma solicitud aun con múltiples procesos. Un mismo UUID y
+payload recupera exactamente el SID/folio o lote previo; cambiar datos con el
+mismo UUID devuelve 409; usuario ajeno 403. Las integraciones históricas que no
+mandan solicitud_id conservan la semántica anterior. Este control no impide
+una nueva emisión EXPLÍCITA con otro UUID; el navegador exige pulsar «Emitir
+otra aplicación nueva» y confirmar antes de permitirla. No se borran
+aplicaciones creadas previamente por el usuario.
+
+**Paquete completo:** GET /api/applications/{sid}/package (admin/coordinador
+asignado) y GET /api/print-lots/{id}/package (admin) producen ZIP temporal
+con los materiales existentes en carpeta Material_OMR/ y LEEME.txt. Incluyen
+cuadernillo, hoja, acetato, clave, manifest y, cuando existe, ZIP de paquetes
+individuales. El servidor nunca acepta una ruta arbitraria y elimina el ZIP
+temporal después de entregar el archivo. La clave y acetato NO se entregan a
+auxiliares. Los materiales originales siguen en el almacén autorizado.
+Edge/Chrome en contexto seguro puede ofrecer showSaveFilePicker ANTES de la
+emisión, permitiendo seleccionar destino; otros navegadores descargan al
+destino configurado en sus preferencias. No se puede obligar al explorador
+a mostrar un selector de carpeta en todos los navegadores.
+
+**PNG:** imágenes con transparencia alfa pasan sobre blanco (color del papel)
+antes de generar PDF, evitando fondos negros. No se eliminan fondos sólidos que
+ya estén pintados en PNG/JPG: eso requiere corregir el archivo original. Los
+marcadores QR y coordenadas OMR no se alteraron.
+
+**Verificación pendiente:** la CI automatizada y pruebas en navegador deben
+confirmar el nuevo flujo; aún no se considera validación física Xerox. Conservar
+la base de pruebas y los folios ya emitidos; jamás reemitir sólo para descargar.
