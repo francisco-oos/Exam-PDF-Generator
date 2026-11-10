@@ -580,3 +580,20 @@ def test_reproceso_mejora_pendientes_sin_borrar_revision_humana(tmp_path):
         'validada')
     assert status=='repetida'
     assert store.pages(sid)[0]['respuestas']==['A','B','C']
+
+
+
+def test_qr_opencv_puntos_degenerados_no_detiene_lectores_redundantes(monkeypatch):
+    """OpenCV puede lanzar error al decodificar QR rotados/puntos colineales."""
+    import cv2
+    import numpy as np
+    from omr_evaluaciones.motor import _decode_qr
+
+    class DetectorRoto:
+        def detectAndDecode(self, _):
+            raise cv2.error("Puntos degenerados: área de contorno cero")
+
+    monkeypatch.setattr(cv2,"QRCodeDetector",lambda:DetectorRoto())
+    blank=np.full((800,600),255,dtype=np.uint8)
+    assert _decode_qr(blank,allow_full=True) is None
+    assert _decode_qr(blank,allow_full=False) is None
