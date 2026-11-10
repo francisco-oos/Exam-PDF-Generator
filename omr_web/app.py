@@ -557,7 +557,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
                             headers={"Cache-Control":"no-store"})
 
     @web.get("/api/applications/{sid}/participants/{person_id}/result")
-    def participant_result(sid:str,person_id:str,user=Depends(user_of)):
+    def participant_result(sid:str,person_id:str,auditado:bool=False,user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador"},sid=sid)
         target=engine.outputs/(uuid4().hex+".pdf")
         try:
@@ -569,7 +569,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             if participant is None:
                 raise ValueError("Participante inexistente.")
             evidence_pdf=None
-            if participant["hoja_id"]:
+            if auditado and participant["hoja_id"]:
                 evidence_pdf=audit_evidence_pdf(
                     engine.store,participant["hoja_id"],acetato=True,
                     history=engine.sheet_history(user,participant["hoja_id"]))
