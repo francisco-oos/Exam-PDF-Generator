@@ -78,6 +78,7 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             'grupo': opciones.get('puesto', ''),
             'subtitulo': subtitulo,
             'color_titulo': opciones.get('color_titulo', '#213A4C'),
+            'color_subtitulo': opciones.get('color_subtitulo', '#5E7180'),
             'color_respuestas': opciones.get('color_respuestas', '#213A4C'),
             'logo': opciones.get('logo'),
         }

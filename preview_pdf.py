@@ -35,7 +35,7 @@ def build_preview_pdf(data: PreviewData, view: str) -> bytes:
                 qs,data.titulo or 'Evaluación',data.tamano_papel,
                 empresa=data.empresa,grupo=data.grupo,subtitulo=data.subtitulo,
                 color_titulo=data.color_titulo,color_respuestas=data.color_respuestas,
-                logo=data.logo,nombre=data.participante_nombre or 'Participante de ejemplo',
+                color_subtitulo=data.color_subtitulo,logo=data.logo,nombre=data.participante_nombre or 'Participante de ejemplo',
                 identifier=data.participante_id or '000001',
                 con_personal=data.cantidad_personas > 0,
             )

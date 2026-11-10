@@ -569,7 +569,7 @@ class OMRStore:
 def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
                         empresa='', grupo='', subtitulo='',
                         color_titulo='#213A4C', color_respuestas='#213A4C',
-                        logo=None,preview=False):
+                        color_subtitulo='#5E7180',logo=None,preview=False):
     """Hoja institucional: una sola geometría para PDF, QR y lectura de escáner.
 
     Usa bubble_positions y corner_centers sin alteraciones. El aspecto adopta
@@ -585,6 +585,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
     w, h = PAPERS[paper]
     tint = colors.HexColor(color_respuestas)
     title_ink = colors.HexColor(color_titulo)
+    subtitle_ink = colors.HexColor(color_subtitulo)
     pts = bubble_positions(paper, len(session['preguntas']))
     cnv.setFillColorRGB(1, 1, 1)
     cnv.rect(0, 0, w, h, fill=1, stroke=0)
@@ -620,6 +621,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
                    clip_text(session['titulo'], bold, 9, w-205-(title_x-44)))
     if subtitulo:
         cnv.setFont(normal, 8)
+        cnv.setFillColor(subtitle_ink)
         cnv.drawString(title_x, h-101,
                        clip_text(subtitulo, normal, 8,w-205-(title_x-44)))
     if empresa:
@@ -684,7 +686,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
 def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
                      empresa='',grupo='',subtitulo='',
                      color_titulo='#213A4C',color_respuestas='#213A4C',
-                     logo=None,person_ids=None):
+                     color_subtitulo='#5E7180',logo=None,person_ids=None):
     """Imprime las hojas QR desde el diseño único; no genera otro examen.
 
     Cada código tiene HMAC de la misma sesión persistida que utilizará el lector.
@@ -706,7 +708,7 @@ def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
             continue
         _draw_formulario_omr(cnv,s,p,empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                             color_titulo=color_titulo,color_respuestas=color_respuestas,
-                            logo=logo)
+                            color_subtitulo=color_subtitulo,logo=logo)
     cnv.save()
     return path
 
@@ -764,7 +766,7 @@ def preview_acetato_omr(questions, paper, *, color='#167341'):
 def preview_formulario_omr(questions, title, paper, *,
                           empresa='',grupo='',subtitulo='',
                           color_titulo='#213A4C',color_respuestas='#213A4C',
-                          logo=None,nombre='Ejemplo de participante',identifier='000001',
+                          color_subtitulo='#5E7180',logo=None,nombre='Ejemplo de participante',identifier='000001',
                           con_personal=True):
     """Muestra el aspecto exacto sin crear folios utilizables ni escribir disco."""
     from io import BytesIO
@@ -778,7 +780,8 @@ def preview_formulario_omr(questions, title, paper, *,
     _draw_formulario_omr(cnv,session,sample if con_personal else None,
                         empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                         color_titulo=color_titulo,
-                        color_respuestas=color_respuestas,logo=logo,preview=True)
+                        color_respuestas=color_respuestas,
+                        color_subtitulo=color_subtitulo,logo=logo,preview=True)
     cnv.save()
     return data.getvalue()
 
@@ -787,7 +790,7 @@ def preview_formulario_omr(questions, title, paper, *,
 def create_generic_forms_pdf(questions, title, paper, target, *,
                              empresa='',grupo='',subtitulo='',
                              color_titulo='#213A4C',color_respuestas='#213A4C',
-                             logo=None):
+                             color_subtitulo='#5E7180',logo=None):
     """Hoja anónima con EXACTA geometría OMR y espacios manuscritos, sin QR.
 
     El diseño no cambia al cargar personal: solo se rellenan datos y QR.
@@ -800,7 +803,8 @@ def create_generic_forms_pdf(questions, title, paper, target, *,
     session={'titulo':title,'papel':paper,'preguntas':questions}
     _draw_formulario_omr(cnv,session,None,empresa=empresa,grupo=grupo,
                          subtitulo=subtitulo,color_titulo=color_titulo,
-                         color_respuestas=color_respuestas,logo=logo)
+                         color_respuestas=color_respuestas,
+                         color_subtitulo=color_subtitulo,logo=logo)
     cnv.save()
     return path
 

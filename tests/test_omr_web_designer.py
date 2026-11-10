@@ -114,6 +114,7 @@ def test_importar_imagen_logo_y_editar_cuestionario_sin_perder_originales(server
     assert data["letra"]==10.5
     assert data["modo"]=="normal"
     assert data["papel"]=="Oficio"
+    assert data["color_subtitulo"]=="#446688"
     assert data["logo"]=="logo.png"
     assert data["preguntas"][0]["imagen"]=="pregunta_001.png"
     img=c.get("/api/library/"+exam_id+"/images/pregunta_001.png")
