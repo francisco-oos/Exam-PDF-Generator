@@ -1303,11 +1303,19 @@ def _recognize(gray,paper,questions_count):
         pencil=(v>=68 and q>=68 and c>=.72 and
                 second<=13 and v-second>=55 and
                 v>=3.8*max(second,1.))
+        # El grafito HB no es una superficie de intensidad uniforme:
+        # la media puede rondar 65-68 aunque >=82% del círculo esté
+        # cubierto y el percentil alto muestre tinta distinguible.
+        # No bajar simplemente a 64: un gris plano 190 debe seguir en
+        # revisión. Aceptar sólo si las otras opciones están limpias.
+        textured_hb=(v>=64 and q>=74 and c>=.82 and
+                     second<=12 and v-second>=56 and
+                     v>=4.0*max(second,1.))
         other_mark=(second>=31 and q2>=47 and c2>=.16)
         separated=(v-second>=47 and
                    (second<=12 or v>=2.15*second))
         if (strong and separated and not other_mark) or (
-                pencil and not other_mark):
+                (pencil or textured_hb) and not other_mark):
             answers.append(ANSWER_CHOICES[winner])
         else:
             answers.append(None)
