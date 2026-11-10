@@ -46,7 +46,7 @@ def _paragraph_pdf(title, lines):
 
 
 def participant_receipt(store: OMRStore, sid: str, person_id: str,
-                        target: Path):
+                        target: Path, *, evidence_pdf: bytes | None = None):
     """Resultado de UNA persona; nunca expone preguntas, claves ni compañeros."""
     report=store.results(sid)
     data=next((p for p in report['participantes']
@@ -99,7 +99,16 @@ def participant_receipt(store: OMRStore, sid: str, person_id: str,
     target.parent.mkdir(parents=True,exist_ok=True)
     temp=target.with_name(target.name+'.part')
     try:
-        temp.write_bytes(_paragraph_pdf('Resultado individual',lines))
+        receipt=_paragraph_pdf('Resultado individual',lines)
+        if evidence_pdf:
+            # El PDF individual y su evidencia auditada viajan juntos,
+            # sin modificar ni esconder la hoja escaneada original.
+            import fitz
+            with fitz.open(stream=receipt,filetype="pdf") as base:
+                with fitz.open(stream=evidence_pdf,filetype="pdf") as appendix:
+                    base.insert_pdf(appendix)
+                receipt=base.tobytes(garbage=3,deflate=True)
+        temp.write_bytes(receipt)
         os.replace(temp,target)
     finally:
         temp.unlink(missing_ok=True)
@@ -194,7 +203,7 @@ def _effective_pages(store: OMRStore, inbox: DocumentInbox, sid: str):
 
 def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
                           destination: Path,*,internal=True,
-                          include_originals=True):
+                          include_originals=True,audit_pdf_factory=None):
     """ZIP de resultados y evidencias para la aplicación especificada.
 
     Modo interno: XLSX con bitácora, PDF de hojas efectivas,
@@ -232,6 +241,11 @@ def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
                     [(p['sha'],p['pagina'],0) for p in selections],evidence)
                 content[evidence.name]=evidence.read_bytes()
                 used_documents={p['sha'] for p in selections}
+                if audit_pdf_factory is not None:
+                    # Sólo hojas efectivas: no mezclar documentos/participantes.
+                    for item in selections:
+                        content['Evidencias_auditadas/'+item['folio']+'.pdf']=(
+                            audit_pdf_factory(item['hoja_id']))
             if include_originals:
                 # Mezclas de Cabos/Checadores nunca se filtran solo por
                 # nombre del PDF: se evalúan TODAS sus páginas indexadas.

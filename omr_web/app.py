@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from omr_evaluaciones.documentos import sha_file
 from omr_evaluaciones.expedientes import export_session_bundle, participant_receipt
 from .service import WebError, WebService
+from .evidencia import audit_evidence_pdf
 from .designer import import_exam, serialize_exam, update_exam, preview_exam, resource, import_roster
 
 MAX_UPLOAD = 100 * 1024 * 1024
@@ -79,6 +80,11 @@ class EditPayload(BaseModel):
     lease: str
     expected_revision: int
     cambios: list[dict]
+    motivo: str
+
+
+class ReopenPayload(BaseModel):
+    pregunta: int
     motivo: str
 
 
@@ -402,6 +408,31 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         return {"nombre":name,"estado":"manual_pendiente",
                 "aviso":"Revisar TODOS los reactivos antes de calificar."}
 
+    @web.post("/api/sheets/{sheet_id}/reopen")
+    def reopen(sheet_id:str,data:ReopenPayload,user=Depends(write_user)):
+        return engine.reopen_validated(user,sheet_id,data.pregunta,data.motivo)
+
+    @web.get("/api/sheets/{sheet_id}/history")
+    def history(sheet_id:str,user=Depends(user_of)):
+        return engine.sheet_history(user,sheet_id)
+
+    @web.get("/api/sheets/{sheet_id}/evidence")
+    def evidence(sheet_id:str,acetato:bool=True,user=Depends(user_of)):
+        engine.require(user,roles={"admin","coordinador","auditor"})
+        engine.get_sheet(user,sheet_id)
+        if acetato:
+            engine.require(user,roles={"admin","coordinador"})
+        try:
+            content=audit_evidence_pdf(
+                engine.store,sheet_id,acetato=acetato,
+                history=engine.sheet_history(user,sheet_id))
+        except ValueError as exc:
+            raise WebError(str(exc),404) from exc
+        return Response(content,media_type="application/pdf",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="Evidencia_{sheet_id[:12]}.pdf"',
+                                 "Cache-Control":"no-store"})
+
     @web.post("/api/sheets/{sheet_id}/claim")
     def claim(sheet_id:str,user=Depends(write_user)):
         return engine.claim(user,sheet_id)
@@ -500,13 +531,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     @web.get("/api/applications/{sid}/results")
     def results(sid:str,user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador","auditor"},sid=sid)
-        data=engine.store.results(sid)
-        return {"sesion_id":sid,"promedio":data["promedio"],
-                "validados":data["validados"],"pendientes":data["pendientes"],
-                "ausentes":data["ausentes"],
-                "participantes":[{key:p[key] for key in
-                    ("id","folio","nombre","estado","aciertos","porcentaje")}
-                    for p in data["participantes"]]}
+        return engine.results_with_evidence(user,sid)
 
     @web.get("/api/applications/{sid}/events")
     def events(sid:str,user=Depends(user_of)):
@@ -516,8 +541,13 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     def export(sid:str,internal:bool=False,user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador"},sid=sid)
         path=engine.outputs/(uuid4().hex+".zip")
-        export_session_bundle(engine.store,engine.inbox,sid,path,
-                              internal=internal)
+        export_session_bundle(
+            engine.store,engine.inbox,sid,path,internal=internal,
+            audit_pdf_factory=(
+                (lambda sheet_id: audit_evidence_pdf(
+                    engine.store,sheet_id,acetato=True,
+                    history=engine.sheet_history(user,sheet_id)))
+                if internal else None))
         return FileResponse(path,filename=("Expediente_" if internal else
                             "Resultados_")+sid+".zip",
                             media_type="application/zip",
@@ -528,7 +558,20 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         engine.require(user,roles={"admin","coordinador"},sid=sid)
         target=engine.outputs/(uuid4().hex+".pdf")
         try:
-            participant_receipt(engine.store,sid,person_id,target)
+            # Anexar la evidencia de una sola hoja en la misma copia PDF.
+            # Si la persona aún no tiene escaneo no se inventa una imagen.
+            report=engine.results_with_evidence(user,sid)
+            participant=next((p for p in report["participantes"]
+                              if p["id"]==person_id),None)
+            if participant is None:
+                raise ValueError("Participante inexistente.")
+            evidence_pdf=None
+            if participant["hoja_id"]:
+                evidence_pdf=audit_evidence_pdf(
+                    engine.store,participant["hoja_id"],acetato=True,
+                    history=engine.sheet_history(user,participant["hoja_id"]))
+            participant_receipt(engine.store,sid,person_id,target,
+                                evidence_pdf=evidence_pdf)
         except ValueError as exc:
             raise WebError(str(exc),404) from exc
         return FileResponse(target,filename="Resultado_"+sid+".pdf",
