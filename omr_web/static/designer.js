@@ -9,7 +9,7 @@
   const all = (root, q) => Array.from(root.querySelectorAll(q));
   let api, alertBox, root, onCreated, exams=[], draft=null, examId=null,
       previewURL=null, activeView="Cuadernillo", previewSeq=0,
-      savedDesign=null;
+      savedDesign=null, pendingLogo=null;
 
   const meta = (id, label, value, kind="text", extra="") =>
     '<label>'+h(label)+'<input data-meta="'+h(id)+'" type="'+kind+
@@ -23,7 +23,9 @@
   function fileQuestion(q,i){
     return '<details class="questionEditor" data-question="'+i+'">'+
       '<summary><b>Pregunta '+(i+1)+'</b> · '+h(q.pregunta.slice(0,85))+
-      (q.imagen?' · con imagen':'')+'</summary><div class="cols">'+
+      (q.imagen?' · con imagen':'')+
+      (q.pendingImage?' · imagen seleccionada sin guardar':'')+
+      '</summary><div class="cols">'+
       meta('tema','Tema',q.tema)+meta('pregunta','Pregunta',q.pregunta)+
       '</div><div class="cols">'+
       'ABCD'.split('').map((letter,k)=>meta('opt'+k,'Opción '+letter,q.opciones[k])).join('')+
@@ -32,7 +34,9 @@
       '<label>Imagen opcional PNG/JPG'+(q.imagen?
          ' · <a target="_blank" rel="noopener" href="/api/library/'+
            encodeURIComponent(examId)+'/images/'+encodeURIComponent(q.imagen)+'">Ver actual</a>':'')+
-      '<input type="file" accept=".png,.jpg,.jpeg" data-image="'+i+'"></label></div>'+
+      '<input type="file" accept=".png,.jpg,.jpeg" data-image="'+i+'">'+
+      (q.pendingImage?'<span class="hint">Pendiente: '+h(q.pendingImage.name)+'</span>':'')+
+      '</label></div>'+
       (q.imagen?'<label class="check"><input type="checkbox" data-remove-image>Quitar imagen actual</label>':'')+
       '<div class="actions"><button type="button" class="ghost" data-remove-q="'+i+
       '">Eliminar pregunta</button></div></details>';
@@ -43,6 +47,9 @@
     all(panel,'[data-meta]').filter(e=>!e.closest('[data-question]')).forEach(e=>{
       draft[e.dataset.meta]=e.value;
     });
+    draft.quitarLogo=!!sel(panel,'#removeLogo')?.checked;
+    const selectedLogo=sel(panel,'#designerLogo')?.files?.[0];
+    if(selectedLogo){pendingLogo=selectedLogo;draft.quitarLogo=false;}
     all(panel,'[data-question]').forEach((row,i)=>{
       const q=draft.preguntas[i];
       all(row,'[data-meta]').forEach(e=>{
@@ -51,6 +58,8 @@
         else q[key]=e.value;
       });
       q.quitarImagen=!!sel(row,'[data-remove-image]')?.checked;
+      const image=sel(row,'[data-image]')?.files?.[0];
+      if(image){q.pendingImage=image;q.quitarImagen=false;}
     });
   }
   function cleanPayload(){
@@ -64,7 +73,7 @@
       color_subtitulo:draft.color_subtitulo,
       color_respuestas:draft.color_respuestas,
       color_acetato:draft.color_acetato,
-      quitar_logo:!!sel(root,'#removeLogo')?.checked,
+      quitar_logo:!!draft.quitarLogo&&!pendingLogo,
       preguntas:draft.preguntas.map(q=>({
         tema:q.tema,pregunta:q.pregunta,opciones:q.opciones,
         correcta:q.correcta,
@@ -99,7 +108,9 @@
       (draft.logo?' · <a href="/api/library/'+encodeURIComponent(examId)+
        '/images/'+encodeURIComponent(draft.logo)+'" target="_blank" rel="noopener">Ver actual</a>':'')+
       '<input id="designerLogo" type="file" accept=".png,.jpg,.jpeg"></label>'+
-      (draft.logo?'<label class="check"><input id="removeLogo" type="checkbox">Quitar logotipo</label>':'')+
+      (pendingLogo?'<p class="hint">Logotipo pendiente: '+h(pendingLogo.name)+'</p>':'')+
+      (draft.logo?'<label class="check"><input id="removeLogo" type="checkbox" '+
+        (draft.quitarLogo?'checked':'')+'>Quitar logotipo</label>':'')+
       '</div><h3>Preguntas y respuestas</h3>'+
       '<p class="hint">Cada pregunta admite cuatro opciones, una respuesta correcta y una imagen. El acetato siempre usa esa clave.</p>'+
       '<div id="questionRows">'+draft.preguntas.map(fileQuestion).join('')+'</div>'+
@@ -123,11 +134,27 @@
       readEditor();
       if(draft.preguntas.length>=100){alertBox('Máximo 100 preguntas.',true);return;}
       draft.preguntas.push({tema:'',pregunta:'',opciones:['','','',''],
-        correcta:'A',imagen:null,sourceIndex:null,quitarImagen:false});
+        correcta:'A',imagen:null,sourceIndex:null,quitarImagen:false,
+        pendingImage:null});
       showEditor();
       all(panel,'.questionEditor').at(-1)?.setAttribute('open','');
     };
     sel(panel,'#saveDesign').onclick=()=>saveDesign();
+    // Conservar archivos pendientes como File en el borrador, incluso
+    // si "Añadir/Eliminar pregunta" reconstruye los inputs del DOM.
+    all(panel,'[data-image]').forEach(input=>input.onchange=()=>{
+      const q=draft.preguntas[Number(input.dataset.image)];
+      if(input.files?.length){q.pendingImage=input.files[0];q.quitarImagen=false;
+        const remove=sel(input.closest('[data-question]'),'[data-remove-image]');
+        if(remove)remove.checked=false;
+      }
+    });
+    sel(panel,'#designerLogo').onchange=e=>{
+      if(e.target.files?.length){pendingLogo=e.target.files[0];draft.quitarLogo=false;
+        const remove=sel(panel,'#removeLogo');
+        if(remove)remove.checked=false;
+      }
+    };
     all(panel,'[data-preview]').forEach(button=>button.onclick=()=>{
       activeView=button.dataset.preview;preview();
     });
@@ -143,15 +170,14 @@
     const payload=cleanPayload();
     const form=new FormData();
     form.append('payload',JSON.stringify(payload));
-    const photoFields=all(root,'#designerPanel [data-image]');
-    for(const input of photoFields){
-      if(input.files?.length){
-        const file=input.files[0],idx=Number(input.dataset.image)+1;
-        form.append('images',new File([file],'q'+idx+'__'+file.name,{type:file.type}));
+    for(const [i,q] of draft.preguntas.entries()){
+      if(q.pendingImage){
+        const file=q.pendingImage;
+        form.append('images',new File([file],'q'+(i+1)+'__'+file.name,
+                                      {type:file.type}));
       }
     }
-    const logo=sel(root,'#designerLogo')?.files?.[0];
-    if(logo)form.append('logo',logo);
+    if(pendingLogo)form.append('logo',pendingLogo);
     try{
       await api('/library/'+encodeURIComponent(examId)+'/edit',
                 {method:'POST',body:form});
@@ -162,8 +188,10 @@
   async function loadExam(id){
     examId=id;
     const detail=await api('/library/'+encodeURIComponent(id));
-    draft={...detail,preguntas:detail.preguntas.map((q,i)=>({
-      ...q,opciones:q.opciones.slice(),sourceIndex:i,quitarImagen:false
+    pendingLogo=null;
+    draft={...detail,quitarLogo:false,preguntas:detail.preguntas.map((q,i)=>({
+      ...q,opciones:q.opciones.slice(),sourceIndex:i,quitarImagen:false,
+      pendingImage:null
     }))};
     if(sel(root,'#examSelector'))sel(root,'#examSelector').value=id;
     showEditor();
