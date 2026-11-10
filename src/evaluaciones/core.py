@@ -204,7 +204,10 @@ def read_questions(path: Path) -> list[Question]:
         raise ExamError('El XLSX supera 8 MB.')
     _inspect_archive(path)
     try:
-        book = load_workbook(path, read_only=True, data_only=False, keep_links=False)
+        # Leer el XLSX desde memoria (máximo 8 MB) para que ningún
+        # iterador ni stream de openpyxl bloquee el fichero en Windows.
+        book = load_workbook(BytesIO(path.read_bytes()), read_only=True,
+                             data_only=False, keep_links=False)
     except Exception as exc:
         raise ExamError('No se pudo abrir el Excel. Comprueba que no esté dañado.') from exc
     rows=None

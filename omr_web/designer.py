@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from io import BytesIO
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -61,7 +62,11 @@ def recover_embedded_question_images(sheet:Path,images_dir:Path) -> set[str]:
     _inspect_archive(sheet)
     from openpyxl import load_workbook
     try:
-        book=load_workbook(sheet,read_only=False,data_only=False,keep_links=False)
+        # openpyxl puede mantener streams internos de fotos después
+        # de una excepción; usar bytes evita que Windows bloquee el
+        # archivo XLSX temporal durante su eliminación.
+        book=load_workbook(BytesIO(sheet.read_bytes()),read_only=False,
+                           data_only=False,keep_links=False)
     except Exception as exc:
         raise WebError("No se pudieron leer las imágenes del Excel.",422) from exc
     try:
@@ -72,6 +77,7 @@ def recover_embedded_question_images(sheet:Path,images_dir:Path) -> set[str]:
         if len(photos)>100:
             raise WebError("Máximo 100 imágenes en la plantilla.",422)
         created=set()
+        seen_rows=set()
         for photo in photos:
             anchor=getattr(photo.anchor,"_from",None)
             row=int(anchor.row)+1 if anchor is not None else 0
@@ -79,6 +85,8 @@ def recover_embedded_question_images(sheet:Path,images_dir:Path) -> set[str]:
                 raise WebError(
                     "Una foto pegada no está en una fila de pregunta. "
                     "Ancla cada foto a su reactivo (desde la fila 2).",422)
+            if row in seen_rows:
+                raise WebError(f"Fila {row}: más de una foto para el mismo reactivo.",422)
             if page.cell(row=row,column=8).value not in (None,""):
                 raise WebError(
                     f"Fila {row}: hay una foto incrustada y también un nombre "
@@ -113,6 +121,7 @@ def recover_embedded_question_images(sheet:Path,images_dir:Path) -> set[str]:
                 raise WebError(str(exc),422) from exc
             page.cell(row=row,column=8,value=name)
             created.add(name.lower())
+            seen_rows.add(row)
         if photos:
             book.save(sheet)
         return created
