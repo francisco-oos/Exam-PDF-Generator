@@ -266,9 +266,13 @@
         byId("appFiles").innerHTML='<p class="hint">Esta aplicación se creó para calificación manual de una página sin QR. No tiene un lote de impresión propio; consulta su evidencia en Calificar.</p>';
       }else{
         const base="/api/applications/"+encodeURIComponent(state.sid)+"/files/";
-        byId("appFiles").innerHTML=["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
-          "Paquetes_individuales.zip"].map(n=>
-          '<a class="ghost" href="'+base+encodeURIComponent(n)+'">'+h(n)+'</a>').join("");
+        byId("appFiles").innerHTML='<a class="primary" href="/api/applications/'+
+          encodeURIComponent(state.sid)+'/package">Descargar paquete completo ZIP</a>'+
+          '<details class="advancedDownload"><summary>Descargas individuales</summary><div class="actions">'+
+          ["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
+           "Paquetes_individuales.zip"].map(n=>
+          '<a class="ghost" href="'+base+encodeURIComponent(n)+'">'+h(n)+'</a>').join("")+
+          '</div></details>';
       }
     }
   }

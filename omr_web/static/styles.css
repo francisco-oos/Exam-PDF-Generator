@@ -90,6 +90,11 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
 }
 
 
+#rosterSection #rosterInput{min-height:105px}
+#createdFiles{margin-top:12px}
+#createdFiles .panel{background:#f7fbfc;border-color:#cae2e6}
+#createdFiles .advancedDownload{background:white}
+#generateFiles{max-width:100%}
 /* Inicio por tarea: el perfil decide qué herramientas aparecen tras entrar. */
 .workflowChoices{display:grid;grid-template-columns:repeat(auto-fit,minmax(265px,1fr));gap:18px}
 .workflowChoice{display:flex;flex-direction:column;gap:10px;min-height:240px}

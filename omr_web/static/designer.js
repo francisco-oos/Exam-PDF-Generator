@@ -258,78 +258,162 @@
               grupo:cols[3]||'',turno:cols[4]||''};
     });
   }
+  async function savePackage(url,name,handle=null){
+    if(handle){
+      const response=await fetch(url,{credentials:"same-origin"});
+      if(!response.ok)throw Error("No se pudo descargar el paquete (HTTP "+response.status+").");
+      const writable=await handle.createWritable();
+      try{
+        if(response.body)await response.body.pipeTo(writable);
+        else{
+          await writable.write(await response.blob());
+          await writable.close();
+        }
+      }catch(err){
+        try{await writable.abort();}catch(_ignored){}
+        throw err;
+      }
+    }else{
+      const link=document.createElement("a");
+      link.href=url;link.download=name;
+      document.body.appendChild(link);link.click();link.remove();
+    }
+  }
   async function renderGeneration(){
     const panel=sel(root,'#generationPanel');
-    if(!panel)return;
-    panel.innerHTML='<h2>Emitir e imprimir</h2>'+
-      '<p>Elige Normal o Ecológico. La lista es <b>opcional</b>. QR y folios sólo cuando hay participantes.</p>'+
+    const roster=sel(root,'#rosterPanel');
+    if(!panel||!roster)return;
+    roster.innerHTML='<h2>Personal a evaluar (opcional)</h2>'+
+      '<p class="hint">Esta lista se usa al emitir el examen, no al importar las preguntas. Sin participantes se imprimen hojas manuales sin QR.</p>'+
+      '<div class="actions"><a class="ghost" href="/api/templates/personal">Descargar plantilla de personal XLSX</a></div>'+
+      '<label>Cargar lista CSV o Excel XLSX<input id="rosterFile" type="file" accept=".csv,.xlsx"></label>'+
+      '<p class="hint">Columnas: ID_personal, Nombre, Area_adscripcion, Grupo y Turno. Los ID con ceros deben almacenarse como texto en Excel.</p>'+
+      '<label>Participantes preparados (puedes revisar o pegar desde Excel)'+
+      '<textarea id="rosterInput" rows="5" placeholder="000001,Persona ficticia,Área A,Equipo 1,Día"></textarea></label>'+
+      '<div id="rosterCount" class="hint">Sin lista: corrección manual con acetato.</div>';
+    panel.innerHTML='<h2>Emitir evaluación</h2>'+
+      '<p class="hint">El cuestionario y el diseño ya están guardados en la biblioteca. Cada emisión crea folios QR nuevos: hazla una sola vez y vuelve a descargar después desde Aplicaciones.</p>'+
       '<div class="cols"><label>Nombre de la aplicación<input id="appName" placeholder="Ej. Cabos turno C"></label>'+
       '<label>Modalidad<select id="applicationMode"><option value="normal">Normal · cuadernillo individual</option>'+
       '<option value="ecologico">Ecológico · cuadernillo reutilizable</option></select></label>'+
       '<label>Papel<select id="applicationPaper"><option>Carta</option><option>A4</option><option>Oficio</option></select></label>'+
-      '</div><h3>Lista de personal (opcional)</h3>'+
-      '<a class="ghost" href="/api/templates/personal">Descargar plantilla de personal XLSX</a>'+
-      '<label>Cargar CSV o Excel XLSX<input id="rosterFile" type="file" accept=".csv,.xlsx"></label>'+
-      '<p class="hint">El archivo puede tener ID_personal, Nombre, Area_adscripcion, Grupo y Turno. Sólo ID y Nombre son obligatorios; se conservan ceros iniciales si Excel los almacena como texto.</p>'+
-      '<label>También puedes escribir o pegar desde Excel: ID, Nombre, Área, Grupo, Turno'+
-      '<textarea id="rosterInput" rows="6" placeholder="000001,Persona ficticia,Área A,Equipo 1,Día"></textarea></label>'+
-      '<div id="rosterCount" class="hint">Sin lista: hoja sin QR y corrección manual con acetato.</div>'+
-      '<div class="actions"><button id="generateFiles" class="primary">Generar documentos del examen</button></div>'+
+      '</div><p id="linkedRoster" class="hint">Personal: sin lista (acetato manual).</p>'+
+      '<div class="actions"><button id="generateFiles" class="primary">Generar evaluación y guardar paquete completo</button>'+
+      '<button type="button" id="newIssuance" class="ghost" hidden>Emitir otra aplicación nueva</button></div>'+
+      '<p class="hint">En Edge/Chrome compatible se solicitará dónde guardar el ZIP antes de generar. Si el navegador no permite el selector, el ZIP irá a Descargas; puedes activar «Preguntar dónde guardar cada archivo» en su configuración.</p>'+
       '<div id="createdFiles"></div><div id="manualHistory"></div>';
     sel(panel,'#applicationMode').value=draft?.modo||'ecologico';
     sel(panel,'#applicationPaper').value=draft?.papel||'Carta';
-    sel(panel,'#rosterFile').onchange=async e=>{
+    function countRoster(){
+      try{
+        const list=peopleFromText();
+        const message=list.length?
+          list.length+' participantes preparados; se emitirán folios QR firmados.':
+          'Sin lista: hoja sin QR y corrección manual con acetato.';
+        sel(roster,'#rosterCount').textContent=message;
+        sel(panel,'#linkedRoster').textContent='Personal: '+(list.length?
+          list.length+' participantes asociados.':'sin lista; acetato manual.');
+      }catch(err){
+        sel(roster,'#rosterCount').textContent=err.message;
+        sel(panel,'#linkedRoster').textContent='Revisa la lista: '+err.message;
+      }
+    }
+    sel(roster,'#rosterFile').onchange=async e=>{
       const file=e.currentTarget.files[0];
       if(!file)return;
       const form=new FormData();form.append('file',file);
       try{
         const resp=await api('/roster/import',{method:'POST',body:form});
-        sel(panel,'#rosterInput').value=resp.participantes.map(p=>
+        sel(roster,'#rosterInput').value=resp.participantes.map(p=>
           [p.id,p.nombre,p.area,p.grupo,p.turno].map(csv).join(',')).join('\n');
-        sel(panel,'#rosterCount').textContent=resp.cantidad+' participantes leídos; revisa los campos antes de generar.';
-        alertBox('Lista de personal importada y validada.');
+        countRoster();
+        alertBox('Lista validada: '+resp.cantidad+' participantes.');
       }catch(err){alertBox(err.message,true);}
     };
-    sel(panel,'#rosterInput').oninput=()=>{
-      try{
-        const list=peopleFromText();
-        sel(panel,'#rosterCount').textContent=list.length?
-          list.length+' participantes: se emitirán folios QR firmados.':
-          'Sin lista: la corrección será manual con el acetato.';
-      }catch(err){sel(panel,'#rosterCount').textContent=err.message;}
-    };
+    sel(roster,'#rosterInput').oninput=countRoster;
     await refreshManualHistory();
+    let issued=null,requestId=null,lastPayload=null,working=false;
+    sel(panel,'#newIssuance').onclick=()=>{
+      if(!issued||!confirm('¿Crear OTRA aplicación con nuevos folios QR? La anterior se conserva en Aplicaciones.'))return;
+      issued=null;requestId=null;lastPayload=null;
+      sel(panel,'#createdFiles').innerHTML='';
+      sel(panel,'#generateFiles').disabled=false;
+      sel(panel,'#newIssuance').hidden=true;
+      alertBox('Preparado para una nueva emisión. Revisa nombre, modalidad y participantes.');
+    };
     sel(panel,'#generateFiles').onclick=async e=>{
-      if(!examId){alertBox('Selecciona un cuestionario.',true);return;}
+      if(working||issued)return;
       const button=e.currentTarget;
+      let handle=null;
       try{
-        // Un examen emitido es inmutable: impedir que campos aún sin guardar
-        // parezcan formar parte de la versión usada para los folios.
+        if(!examId)throw Error('Selecciona un cuestionario.');
         if(JSON.stringify(cleanPayload())!==savedDesign)
           throw Error('Primero guarda los cambios del diseño y después genera el examen.');
         const people=peopleFromText();
         if(people.length>500)throw Error('Máximo 500 participantes por aplicación.');
         if(people.some(p=>!p.id||!p.nombre))
           throw Error('Cada participante debe tener ID y nombre.');
-        button.disabled=true;
-        const resp=await api('/applications',{method:'POST',body:{
+        const payload={
           cuestionario_id:examId,nombre:sel(panel,'#appName').value,
           modalidad:sel(panel,'#applicationMode').value,
-          papel:sel(panel,'#applicationPaper').value,participantes:people}});
+          papel:sel(panel,'#applicationPaper').value,participantes:people};
+        const serialized=JSON.stringify(payload);
+        if(serialized!==lastPayload){
+          requestId=window.crypto?.randomUUID?.() ||
+            '00000000-0000-4000-8000-'+Math.random().toString(16).slice(2).padEnd(12,'0').slice(0,12);
+          lastPayload=serialized;
+        }
+        if(typeof window.showSaveFilePicker==='function'){
+          try{
+            handle=await window.showSaveFilePicker({
+              suggestedName:'Material_OMR_'+(payload.nombre||'evaluacion').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,55)+'.zip',
+              types:[{description:'Paquete OMR comprimido',accept:{'application/zip':['.zip']}}],
+              excludeAcceptAllOption:false
+            });
+          }catch(error){
+            if(error.name==='AbortError')return; // Cancelar NO crea otra aplicación.
+            throw error;
+          }
+        }
+        working=true;button.disabled=true;
+        const resp=await api('/applications',{method:'POST',body:{
+          ...payload,solicitud_id:requestId}});
+        issued=resp;
         const dir=resp.sid?'/api/applications/'+encodeURIComponent(resp.sid)+
           '/files/':'/api/print-lots/'+encodeURIComponent(resp.lote_id)+'/files/';
+        const pkg=resp.sid?'/api/applications/'+encodeURIComponent(resp.sid)+
+          '/package':'/api/print-lots/'+encodeURIComponent(resp.lote_id)+'/package';
+        const zipName='Paquete_OMR_'+(resp.sid||resp.lote_id)+'.zip';
         sel(panel,'#createdFiles').innerHTML='<div class="panel">'+
-          '<h3>'+(resp.tipo==='omr'?'Aplicación OMR: '+h(resp.sid):
-             'Lote genérico sin QR')+'</h3>'+
-          '<p>'+h(resp.aviso||'Lista de participantes asociada con folios firmados.')+'</p>'+
+          '<h3>'+(resp.tipo==='omr'?'Aplicación creada: '+h(resp.sid):
+            'Lote manual generado')+'</h3>'+
+          '<p>'+h(resp.aviso||'Participantes y folios QR guardados. No vuelvas a emitir para reimprimir.')+'</p>'+
+          '<div class="actions"><button type="button" class="primary" id="downloadAll">Guardar paquete completo ZIP</button></div>'+
+          '<details class="advancedDownload"><summary>Descargas individuales (opcional)</summary>'+
           '<div class="actions">'+resp.archivos.map(file=>
-             '<a class="secondary" href="'+dir+encodeURIComponent(file)+'">'+h(file)+'</a>').join('')+'</div>'+
-          '<p class="hint">Imprimir al 100 % sin ajustar escala. La hoja de respuestas y su acetato deben ser del mismo lote.</p></div>';
+            '<a class="secondary" href="'+dir+encodeURIComponent(file)+'">'+h(file)+'</a>').join('')+
+          '</div></details>'+
+          '<p class="hint">Imprime al 100 % sin ajustar la escala. El ZIP contiene la clave y el acetato, de uso interno.</p></div>';
+        sel(panel,'#newIssuance').hidden=false;
+        sel(panel,'#downloadAll').onclick=async()=>{
+          try{
+            let hdl=null;
+            if(typeof window.showSaveFilePicker==='function')
+              hdl=await window.showSaveFilePicker({
+                suggestedName:zipName,types:[{description:'ZIP OMR',accept:{'application/zip':['.zip']}}]});
+            await savePackage(pkg,zipName,hdl);
+          }catch(error){if(error.name!=='AbortError')alertBox(error.message,true);}
+        };
         if(resp.sid&&onCreated)await onCreated(resp.sid);
         if(resp.tipo==='manual')await refreshManualHistory();
-        alertBox('Material del examen generado correctamente.');
+        try{
+          await savePackage(pkg,zipName,handle);
+          alertBox('Evaluación creada. Paquete completo enviado a guardar.');
+        }catch(error){
+          alertBox('Aplicación creada; descarga el ZIP con «Guardar paquete completo»: '+error.message,true);
+        }
       }catch(err){alertBox(err.message,true);}
-      finally{button.disabled=false;}
+      finally{working=false;if(!issued)button.disabled=false;}
     };
   }
   async function refreshManualHistory(){
@@ -410,14 +494,15 @@
       '<details class="panel designerSection" id="importSection">'+
       '<summary><b>Importar preguntas y crear cuestionario</b>'+
       '<small>Plantilla Excel, imágenes y logo</small></summary>'+
-      '<p class="hint">En Excel puedes escribir el nombre PNG/JPG en la columna Imagen (H) o pegar la foto anclada a la fila de esa pregunta. Una foto incrustada no necesita adjuntarse de nuevo.</p>'+
-      '<div class="actions"><a class="ghost" href="/api/templates/preguntas">Descargar plantilla de preguntas</a>'+
-      '<a class="ghost" href="/api/templates/personal">Descargar plantilla de personal</a></div>'+
+      '<p class="hint">Método recomendado: inserta la imagen PNG en la fila de su pregunta dentro de Excel (anclada desde fila 2). Se recupera automáticamente, sin volver a adjuntarla. Si la columna Imagen (H) contiene solo el nombre del archivo, usa la opción avanzada siguiente.</p>'+
+      '<div class="actions"><a class="ghost" href="/api/templates/preguntas">Descargar plantilla de preguntas</a></div>'+
       '<form id="importQ"><div class="cols">'+
       '<label>Nombre en biblioteca<input name="name" required placeholder="Evaluación de Cabos"></label>'+
       '<label>Título de impresión<input name="title" required placeholder="Evaluación de conocimientos"></label>'+
       '<label>Excel de preguntas (.xlsx)<input name="file" type="file" accept=".xlsx" required></label>'+
-      '<label>Fotos mencionadas en columna Imagen (PNG/JPG, opcional)<input name="images" type="file" accept=".png,.jpg,.jpeg" multiple></label>'+
+      '<details class="advancedDownload"><summary>Solo si tu Excel contiene nombres de imagen, adjuntar archivos PNG/JPG</summary>'+
+      '<label>Archivos referenciados por nombre en columna Imagen (H)<input name="images" type="file" accept=".png,.jpg,.jpeg" multiple></label>'+
+      '<p class="hint">No adjuntes aquí imágenes ya incrustadas en Excel: se importarían dos veces.</p></details>'+
       '<label>Logotipo (opcional)<input name="logo" type="file" accept=".png,.jpg,.jpeg"></label>'+
       '</div><details><summary>Datos y diseño inicial</summary>'+
       '<div class="cols">'+
@@ -443,8 +528,11 @@
       '<details class="panel designerSection" id="designSection" open>'+
       '<summary><b>Diseñar cuestionario</b><small>Preguntas, colores, medidas y fotos</small></summary>'+
       '<div id="designerPanel"></div></details>'+
+      '<details class="panel designerSection" id="rosterSection">'+
+      '<summary><b>Personal a evaluar (opcional)</b><small>Importar Excel o CSV una sola vez</small></summary>'+
+      '<div id="rosterPanel"></div></details>'+
       '<details class="panel designerSection" id="generationSection">'+
-      '<summary><b>Emitir e imprimir</b><small>Normal / Ecológico, lista opcional, QR y acetato</small></summary>'+
+      '<summary><b>Emitir e imprimir</b><small>Nombre, modalidad, papel y paquete ZIP</small></summary>'+
       '<div id="generationPanel"></div></details></div>'+
       '<aside class="panel designerPreview" id="designerPreview">'+
       '<h3>Vista previa PDF real</h3>'+
