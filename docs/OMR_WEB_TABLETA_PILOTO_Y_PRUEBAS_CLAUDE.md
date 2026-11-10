@@ -915,3 +915,5 @@ test_renovar_reserva_lenta_sin_cambiar_revision_ni_otra_cuenta y
 test_una_reserva_que_vencio_no_resucita_con_heartbeat.
 
 **Cliente con lease expirado:** la vista de reactivos no debe volver a habilitar Guardar decisión o Captura completa después de cambiar de pregunta si la renovación perdió su reserva. El renderizado calcula reservationActive en cada reconstrucción de la UI, deshabilita las acciones y los manejadores vuelven a verificar el token antes de enviar. El servidor conserva el control definitivo de versiones y responde 409.
+
+**Aplicaciones históricas/manuales/cerradas:** la interfaz no muestra enlaces de cuadernillo/acetato/paquete nuevo sobre aplicaciones creadas exclusivamente para vinculación manual sin QR; esa aplicación conserva su evidencia en Calificar. En una evaluación cerrada se mantiene la consulta/exportación de resultados pero el botón de reapertura aparece deshabilitado, como en el control del servidor.

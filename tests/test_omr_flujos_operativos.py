@@ -300,3 +300,11 @@ def test_despues_de_expirar_no_se_reactiva_el_boton_al_cambiar_pregunta():
     assert 'const reservationActive=Boolean(state.lease)' in script
     assert "(!reservationActive?'disabled':'')" in script
     assert 'if(!state.lease){alertBox("La reserva expiró.' in script
+
+
+def test_ui_no_ofrece_paquete_imprenta_manual_y_desactiva_reapertura_cerrada():
+    from pathlib import Path
+    script=(Path(__file__).resolve().parents[1]/
+            "omr_web"/"static"/"app.js").read_text(encoding="utf-8")
+    assert "if(selected?.calificacion_manual)" in script
+    assert 'report.estado_cierre!=="abierta"' in script

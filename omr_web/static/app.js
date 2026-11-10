@@ -261,10 +261,15 @@
     onButton(content,"[data-sid]",async e=>{state.sid=e.currentTarget.dataset.sid;await applications();});
     onButton(content,"[data-go]",e=>navigate(e.currentTarget.dataset.go));
     if(state.sid && state.flow==="crear" && isAdmin()){
-      const base="/api/applications/"+encodeURIComponent(state.sid)+"/files/";
-      byId("appFiles").innerHTML=["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
-        "Paquetes_individuales.zip"].map(n=>
-        '<a class="ghost" href="'+base+encodeURIComponent(n)+'">'+h(n)+'</a>').join("");
+      const selected=state.apps.find(x=>x.id===state.sid);
+      if(selected?.calificacion_manual){
+        byId("appFiles").innerHTML='<p class="hint">Esta aplicación se creó para calificación manual de una página sin QR. No tiene un lote de impresión propio; consulta su evidencia en Calificar.</p>';
+      }else{
+        const base="/api/applications/"+encodeURIComponent(state.sid)+"/files/";
+        byId("appFiles").innerHTML=["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
+          "Paquetes_individuales.zip"].map(n=>
+          '<a class="ghost" href="'+base+encodeURIComponent(n)+'">'+h(n)+'</a>').join("");
+      }
     }
   }
   async function reviewQueue(){
@@ -904,7 +909,8 @@
         Array.from({length:p.preguntas},(_,i)=>'<option value="'+(i+1)+'">'+
           String(i+1).padStart(2,"0")+'</option>').join("")+'</select></label>'+
         '<label>Motivo de aclaración<textarea id="reopenReason" rows="3" placeholder="Explica por qué debe revisarse nuevamente la marca física."></textarea></label>'+
-        '<button class="secondary" id="reopenSheet" '+(!valid?'disabled':'')+
+        '<button class="secondary" id="reopenSheet" '+
+        (!valid||report.estado_cierre!=="abierta"?'disabled':'')+
         '>Abrir re-corrección</button></div>':'')+
       '</div><div class="panel"><h3>Evidencia con acetato</h3>'+
       (canExport()?'<label class="check"><input id="resultAcetate" type="checkbox" '+
