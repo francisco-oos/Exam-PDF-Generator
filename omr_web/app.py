@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import os
 import re
+from zipfile import ZipFile, ZIP_DEFLATED
 from pathlib import Path
 from uuid import uuid4
 
@@ -69,6 +70,7 @@ class NewApplication(BaseModel):
     modalidad: str = "ecologico"
     papel: str = "Carta"
     participantes: list[dict] = Field(default_factory=list,max_length=500)
+    solicitud_id: str | None = None
 
 
 class ClaimPayload(BaseModel):
@@ -296,7 +298,57 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     def create_application(data: NewApplication,user=Depends(write_user)):
         return engine.create_application(
             user,data.cuestionario_id,data.nombre,data.modalidad,
-            data.papel,data.participantes)
+            data.papel,data.participantes,data.solicitud_id)
+
+    def complete_print_package(folder: Path, allowed: set[str], label: str):
+        """Entrega un único ZIP sin almacenar copias permanentes ni URLs secretas."""
+        archive=engine.outputs/(uuid4().hex+".zip")
+        try:
+            with ZipFile(archive,"w",compression=ZIP_DEFLATED,
+                         compresslevel=6) as zip_file:
+                for filename in sorted(allowed):
+                    target=(folder/filename).resolve()
+                    if target.parent!=folder.resolve():
+                        raise WebError("Material fuera de la carpeta autorizada.",403)
+                    if target.is_file():
+                        zip_file.write(target,arcname="Material_OMR/"+filename)
+                zip_file.writestr(
+                    "Material_OMR/LEEME.txt",
+                    "PAQUETE DE IMPRESION OMR\n"
+                    "Imprimir los PDF al 100% sin ajustar a pagina.\n"
+                    "Conservar las hojas, folios y QR de esta aplicacion.\n"
+                    "Acetato y clave: uso interno, no entregar a participantes.\n")
+            if archive.stat().st_size < 100:
+                raise WebError("No se encontraron documentos para descargar.",404)
+        except Exception:
+            archive.unlink(missing_ok=True)
+            raise
+        return FileResponse(
+            archive,filename=label+".zip",media_type="application/zip",
+            background=BackgroundTask(lambda: archive.unlink(missing_ok=True)))
+
+    @web.get("/api/applications/{sid}/package")
+    def download_application_package(sid:str,user=Depends(user_of)):
+        engine.require(user,roles={"admin","coordinador"},sid=sid)
+        session=engine.store.session(sid)
+        folder=Path(session.get("lote_path") or "")
+        if not folder.is_absolute():
+            folder=(engine.root/folder).resolve()
+        allowed_root=(engine.root/"salidas").resolve()
+        if not folder.resolve().is_relative_to(allowed_root) or not folder.is_dir():
+            raise WebError("Material de impresión no disponible.",404)
+        return complete_print_package(folder,set(FILE_NAMES),
+                                      "Paquete_OMR_"+sid)
+
+    @web.get("/api/print-lots/{lot_id}/package")
+    def download_print_lot_package(lot_id:str,user=Depends(user_of)):
+        engine.require(user,roles={"admin"})
+        # La resolución de ruta se hace con el mismo control que una descarga
+        # individual: no aceptar carpeta o identificador suministrado por URL.
+        example=engine.print_lot_file(user,lot_id,"Cuadernillo.pdf")
+        return complete_print_package(example.parent,
+            {"Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
+             "Clave_docente.pdf","manifest.json"},"Paquete_Manual_"+lot_id)
 
     @web.get("/api/print-lots")
     def print_lots(user=Depends(user_of)):

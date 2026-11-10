@@ -606,7 +606,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
     """
     from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
-    from src.evaluaciones.core import _font, _safe_image
+    from src.evaluaciones.core import _font, _safe_image, _white_background
     from PIL import ImageOps
     normal, bold = _font()
     paper = session['papel']
@@ -635,7 +635,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
     if logo:
         validated=_safe_image(Path(logo),source='Logotipo OMR')
         with Image.open(validated) as original:
-            picture=ImageOps.exif_transpose(original).convert('RGB')
+            picture=_white_background(ImageOps.exif_transpose(original))
             picture.thumbnail((300,300),Image.Resampling.LANCZOS)
             dim=min(52,max(19,43*float(logo_ancho_mm)/23.))
             cnv.drawImage(ImageReader(picture),44,h-107,width=dim,height=dim,

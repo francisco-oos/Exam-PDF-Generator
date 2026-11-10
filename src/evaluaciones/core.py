@@ -180,11 +180,24 @@ def _question_image(name: object, base: Path, row: int) -> Path | None:
     return _safe_image(folder / name, source=f'Fila {row}/Imagen')
 
 
+def _white_background(im: PILImage.Image) -> PILImage.Image:
+    """PNG transparente sobre papel blanco, no sobre fondo negro opaco.
+
+    No elimina fondos que ya estén pintados en la imagen de origen.
+    """
+    if im.mode in ("RGBA","LA","PA") or "transparency" in im.info:
+        foreground=im.convert("RGBA")
+        background=PILImage.new("RGBA",foreground.size,(255,255,255,255))
+        background.alpha_composite(foreground)
+        return background.convert("RGB")
+    return im.convert("RGB")
+
+
 def _pdf_image(path: Path, max_width: float, max_height: float,
                align: str = "CENTER") -> PdfImage:
     """Desvincula el PDF del archivo original, normalizando EXIF y dimensiones."""
     with PILImage.open(path) as im:
-        im = ImageOps.exif_transpose(im).convert('RGB')
+        im = _white_background(ImageOps.exif_transpose(im))
         im.thumbnail((1500, 1500), PILImage.Resampling.LANCZOS)
         w, h = im.size
         ratio = min(max_width / w, max_height / h)

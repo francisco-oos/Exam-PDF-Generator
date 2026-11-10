@@ -153,6 +153,11 @@ class WebService:
                   id TEXT PRIMARY KEY, nombre TEXT NOT NULL,
                   ruta TEXT NOT NULL, modo TEXT NOT NULL,
                   papel TEXT NOT NULL, creado TEXT NOT NULL);
+                -- Una misma solicitud de emisión no puede generar dos folios.
+                CREATE TABLE IF NOT EXISTS web_emisiones(
+                  id TEXT PRIMARY KEY, usuario_id TEXT NOT NULL,
+                  huella TEXT NOT NULL, resultado TEXT NOT NULL,
+                  creado TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS web_auditoria_revision(
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   hoja_id TEXT NOT NULL, tipo TEXT NOT NULL,
@@ -825,7 +830,44 @@ class WebService:
                 WHERE h.sesion_id=? ORDER BY e.id DESC LIMIT 400
             """,(sid,))]
 
-    def create_application(self,user,questionnaire_id,name,mode,paper,participants):
+    def create_application(self,user,questionnaire_id,name,mode,paper,participants,
+                           request_id=None):
+        """Una solicitud reintentada recupera su lote: nunca duplica folios QR."""
+        self.require(user,roles={"admin"})
+        if request_id is None:
+            return self._create_application_once(
+                user,questionnaire_id,name,mode,paper,participants)
+        if not isinstance(request_id,str) or not re.fullmatch(
+                r"[0-9a-fA-F-]{36}",request_id):
+            raise WebError("Identificador de emisión inválido.",422)
+        fingerprint=hashlib.sha256(compact_json({
+            "cuestionario_id":questionnaire_id,"nombre":name,"modo":mode,
+            "papel":paper,"participantes":participants,
+        }).encode("utf-8")).hexdigest()
+        # Candado entre procesos: dos navegadores pueden reintentar el mismo
+        # POST al mismo tiempo, incluso en instancias web distintas.
+        with exclusive_scan_queue(self.root/"omr"/"web_emision.lock"):
+            with self.store.connect() as db:
+                issued=db.execute(
+                    "SELECT usuario_id,huella,resultado FROM web_emisiones "
+                    "WHERE id=?",(request_id,)).fetchone()
+            if issued:
+                if issued["usuario_id"]!=user["id"]:
+                    raise WebError("La emisión pertenece a otra cuenta.",403)
+                if issued["huella"]!=fingerprint:
+                    raise WebError("La solicitud se reutilizó con otros datos.",409)
+                return json.loads(issued["resultado"])
+            result=self._create_application_once(
+                user,questionnaire_id,name,mode,paper,participants)
+            with self.store.connect() as db:
+                db.execute("INSERT INTO web_emisiones "
+                           "(id,usuario_id,huella,resultado,creado) "
+                           "VALUES(?,?,?,?,?)",
+                           (request_id,user["id"],fingerprint,
+                            compact_json(result),utcnow()))
+            return result
+
+    def _create_application_once(self,user,questionnaire_id,name,mode,paper,participants):
         """Dos modos aprobados; QR solamente al cargar lista de personas.
 
         Normal + lista: paquetes por participante; Ecológico + lista:
