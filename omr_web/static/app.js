@@ -304,7 +304,12 @@
       '</b> · dudas restantes: '+pending.length+'</p>'+
       (currentIssue?'<p class="pendingReason"><b>Motivo de la duda:</b> '+
         h(currentIssue.razon||"Lectura inconclusa")+
-        '. Confirma físicamente el lápiz antes de elegir.</p>':'')+
+        '. Confirma físicamente el lápiz antes de elegir.'+
+        (Array.isArray(currentIssue.niveles)&&currentIssue.niveles.length===4?
+          '<span class="inkLevels">Intensidad promedio de tinta (no es probabilidad de acierto): '+
+          currentIssue.niveles.map((n,i)=>
+            'ABCD'[i]+' '+h(Math.round(Math.max(0,Math.min(1,Number(n)||0))*100))+'%').join(' · ')+
+          '</span>':'')+'</p>':'')+
       '<label>Decisión A/B/C/D o BLANCO<select id="decision">'+
       (disputed?'<option value="" selected>— Selecciona una decisión —</option>':'')+
       ["A","B","C","D","BLANCO"].map(c=>'<option '+(!disputed&&c===value?'selected':'')+'>'+c+'</option>').join("")+
