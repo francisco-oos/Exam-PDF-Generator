@@ -878,3 +878,11 @@ incluye rutas absolutas, claves ni el contenido del PDF. La vista se
 actualiza cada 3.5 segundos solo mientras está abierta y no cambia
 el candado global de procesamiento, que sigue siendo exclusivo.
 El ID original de un trabajo reintentado se conserva.
+
+
+**Nota de simulación de PDF:** para validar nombre de archivo,
+descarga y eliminación de temporales, el test crea imágenes ficticias
+rectificadas de 1700 × 2200 píxeles (Carta a 200 dpi). Una imagen de
+240 × 190 px no tiene las cuatro marcas ni la geometría homologada:
+el sistema debe rechazar el acetato alineado. Eso NO es un fallo de
+Xerox ni prueba de lectura de lápiz real.

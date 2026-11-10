@@ -40,8 +40,11 @@ def sample(tmp_path):
     svc.close()
 
 
-def register(svc,sid,person,index,answers,issues=None,status="validada"):
-    image=np.full((240,190,3),255,dtype=np.uint8)
+def register(svc,sid,person,index,answers,issues=None,status="validada",*,aligned=False):
+    # El acetato auditado exige una imagen rectificada a 200 dpi.
+    # Los escenarios puramente transaccionales pueden usar una imagen pequeña.
+    shape=(2200,1700,3) if aligned else (240,190,3)
+    image=np.full(shape,255,dtype=np.uint8)
     return svc.store.register_page(sid,f"{index:064x}",0,image,
         person["token"],answers,issues or [],status)[0]
 
@@ -162,7 +165,7 @@ def test_archivos_exportados_se_nombran_por_folio_y_no_acumulan_temporales(sampl
     from omr_web.app import create_app
     svc,admin,sid,people=sample
     for index,person in enumerate(people):
-        sheet=register(svc,sid,person,40+index,["A","C","D"])
+        sheet=register(svc,sid,person,40+index,["A","C","D"],aligned=True)
         svc.approve(admin,sheet)
     app=create_app(svc.root,start_workers=False)
     try:

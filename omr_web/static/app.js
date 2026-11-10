@@ -527,8 +527,7 @@
           const jid=e.currentTarget.dataset.retry;
           if(!confirm("¿Reintentar el PDF fallido sin crear otro ingreso?"))return;
           try{await api("/jobs/"+jid+"/retry",{method:"POST"});
-            alertBox("Trabajo devuelto a la cola de procesamiento.");
-            await refreshJobs();
+            alertBox("Trabajo devuelto a la cola. La bandeja se actualizará automáticamente.");
           }catch(err){alertBox(err.message,true);}
         });
       }catch(err){target.textContent="No se pudo consultar la cola: "+err.message;}
