@@ -108,6 +108,12 @@ class WebService:
                 CREATE TABLE IF NOT EXISTS web_aprobaciones(
                   hoja_id TEXT PRIMARY KEY,usuario_id TEXT NOT NULL,
                   fecha TEXT NOT NULL,revision INTEGER NOT NULL);
+                -- Sin personal NO se inventa una sesión OMR: los PDF
+                -- se conservan como lote genérico para acetato manual.
+                CREATE TABLE IF NOT EXISTS web_lotes_impresion(
+                  id TEXT PRIMARY KEY, nombre TEXT NOT NULL,
+                  ruta TEXT NOT NULL, modo TEXT NOT NULL,
+                  papel TEXT NOT NULL, creado TEXT NOT NULL);
             """)
             # Reiniciar trabajos interrumpidos sin perder sus originales
             # (la importación OMR ya es idempotente).
@@ -210,6 +216,9 @@ class WebService:
 
     def add_user(self, admin, username, name, password, role):
         self.require(admin, roles={"admin"})
+        # "auxiliar" es el perfil sencillo del usuario. Internamente se
+        # conserva "capturista" para no romper cuentas ni permisos históricos.
+        role = "capturista" if role == "auxiliar" else role
         if role not in VALID_ROLES or not IDENTITY.fullmatch(username):
             raise WebError("Rol o usuario inválido.")
         uid = uuid4().hex
@@ -457,11 +466,17 @@ class WebService:
             """,(sid,))]
 
     def create_application(self,user,questionnaire_id,name,mode,paper,participants):
+        """Dos modos aprobados; QR solamente al cargar lista de personas.
+
+        Normal + lista: paquetes por participante; Ecológico + lista:
+        cuadernillo reutilizable. SIN lista en cualquiera de los dos
+        casos: hoja genérica sin QR y acetato físico; no crear calificaciones.
+        """
         self.require(user,roles={"admin"})
         if mode not in ("normal","ecologico") or paper not in ("A4","Carta","Oficio"):
             raise WebError("Modalidad o papel inválidos.")
-        if not isinstance(participants,list) or not 1<=len(participants)<=500:
-            raise WebError("Se requiere una lista de 1 a 500 participantes.")
+        if not isinstance(participants,list) or len(participants)>500:
+            raise WebError("Lista inválida; máximo 500 participantes.")
         with TemporaryDirectory(prefix="omr_biblioteca_") as tmp:
             exam=load_exam(self.library,questionnaire_id,Path(tmp))
             if not exam.questions:
@@ -469,13 +484,21 @@ class WebService:
             source=Path(tmp)/"Preguntas.xlsx"
             from biblioteca import export_workbook
             export_workbook(exam.questions,source)
-            import csv
-            roster=Path(tmp)/"personal.csv"
-            with roster.open("w",newline="",encoding="utf-8-sig") as f:
-                writer=csv.DictWriter(f,fieldnames=["id","nombre","area","grupo","turno"])
-                writer.writeheader()
-                for p in participants:
-                    writer.writerow({k:p.get(k,"") for k in writer.fieldnames})
+            roster=None
+            if participants:
+                # Reutilizar read_roster: las mismas validaciones se aplican
+                # a los datos pegados y a los importados desde XLSX/CSV.
+                import csv
+                roster=Path(tmp)/"personal.csv"
+                with roster.open("w",newline="",encoding="utf-8-sig") as stream:
+                    writer=csv.DictWriter(stream,
+                        fieldnames=["id","nombre","area","grupo","turno"])
+                    writer.writeheader()
+                    for person in participants:
+                        if not isinstance(person,dict):
+                            raise WebError("Participante inválido.")
+                        writer.writerow({key:person.get(key,"") for key
+                                         in writer.fieldnames})
             folder=preparar_examen(
                 source,self.root/"salidas",exam.titulo,exam.subtitulo,
                 modo_examen=mode,lista_personal=roster,
@@ -489,13 +512,57 @@ class WebService:
                 color_respuestas=exam.color_respuestas,
                 color_acetato=exam.color_acetato,
             )
-        import re
-        text=(folder/"Sesion_OMR.txt").read_text(encoding="utf-8")
-        match=re.search(r"\b[0-9a-f]{12}\b",text)
-        if not match:
-            raise WebError("No se pudo verificar la aplicación generada.",500)
-        return {"sid":match.group(0),"ruta":str(folder.relative_to(self.root)),
-                "archivos":["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf"]}
+        files=[f for f in ("Cuadernillo.pdf","Hoja_respuestas.pdf",
+               "Acetato_clave.pdf","Clave_docente.pdf",
+               "Paquetes_individuales.zip","manifest.json")
+               if (folder/f).is_file()]
+        session_file=folder/"Sesion_OMR.txt"
+        if session_file.is_file():
+            match=re.search(r"\\b[0-9a-f]{12}\\b",
+                            session_file.read_text(encoding="utf-8"))
+            if not match:
+                raise WebError("La aplicación generada no tiene sesión válida.",500)
+            return {"tipo":"omr","sid":match.group(0),"lote_id":None,
+                    "modalidad":mode,"con_personal":True,"archivos":files}
+        if participants:
+            raise WebError("No se generó la sesión OMR esperada.",500)
+        lot_id=uuid4().hex
+        relative=str(folder.relative_to(self.root))
+        with self.store.connect() as db:
+            db.execute("""INSERT INTO web_lotes_impresion
+                (id,nombre,ruta,modo,papel,creado) VALUES(?,?,?,?,?,?)""",
+                (lot_id,(name or exam.nombre)[:120],relative,mode,paper,utcnow()))
+        return {"tipo":"manual","sid":None,"lote_id":lot_id,
+                "modalidad":mode,"con_personal":False,"archivos":files,
+                "aviso":"Sin lista: hoja sin QR, corrección manual con acetato."}
+
+    def print_lots(self,user):
+        self.require(user,roles={"admin"})
+        with self.store.connect() as db:
+            return [dict(row) for row in db.execute(
+                "SELECT id,nombre,modo,papel,creado FROM web_lotes_impresion "
+                "ORDER BY creado DESC LIMIT 100")]
+
+    def print_lot_file(self,user,lot_id,filename):
+        """Acceder solamente a archivos de lotes propios guardados en salidas."""
+        self.require(user,roles={"admin"})
+        if filename not in {"Cuadernillo.pdf","Hoja_respuestas.pdf",
+                            "Acetato_clave.pdf","Clave_docente.pdf",
+                            "manifest.json"}:
+            raise WebError("Archivo no permitido.",404)
+        with self.store.connect() as db:
+            row=db.execute("SELECT ruta FROM web_lotes_impresion WHERE id=?",
+                           (lot_id,)).fetchone()
+        if row is None:
+            raise WebError("Lote inexistente.",404)
+        root=(self.root/"salidas").resolve()
+        folder=(self.root/row["ruta"]).resolve()
+        if not folder.is_relative_to(root) or not folder.is_dir():
+            raise WebError("Carpeta del lote fuera del servidor.",403)
+        target=(folder/filename).resolve()
+        if target.parent!=folder or not target.is_file():
+            raise WebError("Archivo del lote no disponible.",404)
+        return target
 
     def add_job(self,user,source):
         self.require(user,roles={"admin","coordinador"})

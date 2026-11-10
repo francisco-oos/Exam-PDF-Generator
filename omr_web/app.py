@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -62,7 +62,7 @@ class NewApplication(BaseModel):
     nombre: str = ""
     modalidad: str = "ecologico"
     papel: str = "Carta"
-    participantes: list[dict] = Field(min_length=1,max_length=500)
+    participantes: list[dict] = Field(default_factory=list,max_length=500)
 
 
 class ClaimPayload(BaseModel):
@@ -248,6 +248,15 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         return engine.create_application(
             user,data.cuestionario_id,data.nombre,data.modalidad,
             data.papel,data.participantes)
+
+    @web.get("/api/print-lots")
+    def print_lots(user=Depends(user_of)):
+        return engine.print_lots(user)
+
+    @web.get("/api/print-lots/{lot_id}/files/{filename}")
+    def print_lot_file(lot_id:str,filename:str,user=Depends(user_of)):
+        return FileResponse(engine.print_lot_file(user,lot_id,filename),
+                            filename=filename)
 
     @web.get("/api/applications/{sid}/questions")
     def questions(sid: str,user=Depends(user_of)):
