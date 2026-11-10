@@ -44,9 +44,10 @@ def exclusive_scan_queue(lockfile: Path):
     with lockfile.open("a+b") as handle:
         if os.name=="nt":
             import msvcrt
-            handle.seek(0)
-            if not handle.read(1):
-                handle.seek(0)
+            # Windows exige locks obligatorios: leer el byte reservado
+            # por otro worker lanza PermissionError. Sólo consultar tamaño.
+            handle.seek(0,os.SEEK_END)
+            if handle.tell()==0:
                 handle.write(b"0")
                 handle.flush()
             while True:
@@ -969,12 +970,15 @@ class WebService:
         reused=False
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            old=db.execute("""SELECT id FROM web_trabajos
+            old=db.execute("""SELECT id,ruta,operador_id FROM web_trabajos
                 WHERE archivo_sha=? AND estado IN ('pendiente','procesando')
                 ORDER BY creado,id LIMIT 1""",(sha,)).fetchone()
             if old:
+                if (user["rol"]!="admin" and old["operador_id"]!=user["id"]):
+                    raise WebError("Este PDF ya está en cola por otro operador. "
+                                   "Solicita al administrador revisar el trabajo.",409)
                 jid=old["id"]
-                reused=True
+                reused=(source.resolve()!=Path(old["ruta"]).resolve())
             else:
                 db.execute("""INSERT INTO web_trabajos
                     (id,operador_id,ruta,estado,resultado,error,creado,actualizado,archivo_sha)
@@ -982,7 +986,8 @@ class WebService:
                     (jid,user["id"],str(source),"pendiente","{}","",
                      utcnow(),utcnow(),sha))
         if reused and source.resolve().is_relative_to(self.incoming.resolve()):
-            # El ingreso repetido temporal nunca sustituye al PDF archivado.
+            # No borrar el archivo usado por el trabajo vigente; sólo
+            # descartar otra copia temporal de contenido idéntico.
             source.unlink(missing_ok=True)
         self.wake()
         return jid

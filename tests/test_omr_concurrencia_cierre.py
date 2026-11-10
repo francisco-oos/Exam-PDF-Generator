@@ -209,3 +209,17 @@ def test_guardar_ultima_decision_libera_reserva_atomica(tmp_path):
     svc.approve(admin,sheet)
     assert svc.closure_summary(admin,sid)["listo"]
     svc.close()
+
+
+def test_repetir_add_job_con_misma_ruta_no_borra_original_en_cola(tmp_path):
+    svc=WebService(tmp_path,start_workers=False)
+    admin=_admin(svc)
+    source=svc.incoming/"mismo_archivo.pdf"
+    source.write_bytes(b"%PDF-1.4\\n%%EOF\\n")
+    first=svc.add_job(admin,source)
+    second=svc.add_job(admin,source)
+    assert first==second
+    assert source.is_file()
+    with svc.store.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM web_trabajos").fetchone()[0]==1
+    svc.close()
