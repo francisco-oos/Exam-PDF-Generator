@@ -65,3 +65,26 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
 .auditReopen{border-top:1px solid #dce5ea;margin-top:18px;padding-top:12px}
 .resultEvidenceLayout .check{margin-bottom:12px}
 @media(max-width:950px){.resultEvidenceLayout{grid-template-columns:1fr}}
+
+
+/* Diseñador: columnas permanentes y acordeones. El visor está fuera de
+   formularios que se reconstruyen, evitando que pierda el PDF activo. */
+.designerWorkbench{display:grid;grid-template-columns:minmax(0,1.07fr) minmax(370px,.93fr);gap:18px;align-items:start}
+.designerSteps{min-width:0;display:flex;flex-direction:column;gap:13px}
+.designerSection{min-width:0}
+.designerSection>summary{cursor:pointer;display:flex;align-items:center;gap:12px;justify-content:space-between;padding:4px 0;list-style:none}
+.designerSection>summary::-webkit-details-marker{display:none}
+.designerSection>summary:after{content:"▾";color:#416a7a;flex-shrink:0}
+.designerSection:not([open])>summary:after{content:"▸"}
+.designerSection>summary b{font-size:15px}
+.designerSection>summary small{font-size:11px;color:#617d8a;font-weight:500}
+.designerSection[open]>summary{border-bottom:1px solid #dce5e9;padding-bottom:11px;margin-bottom:14px}
+.designerSection .designerControls{min-width:0}
+.designerWorkbench .designerPreview{position:sticky;top:10px;max-height:calc(100vh - 24px);overflow:auto;align-self:start}
+.designerWorkbench .pdfPreview{height:min(72vh,800px);min-height:460px}
+@media(max-width:1020px){
+  .designerWorkbench{grid-template-columns:1fr}
+  .designerWorkbench .designerPreview{order:-1;position:sticky;top:0;max-height:43vh;z-index:2;background:#fff;box-shadow:0 7px 15px #1e46521a}
+  .designerWorkbench .pdfPreview{height:30vh;min-height:180px}
+  .designerSection>summary{flex-wrap:wrap;justify-content:flex-start}
+}
