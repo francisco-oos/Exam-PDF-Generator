@@ -223,6 +223,44 @@ def test_personal_xlsx_preserva_ceros_y_rechaza_formato_invalido(server):
                   files={"file":("mal.txt",b"incorrecto")}).status_code==400
 
 
+def test_vista_previa_no_emite_folios_ni_muta_sesiones(server):
+    app,c,headers=server
+    eid=import_questionnaire(c,headers)
+    assert not app.state.engine.store.sessions()
+    for view in ("Cuadernillo","Respuestas","Acetato"):
+        response=c.post("/api/library/"+eid+"/preview?view="+view,
+                        headers=headers,json={
+                            "modo":"normal","papel":"Carta",
+                            "con_personal":True})
+        assert response.status_code==200,response.text
+    assert not app.state.engine.store.sessions()
+
+
+def test_editar_clave_biblioteca_no_cambia_evaluacion_ya_impresa(server):
+    app,c,headers=server
+    eid=import_questionnaire(c,headers)
+    def application():
+        r=c.post("/api/applications",headers=headers,json={
+            "cuestionario_id":eid,"modalidad":"ecologico","papel":"Carta",
+            "participantes":[{"id":"A0001","nombre":"Persona ficticia"}]})
+        assert r.status_code==200,r.text
+        return app.state.engine.store.session(r.json()["sid"])
+
+    original=application()
+    assert original["preguntas"][0]["correcta"]=="A"
+    data=c.get("/api/library/"+eid).json()
+    data["preguntas"][0]["correcta"]="B"
+    data["preguntas"][0]["imagen"]=None
+    updated=c.post("/api/library/"+eid+"/edit",headers=headers,
+                   data={"payload":json.dumps(data)})
+    assert updated.status_code==200,updated.text
+    assert app.state.engine.store.session(original["id"])["preguntas"][0]["correcta"]=="A"
+    new=application()
+    assert new["preguntas"][0]["correcta"]=="B"
+    assert new["cuestionario_id"]==eid
+    assert new["revision_biblioteca"]==2
+
+
 def test_clave_no_sale_a_auxiliar_asignado(server):
     app,c,headers=server
     eid=import_questionnaire(c,headers)

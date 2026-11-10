@@ -8,7 +8,8 @@
   const sel = (root, q) => root.querySelector(q);
   const all = (root, q) => Array.from(root.querySelectorAll(q));
   let api, alertBox, root, onCreated, exams=[], draft=null, examId=null,
-      previewURL=null, activeView="Cuadernillo", previewSeq=0;
+      previewURL=null, activeView="Cuadernillo", previewSeq=0,
+      savedDesign=null;
 
   const meta = (id, label, value, kind="text", extra="") =>
     '<label>'+h(label)+'<input data-meta="'+h(id)+'" type="'+kind+
@@ -166,6 +167,7 @@
     }))};
     if(sel(root,'#examSelector'))sel(root,'#examSelector').value=id;
     showEditor();
+    savedDesign=JSON.stringify(cleanPayload());
     await preview();
   }
   function parseRow(line){
@@ -240,6 +242,10 @@
       if(!examId){alertBox('Selecciona un cuestionario.',true);return;}
       const button=e.currentTarget;
       try{
+        // Un examen emitido es inmutable: impedir que campos aún sin guardar
+        // parezcan formar parte de la versión usada para los folios.
+        if(JSON.stringify(cleanPayload())!==savedDesign)
+          throw Error('Primero guarda los cambios del diseño y después genera el examen.');
         const people=peopleFromText();
         if(people.length>500)throw Error('Máximo 500 participantes por aplicación.');
         if(people.some(p=>!p.id||!p.nombre))
