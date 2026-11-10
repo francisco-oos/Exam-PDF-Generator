@@ -23,13 +23,13 @@ from .service import WebError
 
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_BOOK_BYTES = 8 * 1024 * 1024
-IMAGE = re.compile(r"^[^./\\\\:][^/\\\\:]{0,150}\.(png|jpg|jpeg)$",re.I)
+IMAGE = re.compile(r"^[^./\\:][^/\\:]{0,150}\.(png|jpg|jpeg)$",re.I)
 INDEXED_IMAGE = re.compile(r"^q([1-9][0-9]{0,2})__(.+)$",re.I)
 
 
 def filename_of(upload: UploadFile, *, image=False) -> str:
     name = str(upload.filename or "")
-    if not name or name in (".","..") or Path(name).name != name or "/" in name or "\\\\" in name or ":" in name:
+    if not name or name in (".","..") or Path(name).name != name or "/" in name or "\\" in name or ":" in name:
         raise WebError("Nombre de archivo inválido.")
     if image and not IMAGE.fullmatch(name):
         raise WebError("Las imágenes deben ser archivos PNG/JPG de nombre simple.")
