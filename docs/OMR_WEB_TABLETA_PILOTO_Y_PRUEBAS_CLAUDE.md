@@ -644,3 +644,125 @@ ficticio, cambiar decisión y verificar que el registro indique quién
 y por qué. Confirmar que el original no cambió y que un Auxiliar
 no puede reabrir ni descargar la clave. No fusionar ni integrar
 licencia central sin aprobación física y cierre de CI.
+
+
+
+## Reparación de evidencia en copia de worktree y diseño con imágenes (10/11/2026)
+
+**Escenario Xerox real reportado:** al instalar la rama experimental en otra
+carpeta, SQLite seguía guardando rutas absolutas de los PNG escaneados en
+la instalación anterior. Resultados mostraba nota, folio y participante,
+pero el visor y los PDF auditados fallaban con "No se encontró el escaneo
+dentro del almacén autorizado". **No era un error del reconocimiento OMR.**
+
+### Localización segura del PNG al copiar un piloto
+
+La API de hoja, acetato y evidencia auditada consulta el registro por ID
+autorizado y construye exclusivamente:
+\`<OMR_WEB_DATA>/omr/escaneos/<sesion_id>/<hoja_id>.png\`.
+Solo se permite una ruta real dentro de \`omr/escaneos\`. No se sigue
+cualquier ruta absoluta vieja fuera de la copia, ni se modifican hashes,
+PNG, folios, respuestas, QR, notas o versiones por consultar un archivo.
+La lectura queda operativa aun si se borra la carpeta origen. Regresión
+automática: \`test_worktree_copia_reutiliza_imagen_archivada_con_ruta_absoluta_anterior\`.
+
+**Si falta el archivo físicamente en la copia**, el sistema responde
+404 con el diagnóstico y no rescata contenido personal desde otra
+instalación. En ese caso detener ambos servidores, respaldar la carpeta
+de destino y verificar qué carpeta faltó al copiar.
+
+Para normalizar las rutas de TODA la base, con el servidor detenido y
+un respaldo ya comprobado, utilizar la herramienta existente:
+
+\`\`\`powershell
+$raiz = 'C:\Users\Control de Material\Documents\dev-Francisco\Exam-PDF-Generator-Auditoria'
+cd $raiz
+$datos = (Resolve-Path '.\datos\omr_web_prueba_xerox').Path
+.\.venv-omr-web\Scripts\python.exe -m omr_web.relocate --data-dir "$datos"
+# Revisar "apto" y "problemas" antes de aplicar:
+.\.venv-omr-web\Scripts\python.exe -m omr_web.relocate --data-dir "$datos" --apply --confirm-stopped
+\`\`\`
+
+Si el diagnóstico encuentra un PDF original u otro archivo pendiente
+que falta, NO aplicar ni inventar archivos: restaurar primero la copia
+completa, o continuar usando el lector seguro de imágenes derivadas.
+
+### Dos formas aprobadas de introducir fotos de preguntas
+
+1. **Imagen PEGADA en Excel**: en la hoja **Preguntas**, anclar la foto
+   a la fila de su reactivo, por ejemplo **H2** para la pregunta de
+   la fila 2. La importación extrae el dibujo del XLSX, lo verifica,
+   lo asocia por fila y lo incorpora a la biblioteca. No se adjunta
+   otra vez mediante el selector "Fotos mencionadas en columna Imagen".
+2. **Imagen como archivo**: poner en la columna **Imagen (H)** el nombre
+   exacto de un PNG/JPG (por ejemplo \`equipo.png\`), adjuntarlo en
+   importación, y comprobar que la biblioteca lo enlazó a esa pregunta.
+   La imagen no referenciada se rechaza, no desaparece silenciosamente.
+   No combinar una foto pegada y un nombre de archivo en la misma fila:
+   se rechaza por ambiguo.
+
+La plantilla mantiene sus hojas Preguntas, Ejemplo y Guia; no cambia la
+lista de columnas aprobadas ni interpreta fórmulas como respuestas.
+No se asocian dos fotos a una misma fila. El **logotipo es un recurso
+separado**; se sube en el campo Logotipo y no se trata como una foto
+de reactivo. Todas las fotos son PNG/JPG locales validados y limitados
+en tamaño. No se suben XLSX, imágenes ni escaneos privados a GitHub.
+
+### Medidas y posicionamiento después de importar
+
+En **Diseñar cuestionario**, abrir el reactivo en su acordeón:
+- Ancho máximo: **30–165 mm** (por defecto 106 mm).
+- Alto máximo: **15–90 mm** (por defecto 62 mm).
+- Alineación: **Izquierda / Centrada / Derecha**.
+
+La imagen se adapta al rectángulo indicado **conservando su proporción**;
+no se estira, y ReportLab realiza la paginación cuando aumenta su
+altura. El **ancho del logotipo** se ajusta entre **10 y 28 mm** (23 mm
+por defecto); en hoja OMR se acota al encabezado reservado para no mover
+QR, marcas de calibración, círculos ni acetato. Si la foto viene PEGADA
+en Excel, su escala de impresión se modifica aquí: el anclaje H2 define
+la pregunta, no las dimensiones de salida.
+
+Guardar diseño conserva medidas en la biblioteca SQLite con migración
+aditiva (\`logo_ancho_mm\` y tres propiedades de cada reactivo).
+Aplicaciones ya emitidas mantienen los folios y clave de su versión.
+Las nuevas impresiones Normal/Ecológica reutilizan esas medidas en el
+cuadernillo y paquetes individuales; la hoja universal OMR nunca cambia
+su cuadrícula.
+
+### Vista previa permanente y archivos aún sin guardar
+
+La interfaz ahora presenta secciones plegables:
+**Importar preguntas y crear cuestionario**, **Biblioteca**, **Diseñar
+cuestionario** y **Emitir e imprimir**. A la derecha queda un visor
+PDF real separado que no desaparece al plegar una sección ni al abrir
+o cerrar una pregunta. Hay un botón **Actualizar vista previa** y
+re-renderización automática después de cambios.
+
+Cuando se elige una foto o logotipo nuevo, el navegador envía el
+archivo mediante \`/api/library/{id}/preview-live\` a una carpeta
+temporal aislada y lo descarta al cerrar la petición. **No crea una
+revisión de biblioteca, sesión ni folio**. Se muestra como vista
+temporal hasta usar **Guardar diseño**; después, imprimir solo cuando
+los cambios estén confirmados. No confundir la vista previa con
+material definitivo.
+
+Pruebas agregadas al conjunto \`tests/test_omr_web_designer.py\`:
+adjuntos nuevos antes de guardar, no mutación de biblioteca, foto y
+logo extraídos del PDF por color, medidas/alineación y generación en
+ambas modalidades, Excel con foto H2 + logo hasta el cuadernillo final,
+JSON de biblioteca con foto identificada por nombre, rechazo de medidas
+inválidas. Validación sintáctica Node de \`designer.js\` en CI.
+
+### Aceptación física prevista
+
+Sobre copia privada aislada del Xerox: abrir Resultados, seleccionar
+el folio de Francisco, comprobar que se ve el PNG y acetato; descargar
+PDF auditado y verificar el mismo folio, nota y hoja, manteniendo el
+original intacto. En Generar exámenes: importar una plantilla con foto
+incrustada, probar una segunda por nombre de archivo, cargar un logo,
+cambiar dimensiones/alineación, comparar previsualización Cuadernillo /
+Respuestas / Acetato, guardar y generar modo Normal y Ecológico. Revisar
+físicamente tamaño y colocación en Carta/Oficio, especialmente con
+cuadernillos de varias páginas. **No fusionar al flujo estable ni
+producción antes de cerrar CI y esta aceptación física.**
