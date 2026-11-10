@@ -9,7 +9,7 @@
   const all = (root, q) => Array.from(root.querySelectorAll(q));
   let api, alertBox, root, onCreated, exams=[], draft=null, examId=null,
       previewURL=null, activeView="Cuadernillo", previewSeq=0,
-      savedDesign=null, pendingLogo=null;
+      savedDesign=null, pendingLogo=null, previewTimer=null;
 
   const meta = (id, label, value, kind="text", extra="") =>
     '<label>'+h(label)+'<input data-meta="'+h(id)+'" type="'+kind+
@@ -20,6 +20,10 @@
     '<label>'+h(label)+'<select data-meta="'+h(id)+'">'+
     options(values,value)+'</select></label>';
 
+  function schedulePreview(){
+    clearTimeout(previewTimer);
+    previewTimer=setTimeout(()=>preview(),450);
+  }
   function fileQuestion(q,i){
     return '<details class="questionEditor" data-question="'+i+'">'+
       '<summary><b>Pregunta '+(i+1)+'</b> · '+h(q.pregunta.slice(0,85))+
@@ -155,12 +159,14 @@
       if(input.files?.length){q.pendingImage=input.files[0];q.quitarImagen=false;
         const remove=sel(input.closest('[data-question]'),'[data-remove-image]');
         if(remove)remove.checked=false;
+        schedulePreview();
       }
     });
     sel(panel,'#designerLogo').onchange=e=>{
       if(e.target.files?.length){pendingLogo=e.target.files[0];draft.quitarLogo=false;
         const remove=sel(panel,'#removeLogo');
         if(remove)remove.checked=false;
+        schedulePreview();
       }
     };
     const removeLogo=sel(panel,'#removeLogo');
@@ -170,6 +176,7 @@
         pendingLogo=null;
         sel(panel,'#designerLogo').value='';
       }
+      schedulePreview();
     };
     all(panel,'[data-remove-image]').forEach(box=>box.onchange=e=>{
       if(!e.target.checked)return;
@@ -178,6 +185,7 @@
       draft.preguntas[index].pendingImage=null;
       const input=sel(row,'[data-image]');
       if(input)input.value='';
+      schedulePreview();
     });
     all(panel,'[data-meta]').forEach(field=>{
       field.addEventListener('input',()=>schedulePreview());
@@ -344,11 +352,33 @@
     config.con_personal=!!sel(root,'#previewPersonal')?.checked;
     const csrf=document.cookie.split('; ').find(x=>x.startsWith('omr_csrf='));
     const token=csrf?decodeURIComponent(csrf.slice('omr_csrf='.length)):'';
+    const pending=draft.preguntas.some(q=>q.pendingImage)||!!pendingLogo;
+    const status=sel(root,'#previewStatus');
+    if(status)status.textContent='Actualizando vista previa PDF…';
+    const endpoint='/api/library/'+encodeURIComponent(examId)+
+      (pending?'/preview-live?view=':'/preview?view=')+
+      encodeURIComponent(activeView);
+    const headers={'X-CSRF-Token':token};
+    let payload;
+    if(pending){
+      const form=new FormData();
+      form.append('config',JSON.stringify(config));
+      for(const [i,q] of draft.preguntas.entries()){
+        if(q.pendingImage){
+          const file=q.pendingImage;
+          form.append('images',new File([file],'q'+(i+1)+'__'+file.name,
+                                        {type:file.type}));
+        }
+      }
+      if(pendingLogo)form.append('logo',pendingLogo);
+      payload=form;
+    }else{
+      headers['Content-Type']='application/json';
+      payload=JSON.stringify(config);
+    }
     try{
-      const response=await fetch('/api/library/'+encodeURIComponent(examId)+
-        '/preview?view='+encodeURIComponent(activeView),{
-          method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':token},
-          credentials:'same-origin',body:JSON.stringify(config)});
+      const response=await fetch(endpoint,{
+        method:'POST',headers,credentials:'same-origin',body:payload});
       if(!response.ok){
         const detail=await response.json().catch(()=>({}));
         throw Error(detail.error||detail.detail||'No se generó vista PDF.');
@@ -359,7 +389,14 @@
       previewURL=URL.createObjectURL(blob);
       sel(root,'#pdfPreview').src=previewURL;
       if(previous)URL.revokeObjectURL(previous);
-    }catch(err){alertBox(err.message,true);}
+      if(status)status.textContent=pending?
+        'Vista temporal con fotos o logo aún sin guardar.' :
+        'Vista exacta de la revisión actual.';
+    }catch(err){
+      if(seq!==previewSeq)return;
+      if(status)status.textContent='Vista previa: '+err.message;
+      alertBox(err.message,true);
+    }
   }
   async function start(params){
     ({api,alertBox,root,onCreated}=params);
