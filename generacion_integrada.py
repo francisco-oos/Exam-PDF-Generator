@@ -79,6 +79,7 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             'subtitulo': subtitulo,
             'color_titulo': opciones.get('color_titulo', '#213A4C'),
             'color_respuestas': opciones.get('color_respuestas', '#213A4C'),
+            'logo': opciones.get('logo'),
         }
         if personas:
             # El examen mantiene el tipo elegido para el historial, pero

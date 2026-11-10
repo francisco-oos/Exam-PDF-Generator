@@ -569,7 +569,7 @@ class OMRStore:
 def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
                         empresa='', grupo='', subtitulo='',
                         color_titulo='#213A4C', color_respuestas='#213A4C',
-                        preview=False):
+                        logo=None,preview=False):
     """Hoja institucional: una sola geometría para PDF, QR y lectura de escáner.
 
     Usa bubble_positions y corner_centers sin alteraciones. El aspecto adopta
@@ -578,7 +578,8 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
     """
     from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
-    from src.evaluaciones.core import _font
+    from src.evaluaciones.core import _font, _safe_image
+    from PIL import ImageOps
     normal, bold = _font()
     paper = session['papel']
     w, h = PAPERS[paper]
@@ -599,15 +600,28 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
             txt = txt[:-1]
         return txt
 
+    # El logotipo solo ocupa el margen del encabezado: no cambia las
+    # coordenadas OMR de QR, cuadrados de registro ni respuestas.
+    title_x=44
+    if logo:
+        validated=_safe_image(Path(logo),source='Logotipo OMR')
+        with Image.open(validated) as original:
+            picture=ImageOps.exif_transpose(original).convert('RGB')
+            picture.thumbnail((300,300),Image.Resampling.LANCZOS)
+            cnv.drawImage(ImageReader(picture),44,h-107,width=43,height=43,
+                          preserveAspectRatio=True,anchor='c')
+        title_x=97
     cnv.setFillColor(tint)
     cnv.setFont(bold, 13)
-    cnv.drawString(44, h-68, 'HOJA DE RESPUESTAS')
+    cnv.drawString(title_x, h-68, 'HOJA DE RESPUESTAS')
     cnv.setFont(bold, 9)
     cnv.setFillColor(title_ink)
-    cnv.drawString(44, h-87, clip_text(session['titulo'], bold, 9, w-205))
+    cnv.drawString(title_x, h-87,
+                   clip_text(session['titulo'], bold, 9, w-205-(title_x-44)))
     if subtitulo:
         cnv.setFont(normal, 8)
-        cnv.drawString(44, h-101, clip_text(subtitulo, normal, 8, w-205))
+        cnv.drawString(title_x, h-101,
+                       clip_text(subtitulo, normal, 8,w-205-(title_x-44)))
     if empresa:
         cnv.setFillColor(tint)
         cnv.setFont(normal, 8)
@@ -670,7 +684,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
 def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
                      empresa='',grupo='',subtitulo='',
                      color_titulo='#213A4C',color_respuestas='#213A4C',
-                     person_ids=None):
+                     logo=None,person_ids=None):
     """Imprime las hojas QR desde el diseño único; no genera otro examen.
 
     Cada código tiene HMAC de la misma sesión persistida que utilizará el lector.
@@ -691,7 +705,8 @@ def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
         if selected is not None and p['id'] not in selected:
             continue
         _draw_formulario_omr(cnv,s,p,empresa=empresa,grupo=grupo,subtitulo=subtitulo,
-                            color_titulo=color_titulo,color_respuestas=color_respuestas)
+                            color_titulo=color_titulo,color_respuestas=color_respuestas,
+                            logo=logo)
     cnv.save()
     return path
 
@@ -749,7 +764,7 @@ def preview_acetato_omr(questions, paper, *, color='#167341'):
 def preview_formulario_omr(questions, title, paper, *,
                           empresa='',grupo='',subtitulo='',
                           color_titulo='#213A4C',color_respuestas='#213A4C',
-                          nombre='Ejemplo de participante',identifier='000001',
+                          logo=None,nombre='Ejemplo de participante',identifier='000001',
                           con_personal=True):
     """Muestra el aspecto exacto sin crear folios utilizables ni escribir disco."""
     from io import BytesIO
@@ -763,7 +778,7 @@ def preview_formulario_omr(questions, title, paper, *,
     _draw_formulario_omr(cnv,session,sample if con_personal else None,
                         empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                         color_titulo=color_titulo,
-                        color_respuestas=color_respuestas,preview=True)
+                        color_respuestas=color_respuestas,logo=logo,preview=True)
     cnv.save()
     return data.getvalue()
 
@@ -771,7 +786,8 @@ def preview_formulario_omr(questions, title, paper, *,
 
 def create_generic_forms_pdf(questions, title, paper, target, *,
                              empresa='',grupo='',subtitulo='',
-                             color_titulo='#213A4C',color_respuestas='#213A4C'):
+                             color_titulo='#213A4C',color_respuestas='#213A4C',
+                             logo=None):
     """Hoja anónima con EXACTA geometría OMR y espacios manuscritos, sin QR.
 
     El diseño no cambia al cargar personal: solo se rellenan datos y QR.
@@ -784,7 +800,7 @@ def create_generic_forms_pdf(questions, title, paper, target, *,
     session={'titulo':title,'papel':paper,'preguntas':questions}
     _draw_formulario_omr(cnv,session,None,empresa=empresa,grupo=grupo,
                          subtitulo=subtitulo,color_titulo=color_titulo,
-                         color_respuestas=color_respuestas)
+                         color_respuestas=color_respuestas,logo=logo)
     cnv.save()
     return path
 

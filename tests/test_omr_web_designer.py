@@ -203,6 +203,25 @@ def test_vista_previa_3_pdfs_y_sin_revelar_clave_a_auxiliares(server):
                   headers=headers,json={}).status_code==422
 
 
+def test_logo_visible_en_hoja_de_respuestas_omr_y_preview(server):
+    import fitz
+    app,c,headers=server
+    eid=import_questionnaire(c,headers,with_images=True)
+    preview=c.post("/api/library/"+eid+"/preview?view=Respuestas",
+                   headers=headers,json={"con_personal":False,"papel":"Oficio"})
+    assert preview.status_code==200,preview.text[:150]
+    with fitz.open(stream=preview.content,filetype="pdf") as pdf:
+        assert len(pdf[0].get_images(full=True))>=1
+    generated=c.post("/api/applications",headers=headers,json={
+        "cuestionario_id":eid,"modalidad":"normal","papel":"Oficio",
+        "participantes":[{"id":"P1","nombre":"Persona ficticia"}]})
+    assert generated.status_code==200,generated.text
+    pdf=c.get("/api/applications/"+generated.json()["sid"]+"/files/Hoja_respuestas.pdf")
+    assert pdf.status_code==200
+    with fitz.open(stream=pdf.content,filetype="pdf") as doc:
+        assert len(doc[0].get_images(full=True))>=2  # Logo y QR
+
+
 def test_personal_xlsx_preserva_ceros_y_rechaza_formato_invalido(server):
     app,c,headers=server
     wb=Workbook();ws=wb.active
