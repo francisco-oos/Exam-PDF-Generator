@@ -57,3 +57,11 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
 .pendingReason{padding:10px 12px;border-left:4px solid #cd8527;background:#fff9ef;border-radius:6px;color:#785118;line-height:1.45}
 
 .inkLevels{display:block;font-size:12px;margin-top:7px;font-weight:550;color:#7e5a29}
+
+/* Resultados: análisis con la evidencia física visible al lado. */
+.resultEvidenceLayout{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(360px,1.15fr);gap:14px;margin-top:16px;align-items:start}
+.resultEvidenceLayout .panel{min-width:0}
+.resultEvidenceLayout .scanImage{width:100%;max-height:750px;object-fit:contain}
+.auditReopen{border-top:1px solid #dce5ea;margin-top:18px;padding-top:12px}
+.resultEvidenceLayout .check{margin-bottom:12px}
+@media(max-width:950px){.resultEvidenceLayout{grid-template-columns:1fr}}
