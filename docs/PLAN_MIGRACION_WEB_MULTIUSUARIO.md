@@ -8,6 +8,18 @@ y frontend descritas abajo NO sustituyen el contrato real del piloto.
 **Punto de partida:** commit `731063865bc47d6043b6db463be836291e0b6129` de `feature/bandeja-documental-omr-evidencias` (PR #13).  
 **Referencia de flujos multiusuario:** `francisco-oos/EvaluacionPersonal` v1.2.0; **NO unir sus bases de datos ni importar su formato de evaluación por áreas**.
 
+## Ajuste funcional de noviembre de 2026 — recuperación de requisitos
+
+El motor original ya resolvía Normal/Ecológico, hoja universal y acetato,
+lista opcional de personal, imágenes de reactivos, logotipo, metadatos y
+previsualización de PDF real. La primera UI web dejó esos puntos detrás de
+la interfaz Tk o los omitió. La corrección no abre una tercera modalidad
+ni crea una calificación OMR sin folios: expone la biblioteca aprobada a
+la web para el perfil Administrador y conserva el auxiliar como
+`capturista` interno. Documentación operativa y pruebas asociadas en
+`OMR_WEB_TABLETA_PILOTO_Y_PRUEBAS_CLAUDE.md` y
+`tests/test_omr_web_designer.py`.
+
 ## Registro de evolución después del diseño
 
 - Se eligió **FastAPI + HTML/CSS/JS responsive sin Node/CDN**, por

@@ -34,6 +34,35 @@ pruebas y relevo a Claude](docs/OMR_WEB_TABLETA_PILOTO_Y_PRUEBAS_CLAUDE.md).
 Esta evolución permanece en el [PR #14](https://github.com/francisco-oos/Exam-PDF-Generator/pull/14),
 sin licencia central ni instalación física aprobada.
 
+### Diseñador web completo y perfiles (piloto)
+
+En **Generar exámenes** el administrador descarga las plantillas aprobadas
+(`Preguntas`, `Ejemplo`, `Guia`), importa XLSX junto con archivos
+`imagenes/` (PNG/JPG nombrados en la columna `Imagen`) y logotipo
+opcional, edita la biblioteca, los textos, colores, tamaño de papel
+(Carta/A4/Oficio), tamaño de letra y los reactivos A/B/C/D. La vista
+previa recupera los PDF reales de **Cuadernillo, Hoja de respuestas y
+Acetato**, sin emitir una sesión real al previsualizar.
+
+Los perfiles de operación expuestos al usuario son **Administrador**
+(diseño, biblioteca, emisión, resultados) y **Auxiliar de calificación**
+(sólo revisión de hojas de aplicaciones asignadas, sin clave). El auxiliar
+es el rol histórico `capturista`; las cuentas existentes conservan sus
+permisos. Los roles internos `coordinador`/`auditor` se mantienen para
+compatibilidad pero no son necesarios para el flujo de dos perfiles.
+
+Se mantienen exactamente los dos modos aprobados, **Normal** y
+**Ecológico**. Personal: opcional, mediante Excel/CSV o entrada manual;
+ID y Nombre obligatorios, Área, Grupo y Turno opcionales. **Con lista**
+se crean folios/QR firmados y una sesión para escaneo OMR; **sin lista**
+se imprime hoja genérica sin QR y se corrige manualmente con acetato.
+No se crea una falsa sesión de calificación sin identificadores.
+
+Para conservar tu administrador y las pruebas anteriores, actualizar la
+rama en la laptop **con el servidor detenido y la base respaldada**.
+El proyecto usa ahora `static/designer.js` sin Node/CDN y mantiene
+`datos/omr_web_piloto/` como almacén separado.
+
 ## Procedencia y licencia
 
 Inspirado en [UzielLopez/Exam-PDF-Generator](https://github.com/UzielLopez/Exam-PDF-Generator), creado por **Uziel Humberto López Meneses** en 2020 bajo licencia **MIT**. Conservamos su atribución y el archivo [`LICENSE`](LICENSE). Esta adaptación es una reimplementación con medidas de seguridad, diseño propio y nuevas funciones, **no es una versión oficial del autor original**.

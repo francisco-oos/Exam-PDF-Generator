@@ -163,6 +163,56 @@ $env:OMR_WEB_KEY = "datos/omr_web_piloto/omr/certs/server.key"
 5. No publicar el puerto en Internet, no poner la clave privada en Git,
    correo, ZIP o chats, y proteger la tableta con contraseña y cifrado.
 
+## 3A. Recuperación del diseñador aprobado (rama piloto)
+
+**Hallazgo que motivó este cambio:** la primera adaptación web había
+reducido la biblioteca a XLSX sin imágenes ni metadatos y obligaba a
+cargar personal, pese a que el motor original permitía ambas modalidades
+y lista opcional. Se corrigió la interfaz, sin reescribir la geometría
+de hoja ni acetato.
+
+| Aspecto | Comportamiento verificado por diseño |
+| --- | --- |
+| Perfil administrador | Importa/edita preguntas y opciones A-D, imágenes, logotipo, títulos, subtítulos, empresa, grupo, instrucciones, colores, papel y tipografía; genera y descarga |
+| Perfil auxiliar | Cuenta propia con contraseña temporal, revisión de hojas asignadas, decisión A-D/BLANCO justificada; no descarga claves ni diseña |
+| Normal + personal | Cuadernillo/hoja QR por persona; paquetes ZIP individuales y lote |
+| Ecológico + personal | Cuadernillo reutilizable y hojas QR con identidad y folio |
+| Normal/Ecológico sin personal | Hoja universal sin QR ni folio; acetato físico para calificación manual, sin sesión de OMR inventada |
+| Plantilla preguntas | `Plantilla_Cuestionario.xlsx` de Preguntas/Ejemplo/Guia; las rutas de fotos son solo nombres en la columna Imagen |
+| Plantilla personal | `Plantilla_Personal_OMR.xlsx`, CSV o captura manual; ID/Nombre obligatorios, Área/Grupo/Turno opcionales |
+| Vista PDF | Cuadernillo, Respuestas, Acetato generados en memoria por `preview_pdf.py`; QR de ejemplo NO válido para calificación real |
+| Biblioteca SQLite | Una identidad/revisión por cuestionario. Se conserva la clave y recursos BLOB con SHA-256; las sesiones ya impresas no se modifican al editar |
+
+**Código conectado:** `omr_web/designer.py` (importación y validación de
+archivos, edición, vistas y personal), `omr_web/static/designer.js`
+(formularios y tres vistas PDF), `omr_web/app.py` (endpoints admin),
+`omr_web/service.py` (dos modalidades, lote manual, alias auxiliar).
+Se reutiliza `biblioteca.save_exam/load_exam`,
+`src.evaluaciones.core.read_questions` y
+`generacion_integrada.preparar_examen`; no existe otro motor de
+evaluación independiente.
+
+**Permisos:** la API aplica `admin` en biblioteca, plantillas,
+vista previa, lotes de impresión y emisión. `auxiliar` se almacena
+como `capturista` para no alterar la tabla de cuentas instalada.
+Los roles de coordinador y auditor se conservan para datos históricos,
+pero el operador sólo necesita los dos perfiles mencionados.
+
+**Precauciones:** cada edición de la biblioteca incrementa su revisión;
+el QR y clave de cada aplicación impresa son inmutables. Los archivos
+PNG/JPG se validan y almacenan en la biblioteca, y la vista previa
+no sustituye la comprobación impresa al 100%. En modo sin lista no
+hay calificación automática por QR, únicamente acetato manual.
+
+### Pruebas nuevas de regresión
+
+`tests/test_omr_web_designer.py` usa sólo registros ficticios y verifica:
+plantillas originales, importación con fotos/logotipo, edición posterior
+sin perder imágenes, normal/ecológico con y sin participantes, campos
+opcionales, vistas de los tres PDF y separación de claves frente al
+perfil auxiliar. Las ejecuciones deben aprobarse en la matriz Windows/
+Linux y confirmarse en la laptop real antes de instalar en tableta.
+
 ## 4. Cómo se opera
 
 - **Diseñar e imprimir**: el administrador importa XLSX de preguntas
