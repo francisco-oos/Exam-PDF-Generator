@@ -37,6 +37,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: cmd
         run: call Iniciar_OMR_Web_Windows.bat --verificar
+      - name: Revisar sintaxis del diseñador web independiente
+        run: node --check omr_web/static/designer.js
       - name: Preparar Tk y Xvfb en Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb
