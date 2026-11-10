@@ -96,6 +96,12 @@ def test_pdf_lateral_reapertura_nota_historial_y_persistencia(tmp_path):
         receipt=c.get("/api/applications/"+sid+"/participants/A001/result")
         assert receipt.status_code==200,receipt.text[:120]
         with fitz.open(stream=receipt.content,filetype="pdf") as pdf:
+            assert len(pdf)==1
+            assert "Resultado individual" in pdf[0].get_text()
+        audited=c.get("/api/applications/"+sid+
+                      "/participants/A001/result?auditado=true")
+        assert audited.status_code==200,audited.text[:120]
+        with fitz.open(stream=audited.content,filetype="pdf") as pdf:
             assert len(pdf)>=2
             assert "Resultado individual" in pdf[0].get_text()
             assert "EVIDENCIA" in pdf[-1].get_text()
