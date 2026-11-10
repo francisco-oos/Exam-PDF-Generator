@@ -23,6 +23,7 @@ def main():
     app=create_app(data_directory())
     engine=app.state.engine
     print("\nOMR · CENTRO DE CONTROL (PILOTO, SIN LICENCIA CENTRAL ACTIVA)")
+    print("Almacenamiento activo:", engine.root)
     if engine.needs_setup:
         print("CÓDIGO DE PRIMER ADMINISTRADOR (solo esta consola):",
               engine._setup_token)

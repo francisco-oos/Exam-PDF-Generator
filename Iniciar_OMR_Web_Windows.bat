@@ -7,7 +7,7 @@ if not exist ".venv-omr-web\Scripts\python.exe" goto falta_instalar
 if errorlevel 1 goto fallo
 echo.
 echo OMR WEB PILOTO: http://127.0.0.1:8877 (solo en esta PC por defecto)
-echo Los datos del piloto se guardan en datos\omr_web_piloto.
+rem La ruta real (incluido OMR_WEB_DATA) la muestra el servidor.
 ".venv-omr-web\Scripts\python.exe" -m omr_web.run
 if errorlevel 1 goto fallo
 exit /b 0
