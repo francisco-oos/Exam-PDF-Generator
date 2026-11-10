@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from omr_evaluaciones.documentos import sha_file
 from omr_evaluaciones.expedientes import export_session_bundle, participant_receipt
 from .service import WebError, WebService
-from .evidencia import audit_evidence_pdf, detailed_history_pdf
+from .evidencia import audit_evidence_pdf, detailed_history_pdf, resolve_archive_image
 from .designer import import_exam, serialize_exam, update_exam, preview_exam, resource, import_roster
 
 MAX_UPLOAD = 100 * 1024 * 1024
@@ -337,11 +337,13 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
                            (sheet_id,)).fetchone()
         if not rec:
             raise WebError("Evidencia inexistente.",404)
-        path=Path(rec["imagen"]).resolve()
-        if not path.is_relative_to((engine.store.root/"escaneos").resolve()):
-            raise WebError("Ruta de evidencia no autorizada.",403)
-        if not path.is_file():
-            raise WebError("No existe la imagen archivada.",404)
+        with engine.store.connect() as db:
+            row=db.execute("SELECT id,sesion_id,imagen FROM hojas WHERE id=?",
+                           (sheet_id,)).fetchone()
+        try:
+            path=resolve_archive_image(engine.store,row)
+        except ValueError as exc:
+            raise WebError(str(exc),404) from exc
         return FileResponse(path,media_type="image/png")
 
     @web.get("/api/sheets/{sheet_id}/overlay")
@@ -364,9 +366,13 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         with engine.store.connect() as db:
             image_path=db.execute("SELECT imagen FROM hojas WHERE id=?",
                                   (sheet_id,)).fetchone()["imagen"]
-        source=Path(image_path).resolve()
-        if not source.is_relative_to((engine.store.root/"escaneos").resolve()):
-            raise WebError("La evidencia no está en la carpeta permitida.",403)
+        with engine.store.connect() as db:
+            record=db.execute("SELECT id,sesion_id,imagen FROM hojas WHERE id=?",
+                              (sheet_id,)).fetchone()
+        try:
+            source=resolve_archive_image(engine.store,record)
+        except ValueError as exc:
+            raise WebError(str(exc),404) from exc
         bitmap=cv2.imread(str(source))
         if bitmap is None:
             raise WebError("No se pudo recuperar el escaneo.",404)

@@ -16,6 +16,23 @@ from reportlab.pdfgen.canvas import Canvas
 from omr_evaluaciones.motor import render_review_with_acetato
 
 
+def resolve_archive_image(store, row):
+    """Localiza SOLO la imagen de esa hoja dentro de esta copia de datos.
+
+    Después de un git worktree/copia Windows la SQLite puede conservar
+    una ruta absoluta antigua. Nunca se lee directamente esa ruta externa:
+    la alternativa deriva del SID y el ID persistido, no del cliente.
+    No modifica SQLite, ni reescribe PNG, ni sigue enlaces fuera del almacén.
+    """
+    root=(store.root/"escaneos").resolve()
+    candidate=(root / row["sesion_id"] / (row["id"]+".png")).resolve()
+    if not candidate.is_relative_to(root) or not candidate.is_file():
+        raise ValueError(
+            "No se encontró la imagen de esta hoja en la copia actual. "
+            "Verifica la migración de datos y ejecuta el diagnóstico de reubicación.")
+    return candidate
+
+
 def line(pdf, text, x, y, width, *, size=9, leading=13, strong=False, limit=3):
     font="Helvetica-Bold" if strong else "Helvetica"
     pdf.setFont(font,size)
@@ -35,9 +52,7 @@ def audit_evidence_pdf(store,sheet_id,*,acetato=True,history=None):
         record=db.execute("SELECT * FROM hojas WHERE id=?",(sheet_id,)).fetchone()
     if record is None or not record["token"]:
         raise ValueError("Hoja inexistente o no identificada.")
-    path=Path(record["imagen"]).resolve()
-    if not path.is_relative_to((store.root/"escaneos").resolve()) or not path.is_file():
-        raise ValueError("No se encontró el escaneo dentro del almacén autorizado.")
+    path=resolve_archive_image(store,record)
     session=store.session(record["sesion_id"])
     person=next((x for x in session["personal"]
                  if x["token"]==record["token"]),None)
