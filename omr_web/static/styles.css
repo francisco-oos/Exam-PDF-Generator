@@ -49,3 +49,9 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
 .pdfPreview{display:block;width:100%;height:min(75vh,820px);min-height:460px;border:1px solid #d5e1e7;border-radius:10px;background:#f7f9fa}
 .check{display:flex;align-items:center;gap:10px}.check input{width:auto}
 @media(max-width:690px){.pdfPreview{min-height:400px;height:65vh}}
+
+/* Revisión OMR: dudas visibles sin confiar en estilos de <option> en Edge. */
+.pendingNavigation{padding:10px 13px;margin:12px 0;background:#fff7e9;border:1px solid #efd5a2;border-radius:10px;color:#744e14}
+.pendingNavigation strong{font-size:13px}.pendingNavigation .actions{margin:8px 0 0}
+.pendingNavigation button{min-width:38px;padding:8px 10px}
+.pendingReason{padding:10px 12px;border-left:4px solid #cd8527;background:#fff9ef;border-radius:6px;color:#785118;line-height:1.45}

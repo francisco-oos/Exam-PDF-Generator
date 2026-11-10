@@ -68,6 +68,33 @@ def participant_receipt(store: OMRStore, sid: str, person_id: str,
                           else f'{data["porcentaje"]}%'),
         'Aviso: solo los resultados validados son definitivos.',
     ]
+    if data['estado']=='validado':
+        lines.extend([
+            '--- Resumen por tema ---',
+            'Los porcentajes indican desempeño en esta evaluación, no una certificación de competencia.',
+        ])
+        for tema,info in sorted(data['temas'].items(),
+                                key=lambda item:(item[1]['porcentaje'],item[0])):
+            lines.append(
+                f"{tema}: {info['aciertos']}/{info['preguntas']} aciertos "
+                f"({info['porcentaje']}%). {info['nivel_repaso']}."
+            )
+        if data['areas_mejora']:
+            lines.append('--- Recomendaciones de estudio ---')
+            for area in data['areas_mejora']:
+                lines.append(
+                    f"Repasar {area['tema']}: "
+                    f"{area['por_reforzar']} de {area['preguntas']} reactivos "
+                    "no fueron acertados. Revisar los procedimientos de ese tema "
+                    "y practicar con nuevos ejemplos."
+                )
+        else:
+            lines.append('Recomendación: mantener la práctica y repasar periódicamente los temas.')
+    else:
+        lines.append(
+            'Áreas de mejora: pendientes hasta verificar todas las respuestas; '
+            'no se emiten recomendaciones basadas en una lectura incompleta.'
+        )
     target=DocumentInbox(store).validate_output(target)
     target.parent.mkdir(parents=True,exist_ok=True)
     temp=target.with_name(target.name+'.part')

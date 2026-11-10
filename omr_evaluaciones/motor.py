@@ -537,14 +537,27 @@ class OMRStore:
                 for t in sorted({q['tema'] for q in s['preguntas']}):
                     indexes=[i for i,q in enumerate(s['preguntas']) if q['tema']==t]
                     hits=sum(answers[i]==s['preguntas'][i]['correcta'] for i in indexes)
-                    topics[t]={'aciertos':hits,'preguntas':len(indexes),'porcentaje':round(100*hits/len(indexes),2)}
+                    count=len(indexes)
+                    misses=count-hits
+                    blank_count=sum(answers[i] in (None,'BLANCO') for i in indexes)
+                    rate=round(100*hits/count,2)
+                    topics[t]={
+                        'aciertos':hits,'preguntas':count,'porcentaje':rate,
+                        'por_reforzar':misses,'blancos':blank_count,
+                        'nivel_repaso':('Prioridad de repaso' if rate<50
+                                       else 'Conviene reforzar' if rate<80
+                                       else 'Buen dominio en esta prueba')}
+                # Orientaciones por tema: no interpretar una evaluación de
+                # pocas preguntas como diagnóstico de competencia.
+                areas=[{'tema':t,**v} for t,v in topics.items() if v['por_reforzar']]
+                areas.sort(key=lambda x:(x['porcentaje'],-x['por_reforzar'],x['tema']))
                 status='validado'
             else:
-                answers=None;good=None;blanks=None;topics={}
+                answers=None;good=None;blanks=None;topics={};areas=[]
                 status='pendiente' if anyscan else 'ausente'
             records.append({**p,'estado':status,'aciertos':good,'preguntas':n,
                'porcentaje':round(good/n*100,2) if good is not None else None,
-               'blancos':blanks,'temas':topics})
+               'blancos':blanks,'temas':topics,'areas_mejora':areas})
         graded=[v for v in records if v['aciertos'] is not None]
         # Promedio por persona validada; no bajar por ausencias ni formularios dudosos.
         mean=round(sum(x['porcentaje'] for x in graded)/len(graded),2) if graded else None
