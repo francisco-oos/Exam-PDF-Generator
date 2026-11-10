@@ -403,16 +403,18 @@
     previewSeq++;
     if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;}
     exams=await api('/library');
-    root.innerHTML='<div class="panel"><h2>Plantillas aprobadas</h2>'+
-      '<div class="actions"><a class="ghost" href="/api/templates/preguntas">Descargar Excel de preguntas</a>'+
-      '<a class="ghost" href="/api/templates/personal">Descargar Excel de personal</a></div>'+
-      '<p class="hint">Imágenes: puedes escribir en la columna Imagen el nombre exacto del PNG/JPG y adjuntar ese archivo, o pegar una imagen dentro de Excel anclada a la fila del reactivo. Se conserva en biblioteca y aparece en el cuadernillo PDF. Para logotipo usa el campo independiente; no se aceptan rutas de tu computadora.</p></div>'+
-      '<form id="importQ" class="panel"><h2>Importar preguntas y crear cuestionario</h2>'+
-      '<div class="cols">'+
+    root.innerHTML='<div class="designerWorkbench"><div class="designerSteps">'+
+      '<details class="panel designerSection" id="importSection">'+
+      '<summary><b>Importar preguntas y crear cuestionario</b>'+
+      '<small>Plantilla Excel, imágenes y logo</small></summary>'+
+      '<p class="hint">En Excel puedes escribir el nombre PNG/JPG en la columna Imagen (H) o pegar la foto anclada a la fila de esa pregunta. Una foto incrustada no necesita adjuntarse de nuevo.</p>'+
+      '<div class="actions"><a class="ghost" href="/api/templates/preguntas">Descargar plantilla de preguntas</a>'+
+      '<a class="ghost" href="/api/templates/personal">Descargar plantilla de personal</a></div>'+
+      '<form id="importQ"><div class="cols">'+
       '<label>Nombre en biblioteca<input name="name" required placeholder="Evaluación de Cabos"></label>'+
       '<label>Título de impresión<input name="title" required placeholder="Evaluación de conocimientos"></label>'+
       '<label>Excel de preguntas (.xlsx)<input name="file" type="file" accept=".xlsx" required></label>'+
-      '<label>Imágenes de reactivos (PNG/JPG, opcional)<input name="images" type="file" accept=".png,.jpg,.jpeg" multiple></label>'+
+      '<label>Fotos mencionadas en columna Imagen (PNG/JPG, opcional)<input name="images" type="file" accept=".png,.jpg,.jpeg" multiple></label>'+
       '<label>Logotipo (opcional)<input name="logo" type="file" accept=".png,.jpg,.jpeg"></label>'+
       '</div><details><summary>Datos y diseño inicial</summary>'+
       '<div class="cols">'+
@@ -422,18 +424,40 @@
       choose('papel','Papel',['Carta','A4','Oficio'],'Carta').replace('data-meta=','name=')+
       choose('modo','Modalidad',['normal','ecologico'],'ecologico').replace('data-meta=','name=')+
       meta('letra','Tamaño de letra',9,'number','min="8" max="12" step="0.5"').replace('data-meta=','name=')+
+      meta('logo_ancho_mm','Ancho logotipo en mm (10–28)',23,
+        'number','min="10" max="28" step="1"').replace('data-meta=','name=')+
       meta('color_titulo','Color título','#213A4C','color').replace('data-meta=','name=')+
       meta('color_subtitulo','Color subtítulo','#5E7180','color').replace('data-meta=','name=')+
       meta('color_respuestas','Color hoja','#213A4C','color').replace('data-meta=','name=')+
       meta('color_acetato','Color acetato','#167341','color').replace('data-meta=','name=')+
       '</div><label>Instrucciones<textarea name="instrucciones">Selecciona una sola respuesta por pregunta.</textarea></label>'+
-      '</details><div class="actions"><button class="primary">Importar a biblioteca</button></div></form>'+
-      '<div class="panel"><h2>Biblioteca de cuestionarios</h2>'+
+      '</details><div class="actions"><button class="primary">Importar a biblioteca</button></div></form></details>'+
+      '<details class="panel designerSection" id="librarySection" open>'+
+      '<summary><b>Biblioteca de cuestionarios</b><small>Seleccionar versión para editar</small></summary>'+
       '<label>Seleccionar y editar<select id="examSelector"><option value="">Selecciona un cuestionario…</option>'+
       exams.map(x=>'<option value="'+h(x.id)+'">'+h(x.nombre)+' · '+x.total+' preguntas (rev. '+x.revision+')</option>').join('')+
-      '</select></label></div>'+
-      '<div class="panel" id="designerPanel"></div>'+
-      '<div class="panel" id="generationPanel"></div>';
+      '</select></label></details>'+
+      '<details class="panel designerSection" id="designSection" open>'+
+      '<summary><b>Diseñar cuestionario</b><small>Preguntas, colores, medidas y fotos</small></summary>'+
+      '<div id="designerPanel"></div></details>'+
+      '<details class="panel designerSection" id="generationSection">'+
+      '<summary><b>Emitir e imprimir</b><small>Normal / Ecológico, lista opcional, QR y acetato</small></summary>'+
+      '<div id="generationPanel"></div></details></div>'+
+      '<aside class="panel designerPreview" id="designerPreview">'+
+      '<h3>Vista previa PDF real</h3>'+
+      '<div class="actions">'+['Cuadernillo','Respuestas','Acetato'].map(v=>
+        '<button type="button" class="secondary" data-preview="'+v+'">'+
+        (v==='Respuestas'?'Hoja de respuestas':v)+'</button>').join('')+'</div>'+
+      '<label class="check"><input type="checkbox" id="previewPersonal">'+
+      'Mostrar participante y QR de EJEMPLO (no emite folios)</label>'+
+      '<p class="hint" id="previewStatus">Selecciona un cuestionario para ver la vista previa.</p>'+
+      '<iframe id="pdfPreview" class="pdfPreview" title="Vista real de impresión del examen"></iframe>'+
+      '</aside></div>';
+    all(root,'[data-preview]').forEach(button=>button.onclick=()=>{
+      activeView=button.dataset.preview;
+      preview();
+    });
+    sel(root,'#previewPersonal').onchange=()=>preview();
     sel(root,'#importQ').onsubmit=async e=>{
       e.preventDefault();
       const form=e.target, fd=new FormData(form), name=String(fd.get('name')||''),
