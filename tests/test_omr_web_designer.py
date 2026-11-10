@@ -447,7 +447,7 @@ def test_imagen_invalida_y_imagen_no_referenciada_devuelven_422(server):
     assert c.get("/api/library/"+eid).json()["revision"]==1
 
 
-def test_foto_incrustada_en_excel_no_se_ignora_silenciosamente(server):
+def test_foto_incrustada_en_excel_asociada_por_fila_y_visible_en_pdf(server):
     from openpyxl.drawing.image import Image as XlsxImage
     app,c,headers=server
     workbook_object=load_workbook(BytesIO(workbook("")))
@@ -458,5 +458,26 @@ def test_foto_incrustada_en_excel_no_se_ignora_silenciosamente(server):
              headers=headers,files={
                "file":("preguntas.xlsx",data.getvalue(),
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
-    assert r.status_code==422,r.text
-    assert "fotos pegadas" in r.text
+    assert r.status_code==200,r.text
+    eid=r.json()["cuestionario_id"]
+    exam=c.get("/api/library/"+eid).json()
+    assert exam["preguntas"][0]["imagen"]=="pregunta_001.png"
+    colors=_pdf_embeds_colors(c.post(
+        "/api/library/"+eid+"/preview?view=Cuadernillo",json={},
+        headers=headers).content)
+    assert _near_color(colors,(0x88,0x44,0xBB)),colors
+
+
+def test_excel_imagenes_ambiguas_no_se_asocian_al_reactivo_equivocado(server):
+    from openpyxl.drawing.image import Image as XlsxImage
+    app,c,headers=server
+    wb=load_workbook(BytesIO(workbook("")))
+    ws=wb["Preguntas"]
+    ws.add_image(XlsxImage(BytesIO(picture("#8844bb"))),"H2")
+    ws.add_image(XlsxImage(BytesIO(picture("#33bb55"))),"G2")
+    out=BytesIO();wb.save(out);wb.close()
+    response=c.post("/api/library/import?name=Ambiguo&title=Ensayo",
+       headers=headers,files={"file":("x.xlsx",out.getvalue(),
+       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert response.status_code==422,response.text
+    assert "más de una foto" in response.text
