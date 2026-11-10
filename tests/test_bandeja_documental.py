@@ -104,6 +104,22 @@ def test_conservar_todas_las_paginas_y_clasificar_lote_mixto(tmp_path):
     assert len([e for e in inbox.events(digest) if e['accion']=='ingreso'])==2
 
 
+def test_bandeja_cuenta_hojas_procesadas_que_siguen_en_revision(tmp_path):
+    store=OMRStore(tmp_path/'omr')
+    inbox=DocumentInbox(store)
+    sid=store.create_session("Evaluación ficticia",qs(2),people("A",1),
+                             "Carta","normal")
+    pdf=create_forms_pdf(store,sid,tmp_path/'pdf.pdf')
+    inspection,digest,archive=_ingest_and_grade(store,inbox,pdf)
+    assert inbox.documents()[0]["pendientes"]==0
+    with store.connect() as conn:
+        conn.execute("UPDATE hojas SET estado='revisar' WHERE sesion_id=?",(sid,))
+    assert inbox.documents()[0]["pendientes"]==1
+    with store.connect() as conn:
+        conn.execute("UPDATE hojas SET estado='validada' WHERE sesion_id=?",(sid,))
+    assert inbox.documents()[0]["pendientes"]==0
+
+
 def test_no_perder_archivo_sin_qr_y_detectar_cambio_entre_inspeccion_y_archivo(
         tmp_path):
     store=OMRStore(tmp_path/'omr')

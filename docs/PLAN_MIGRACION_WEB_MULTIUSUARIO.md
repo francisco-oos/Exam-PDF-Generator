@@ -1,10 +1,49 @@
 # Propuesta técnica — OMR web multiusuario (rama experimental)
 
-**Estado:** diseño, sin implementación funcional ni cambios de esquema.  
+**Estado:** diseño HISTÓRICO conservado. La implementación posterior
+está en el PR #14, no en esta rama original. Las propuestas de API
+y frontend descritas abajo NO sustituyen el contrato real del piloto.  
 **Fecha:** 2026-11-09.  
 **Rama experimental:** `feature/omr-web-multiusuario`.  
 **Punto de partida:** commit `731063865bc47d6043b6db463be836291e0b6129` de `feature/bandeja-documental-omr-evidencias` (PR #13).  
 **Referencia de flujos multiusuario:** `francisco-oos/EvaluacionPersonal` v1.2.0; **NO unir sus bases de datos ni importar su formato de evaluación por áreas**.
+
+## Ajuste funcional de noviembre de 2026 — recuperación de requisitos
+
+El motor original ya resolvía Normal/Ecológico, hoja universal y acetato,
+lista opcional de personal, imágenes de reactivos, logotipo, metadatos y
+previsualización de PDF real. La primera UI web dejó esos puntos detrás de
+la interfaz Tk o los omitió. La corrección no abre una tercera modalidad
+ni crea una calificación OMR sin folios: expone la biblioteca aprobada a
+la web para el perfil Administrador y conserva el auxiliar como
+`capturista` interno. Documentación operativa y pruebas asociadas en
+`OMR_WEB_TABLETA_PILOTO_Y_PRUEBAS_CLAUDE.md` y
+`tests/test_omr_web_designer.py`.
+
+## Registro de evolución después del diseño
+
+- Se eligió **FastAPI + HTML/CSS/JS responsive sin Node/CDN**, por
+  sencillez de instalación y mantenimiento offline del primer piloto.
+  React/TS quedó como opción futura, no como requisito actual.
+- SQLite/WAL y tablas web aditivas; el motor OMR del escritorio no
+  se reescribió. El piloto usa `datos/omr_web_piloto/` y
+  `.venv-omr-web/` independientes.
+- **API real:** `/api/login`, `/api/applications`, `/api/scans`,
+  `/api/jobs/{id}`, `/api/sheets/{id}/claim`,
+  `/api/sheets/{id}/decisions` y el esquema en `/openapi.json`.
+  Los endpoints en español mencionados más abajo eran propuestas.
+- Pruebas automatizadas: 2 usuarios en competencia, 5 capturistas
+  sobre 50 hojas sintéticas, QR mixtos, idempotencia, roles, auditoría,
+  confidencialidad de acetatos y reubicación entre dos directorios.
+- El instalador local y el diagnóstico de Windows/Linux existen;
+  la tableta, Xerox/lápiz n.º 2, LAN física, restauración de archivos
+  privados y licencia central **siguen sin aceptación final**.
+- El Docker anterior, puerto 8765, continúa siendo el generador
+  clásico. OMR Web funciona por separado en 8877.
+- Mantener esta propuesta como **registro de decisiones**, evitando
+  confundir ideas iniciales con funcionalidades implementadas.
+  Ver el manual operativo actualizado en
+  [OMR Web piloto](OMR_WEB_TABLETA_PILOTO_Y_PRUEBAS_CLAUDE.md).
 
 ## Objetivo y restricciones
 
@@ -220,6 +259,6 @@ el mismo módulo sin coordinación. No publicar bases ni PDF privados.
   revisión doble de dudas cuando la evaluación lo exija.
 - Política de evidencia/retención y recuperación de datos históricos.
 
-**Estado de esta rama al crear el documento:** diseño y aislamiento
-completados; la migración del código y las pruebas del nuevo frontend
-**aún no comenzaron**. Ningún PR de la versión estable fue fusionado.
+**Nota histórica:** al crear este diseño todavía no existía la
+implementación. El estado vigente es el documentado en el PR #14,
+que permanece sin fusionar a `main`.

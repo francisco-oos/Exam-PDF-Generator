@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OMR · Centro de control</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<header class="top">
+  <div class="brand"><span class="mark">◫</span><div><strong>OMR · Centro de control</strong><small>Evaluaciones, folios y revisión compartida</small></div></div>
+  <div class="right"><span class="pill">PILOTO LOCAL</span><span id="identity"></span><button id="logout" class="ghost" hidden>Salir</button></div>
+</header>
+<main>
+ <section id="authPanel" class="authLayout">
+  <div class="hero">
+   <div class="kicker">CAPTURA MULTIUSUARIO</div>
+   <h1>Una sola evaluación.<br>Varias personas revisando.</h1>
+   <p>Servidor local con QR firmado, evidencias intactas y correcciones auditadas. Cada capturista accede únicamente a las aplicaciones autorizadas.</p>
+   <div class="heroSteps"><div><b>01</b> Centraliza tus PDF</div><div><b>02</b> Distribuye hojas pendientes</div><div><b>03</b> Conserva cada decisión</div></div>
+  </div>
+  <form id="authForm" class="panel authCard"><h2 id="authTitle">Entrar al sistema</h2>
+   <div id="setupFields" hidden><label>Código inicial mostrado en la consola<input id="setupToken" autocomplete="off"></label><label>Nombre del administrador<input id="setupName" value="Administrador"></label></div>
+   <label>Usuario<input id="username" autocomplete="username" required></label>
+   <label>Contraseña<input id="password" type="password" autocomplete="current-password" minlength="12" required></label>
+   <button class="primary" type="submit" id="authSubmit">Iniciar sesión</button>
+   <p class="hint">Servidor piloto: la licencia central todavía no está conectada.</p>
+  </form>
+ </section>
+ <section id="workspace" hidden>
+  <nav class="nav" aria-label="Secciones principales">
+   <button data-view="inicio" class="active">Resumen</button>
+   <button data-view="aplicaciones">Aplicaciones</button>
+   <button data-view="revision">Revisión de hojas</button>
+   <button data-view="escaneo">Importar escaneos</button>
+   <button data-view="biblioteca">Generar exámenes</button>
+   <button data-view="bandeja">Bandeja PDF</button>
+   <button data-view="resultados">Resultados</button>
+   <button data-view="usuarios">Usuarios</button>
+  </nav>
+  <div id="content" aria-live="polite"></div>
+ </section>
+ <div id="notice" role="status" aria-live="polite" hidden></div>
+</main>
+<footer>OMR multiusuario · Pruebas LAN · Las calificaciones oficiales requieren revisión y autorización.</footer>
+<script src="/static/designer.js" defer></script>
+ <script src="/static/app.js" defer></script>
+</body></html>

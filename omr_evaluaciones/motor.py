@@ -537,14 +537,27 @@ class OMRStore:
                 for t in sorted({q['tema'] for q in s['preguntas']}):
                     indexes=[i for i,q in enumerate(s['preguntas']) if q['tema']==t]
                     hits=sum(answers[i]==s['preguntas'][i]['correcta'] for i in indexes)
-                    topics[t]={'aciertos':hits,'preguntas':len(indexes),'porcentaje':round(100*hits/len(indexes),2)}
+                    count=len(indexes)
+                    misses=count-hits
+                    blank_count=sum(answers[i] in (None,'BLANCO') for i in indexes)
+                    rate=round(100*hits/count,2)
+                    topics[t]={
+                        'aciertos':hits,'preguntas':count,'porcentaje':rate,
+                        'por_reforzar':misses,'blancos':blank_count,
+                        'nivel_repaso':('Prioridad de repaso' if rate<50
+                                       else 'Conviene reforzar' if rate<80
+                                       else 'Buen dominio en esta prueba')}
+                # Orientaciones por tema: no interpretar una evaluación de
+                # pocas preguntas como diagnóstico de competencia.
+                areas=[{'tema':t,**v} for t,v in topics.items() if v['por_reforzar']]
+                areas.sort(key=lambda x:(x['porcentaje'],-x['por_reforzar'],x['tema']))
                 status='validado'
             else:
-                answers=None;good=None;blanks=None;topics={}
+                answers=None;good=None;blanks=None;topics={};areas=[]
                 status='pendiente' if anyscan else 'ausente'
             records.append({**p,'estado':status,'aciertos':good,'preguntas':n,
                'porcentaje':round(good/n*100,2) if good is not None else None,
-               'blancos':blanks,'temas':topics})
+               'blancos':blanks,'temas':topics,'areas_mejora':areas})
         graded=[v for v in records if v['aciertos'] is not None]
         # Promedio por persona validada; no bajar por ausencias ni formularios dudosos.
         mean=round(sum(x['porcentaje'] for x in graded)/len(graded),2) if graded else None
@@ -569,7 +582,7 @@ class OMRStore:
 def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
                         empresa='', grupo='', subtitulo='',
                         color_titulo='#213A4C', color_respuestas='#213A4C',
-                        preview=False):
+                        color_subtitulo='#5E7180',logo=None,preview=False):
     """Hoja institucional: una sola geometría para PDF, QR y lectura de escáner.
 
     Usa bubble_positions y corner_centers sin alteraciones. El aspecto adopta
@@ -578,12 +591,14 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
     """
     from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
-    from src.evaluaciones.core import _font
+    from src.evaluaciones.core import _font, _safe_image
+    from PIL import ImageOps
     normal, bold = _font()
     paper = session['papel']
     w, h = PAPERS[paper]
     tint = colors.HexColor(color_respuestas)
     title_ink = colors.HexColor(color_titulo)
+    subtitle_ink = colors.HexColor(color_subtitulo)
     pts = bubble_positions(paper, len(session['preguntas']))
     cnv.setFillColorRGB(1, 1, 1)
     cnv.rect(0, 0, w, h, fill=1, stroke=0)
@@ -599,15 +614,29 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
             txt = txt[:-1]
         return txt
 
+    # El logotipo solo ocupa el margen del encabezado: no cambia las
+    # coordenadas OMR de QR, cuadrados de registro ni respuestas.
+    title_x=44
+    if logo:
+        validated=_safe_image(Path(logo),source='Logotipo OMR')
+        with Image.open(validated) as original:
+            picture=ImageOps.exif_transpose(original).convert('RGB')
+            picture.thumbnail((300,300),Image.Resampling.LANCZOS)
+            cnv.drawImage(ImageReader(picture),44,h-107,width=43,height=43,
+                          preserveAspectRatio=True,anchor='c')
+        title_x=97
     cnv.setFillColor(tint)
     cnv.setFont(bold, 13)
-    cnv.drawString(44, h-68, 'HOJA DE RESPUESTAS')
+    cnv.drawString(title_x, h-68, 'HOJA DE RESPUESTAS')
     cnv.setFont(bold, 9)
     cnv.setFillColor(title_ink)
-    cnv.drawString(44, h-87, clip_text(session['titulo'], bold, 9, w-205))
+    cnv.drawString(title_x, h-87,
+                   clip_text(session['titulo'], bold, 9, w-205-(title_x-44)))
     if subtitulo:
         cnv.setFont(normal, 8)
-        cnv.drawString(44, h-101, clip_text(subtitulo, normal, 8, w-205))
+        cnv.setFillColor(subtitle_ink)
+        cnv.drawString(title_x, h-101,
+                       clip_text(subtitulo, normal, 8,w-205-(title_x-44)))
     if empresa:
         cnv.setFillColor(tint)
         cnv.setFont(normal, 8)
@@ -670,7 +699,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
 def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
                      empresa='',grupo='',subtitulo='',
                      color_titulo='#213A4C',color_respuestas='#213A4C',
-                     person_ids=None):
+                     color_subtitulo='#5E7180',logo=None,person_ids=None):
     """Imprime las hojas QR desde el diseño único; no genera otro examen.
 
     Cada código tiene HMAC de la misma sesión persistida que utilizará el lector.
@@ -691,7 +720,8 @@ def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
         if selected is not None and p['id'] not in selected:
             continue
         _draw_formulario_omr(cnv,s,p,empresa=empresa,grupo=grupo,subtitulo=subtitulo,
-                            color_titulo=color_titulo,color_respuestas=color_respuestas)
+                            color_titulo=color_titulo,color_respuestas=color_respuestas,
+                            color_subtitulo=color_subtitulo,logo=logo)
     cnv.save()
     return path
 
@@ -749,7 +779,7 @@ def preview_acetato_omr(questions, paper, *, color='#167341'):
 def preview_formulario_omr(questions, title, paper, *,
                           empresa='',grupo='',subtitulo='',
                           color_titulo='#213A4C',color_respuestas='#213A4C',
-                          nombre='Ejemplo de participante',identifier='000001',
+                          color_subtitulo='#5E7180',logo=None,nombre='Ejemplo de participante',identifier='000001',
                           con_personal=True):
     """Muestra el aspecto exacto sin crear folios utilizables ni escribir disco."""
     from io import BytesIO
@@ -763,7 +793,8 @@ def preview_formulario_omr(questions, title, paper, *,
     _draw_formulario_omr(cnv,session,sample if con_personal else None,
                         empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                         color_titulo=color_titulo,
-                        color_respuestas=color_respuestas,preview=True)
+                        color_respuestas=color_respuestas,
+                        color_subtitulo=color_subtitulo,logo=logo,preview=True)
     cnv.save()
     return data.getvalue()
 
@@ -771,7 +802,8 @@ def preview_formulario_omr(questions, title, paper, *,
 
 def create_generic_forms_pdf(questions, title, paper, target, *,
                              empresa='',grupo='',subtitulo='',
-                             color_titulo='#213A4C',color_respuestas='#213A4C'):
+                             color_titulo='#213A4C',color_respuestas='#213A4C',
+                             color_subtitulo='#5E7180',logo=None):
     """Hoja anónima con EXACTA geometría OMR y espacios manuscritos, sin QR.
 
     El diseño no cambia al cargar personal: solo se rellenan datos y QR.
@@ -784,7 +816,8 @@ def create_generic_forms_pdf(questions, title, paper, target, *,
     session={'titulo':title,'papel':paper,'preguntas':questions}
     _draw_formulario_omr(cnv,session,None,empresa=empresa,grupo=grupo,
                          subtitulo=subtitulo,color_titulo=color_titulo,
-                         color_respuestas=color_respuestas)
+                         color_respuestas=color_respuestas,
+                         color_subtitulo=color_subtitulo,logo=logo)
     cnv.save()
     return path
 
@@ -934,11 +967,11 @@ def render_review_with_acetato(original_bgr, paper, questions, *,
     draw=ImageDraw.Draw(overlay,'RGBA')
     height=PAPERS[paper][1]
     factor=RENDER_DPI/72.0
-    coordinates=bubble_positions(paper,len(questions))
+    coordinates=_bubble_centers_in_scan(aligned,paper,len(questions))
     if show_acetato:
         for idx,(q,options) in enumerate(zip(questions,coordinates)):
             x,y=options[ANSWER_CHOICES.index(q['correcta'])]
-            px,py=round(x*factor),round((height-y)*factor)
+            px,py=round(x),round(y)
             r=round((RADIUS+3.5)*factor)
             draw.ellipse((px-r,py-r,px+r,py+r),
                          fill=(15,155,94,65),outline=(0,120,80,230),
@@ -947,13 +980,17 @@ def render_review_with_acetato(original_bgr, paper, questions, *,
         if not isinstance(n,int) or not 1<=n<=len(coordinates):
             continue
         options=coordinates[n-1]
-        coords=[(round(x*factor),round((height-y)*factor)) for x,y in options]
-        left=min(x for x,y in coords)-35
-        right=max(x for x,y in coords)+35
-        top=min(y for x,y in coords)-27
-        bottom=max(y for x,y in coords)+27
-        draw.rectangle((left,top,right,bottom),outline=(242,147,23,255),
-                       width=max(4,round(2*factor)))
+        coords=[(round(x),round(y)) for x,y in options]
+        # Marcar la FILA sin tapar lápiz ni círculos: un marco fino
+        # separado de los bordes en lugar de un rectángulo grueso.
+        left=min(x for x,y in coords)-round(12*factor)
+        right=max(x for x,y in coords)+round(12*factor)
+        top=min(y for x,y in coords)-round(11*factor)
+        bottom=max(y for x,y in coords)+round(11*factor)
+        draw.rounded_rectangle((left,top,right,bottom),
+                               radius=round(4*factor),
+                               outline=(230,123,16,225),
+                               width=max(2,round(.75*factor)))
     return Image.alpha_composite(background,overlay).convert('RGB')
 
 
@@ -1134,6 +1171,94 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path, *, progress=None):
             'segundos_prelectura':round(perf_counter()-started,3)}
 
 
+def _bubble_centers_in_scan(gray, paper, question_count):
+    """Localiza la cuadrícula REAL sin modificar la plantilla de impresión.
+
+    Algunos escáneres/formatos antiguos comprimen el interior de la hoja
+    aunque las cuatro marcas exteriores sigan alineadas. No asumir que
+    19.3 pt de separación impresa corresponde exactamente al PDF recibido.
+    La calibración solo se acepta si se ven filas, columnas y progresión
+    coherentes de círculos; de lo contrario se regresa a las coordenadas
+    nominales y la lectura conserva dudas, sin inventar aciertos.
+
+    Devuelve centros en PÍXELES sobre un gris rectificado a 200 DPI.
+    Esta única rutina alimenta lectura y acetato visual.
+    """
+    factor=RENDER_DPI/72.0
+    nominal=bubble_positions(paper,question_count)
+    theoretical=[tuple((float(round(x*factor)),
+                        float(round((PAPERS[paper][1]-y)*factor)))
+                       for x,y in positions) for positions in nominal]
+    if gray.ndim!=2 or gray.shape[1]<800 or gray.shape[0]<1000:
+        return theoretical
+
+    _,mask=cv2.threshold(gray,185,255,cv2.THRESH_BINARY_INV)
+    contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,
+                                 cv2.CHAIN_APPROX_SIMPLE)
+    diameter=2*RADIUS*factor
+    circles=[]
+    for contour in contours:
+        x,y,w,h=cv2.boundingRect(contour)
+        if (not .64*diameter<=w<=1.47*diameter or
+            not .64*diameter<=h<=1.47*diameter or
+            not .72<w/max(h,1)<1.35 or
+            cv2.contourArea(contour)<.38*w*h):
+            continue
+        circles.append((x+w/2.0,y+h/2.0))
+
+    result=[]
+    for start in range(0,question_count,25):
+        group=theoretical[start:start+25]
+        count=len(group)
+        expected_x=[p[0] for p in group[0]]
+        y0=group[0][0][1];y_last=group[-1][0][1]
+        # Aproximación estrecha por columna evita círculos ajenos y QR.
+        x_tolerance=max(25.0,diameter*.75)
+        observed=[(x,y) for x,y in circles if
+                  y0-115<=y<=y_last+135 and
+                  any(abs(x-ex)<x_tolerance for ex in expected_x)]
+        observed.sort(key=lambda point:point[1])
+        clusters=[]
+        for center in observed:
+            if (not clusters or
+                center[1]-np.mean([v[1] for v in clusters[-1]])>
+                   diameter*.32):
+                clusters.append([center])
+            else:
+                clusters[-1].append(center)
+        row_groups=[cl for cl in clusters if len(cl)>=2]
+        if len(row_groups)!=count:
+            return theoretical
+        centers_y=np.array([np.median([v[1] for v in cl])
+                            for cl in row_groups],dtype=np.float32)
+        if abs(float(centers_y[0])-y0)>115 or abs(
+                float(centers_y[-1])-y_last)>135:
+            return theoretical
+        if count>1:
+            pitch=np.diff(centers_y)
+            expected_pitch=19.3*factor
+            if (np.min(pitch)<.76*expected_pitch or
+                np.max(pitch)>1.24*expected_pitch or
+                np.max(np.abs(pitch-np.median(pitch)))>10):
+                return theoretical
+        # Encontrar cada columna por todas las filas, no por una sola marca
+        # que puede estar parcialmente rellena o dañada.
+        columns=[]
+        for ex in expected_x:
+            xs=[x for x,y in observed if abs(x-ex)<x_tolerance]
+            if len(xs)<max(2,int(count*.55)):
+                return theoretical
+            median=float(np.median(xs))
+            if abs(median-ex)>x_tolerance:
+                return theoretical
+            columns.append(median)
+        result.extend([
+            tuple((columns[j],float(row_y)) for j in range(4))
+            for row_y in centers_y
+        ])
+    return result
+
+
 def _recognize(gray,paper,questions_count):
     """Mide grafito por contraste del CENTRO, preservando dudas auténticas.
 
@@ -1149,11 +1274,12 @@ def _recognize(gray,paper,questions_count):
     mask=(xx*xx+yy*yy)<r*r
     h,w=gray.shape[:2]
     answers=[];issues=[];levels=[]
-    for index,positions in enumerate(bubble_positions(paper,questions_count),1):
+    for index,positions in enumerate(
+            _bubble_centers_in_scan(gray,paper,questions_count),1):
         stats=[]
         for cx,cy in positions:
-            x=round(cx*scale)
-            y=round((PAPERS[paper][1]-cy)*scale)
+            x=round(cx)
+            y=round(cy)
             if x-r<0 or x+r>=w or y-r<0 or y+r>=h:
                 stats.append((0.,0.,0.))
                 continue
@@ -1170,10 +1296,26 @@ def _recognize(gray,paper,questions_count):
             answers.append(None)
             continue
         strong=(v>=73 and q>=75 and c>=.54)
+        # Grafito lápiz medio (ligeramente más claro que 180): admitimos
+        # SOLO un relleno homogéneo, nítido y aislado de las otras tres
+        # burbujas. Una marca de 190 o más clara, tachones y marcas
+        # parcialmente rellenas siguen pendientes de cotejo físico.
+        pencil=(v>=68 and q>=68 and c>=.72 and
+                second<=13 and v-second>=55 and
+                v>=3.8*max(second,1.))
+        # El grafito HB no es una superficie de intensidad uniforme:
+        # la media puede rondar 65-68 aunque >=82% del círculo esté
+        # cubierto y el percentil alto muestre tinta distinguible.
+        # No bajar simplemente a 64: un gris plano 190 debe seguir en
+        # revisión. Aceptar sólo si las otras opciones están limpias.
+        textured_hb=(v>=64 and q>=74 and c>=.82 and
+                     second<=12 and v-second>=56 and
+                     v>=4.0*max(second,1.))
         other_mark=(second>=31 and q2>=47 and c2>=.16)
         separated=(v-second>=47 and
                    (second<=12 or v>=2.15*second))
-        if strong and separated and not other_mark:
+        if (strong and separated and not other_mark) or (
+                (pencil or textured_hb) and not other_mark):
             answers.append(ANSWER_CHOICES[winner])
         else:
             answers.append(None)

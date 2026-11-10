@@ -1,5 +1,13 @@
 # Mantenimiento y comprobaciones de impresión
 
+## Centro OMR web (rama experimental independiente)
+
+Consultar el [manual OMR web de laptop/tableta](OMR_WEB_TABLETA_PILOTO_Y_PRUEBAS_CLAUDE.md)
+para instalación aislada, diagnóstico, roles, concurrencia,
+migración de evidencias y pruebas físicas. El Docker del generador
+clásico NO ejecuta el servidor OMR. El escritorio Tk descrito abajo
+se conserva sin mezclar su base y el nuevo piloto.
+
 ## Propósito y seguridad
 
 La aplicación prepara PDF de exámenes reutilizables sin recolectar respuestas de los participantes. La identidad de cada participante **se escribe solo en `Hoja_respuestas.pdf`** cuando se activa el modo ecológico. La hoja de respuestas, el acetato y la clave docente se deben resguardar aparte del cuadernillo.

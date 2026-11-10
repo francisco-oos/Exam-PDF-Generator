@@ -1,4 +1,5 @@
 .venv/
+.venv-omr-web/
 __pycache__/
 .pytest_cache/
 *.pyc
