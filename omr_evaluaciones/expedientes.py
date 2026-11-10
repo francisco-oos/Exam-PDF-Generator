@@ -66,7 +66,9 @@ def participant_receipt(store: OMRStore, sid: str, person_id: str,
                      else str(data['aciertos'])),
         'Calificación: '+('Pendiente' if data['porcentaje'] is None
                           else f'{data["porcentaje"]}%'),
-        'Aviso: solo los resultados validados son definitivos.',
+        ('Aviso: evaluación CERRADA y aprobada 2/2; resultado oficial.'
+         if report['sesion']['estado']=='cerrada'
+         else 'Aviso: resultado PROVISIONAL hasta el cierre y aprobación 2/2.'),
     ]
     if data['estado']=='validado':
         lines.extend([
@@ -230,7 +232,8 @@ def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
         content={}
         result_path=folder/('Resultados_Internos.xlsx' if internal else
                             'Resultados_Oficiales.xlsx')
-        export_report(store,sid,result_path,internal=internal)
+        export_report(store,sid,result_path,internal=internal,
+                      definitive_override=(session['estado']=='cerrada'))
         content[result_path.name]=result_path.read_bytes()
         used_documents=set()
         if internal:
@@ -270,6 +273,8 @@ def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
             'evaluacion':session.get('nombre_evaluacion') or session['titulo'],
             'revision_biblioteca':session.get('revision_biblioteca'),
             'tipo':'interno' if internal else 'oficial',
+            'estado_evaluacion':session['estado'],
+            'entrega':'definitiva' if session['estado']=='cerrada' else 'provisional',
             'generado_utc':datetime.now(timezone.utc).isoformat(),
             'paginacion_evidencias':selections if internal else [],
             'folios_sin_evidencia_efectiva':missing if internal else [],

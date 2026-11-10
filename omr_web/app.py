@@ -585,8 +585,11 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             detailed_history_factory=(
                 (lambda: detailed_history_pdf(engine.store,sid))
                 if internal else None))
-        return FileResponse(path,filename=("Expediente_" if internal else
-                            "Resultados_")+sid+".zip",
+        prefix=("Expediente_" if internal else "Resultados_")
+        session_state=engine.store.session(sid)["estado"]
+        if session_state!="cerrada":
+            prefix+="PROVISIONAL_"
+        return FileResponse(path,filename=prefix+sid+".zip",
                             media_type="application/zip",
                             headers={"Cache-Control":"no-store"})
 

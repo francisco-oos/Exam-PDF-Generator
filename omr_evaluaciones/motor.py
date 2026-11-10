@@ -1470,7 +1470,8 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path, *, page_indices=None):
     return report
 
 
-def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
+def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False,
+                  *, definitive_override:bool|None=None):
     """XLSX de entrega sin clave correcta ni datos de marcas por defecto.
 
     La hoja confidencial Incidencias solo se añade al archivo interno.
@@ -1480,6 +1481,10 @@ def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
     from openpyxl.styles import Font,PatternFill,Alignment,Border,Side
     from openpyxl.utils import get_column_letter
     results=store.results(sid);s=results['sesion'];people=results['participantes']
+    # El motor CLI conserva la compatibilidad histórica. La web puede
+    # exigir un cierre formal y aprobación 2/2 antes de rotular DEFINITIVO.
+    definitive=(results['definitivo'] if definitive_override is None
+                else bool(definitive_override))
     def xl(value):
         # Evitar que nombres y comentarios importados se conviertan en fórmulas Excel.
         if isinstance(value,str) and value.lstrip().startswith(('=','+','-','@')):
@@ -1491,7 +1496,7 @@ def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
              'Preguntas','Aciertos','Blancos','Porcentaje','Estado']
     official.append([f'Resultados · {s["titulo"]} · sesión {sid}'])
     official.append([f'Fecha: {s["creada"]} · Versión: {s["version_sha"][:12]} · '+
-                     ('DEFINITIVO' if results['definitivo'] else 'PROVISIONAL')])
+                     ('DEFINITIVO' if definitive else 'PROVISIONAL')])
     official.append(headers)
     for row in people:
         official.append([row['folio'],xl(row['id']),xl(row['nombre']),xl(row['area']),xl(row['grupo']),xl(row['turno']),
@@ -1512,7 +1517,7 @@ def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
     control=book.create_sheet('Control de entrega')
     for row in [('Sesión',sid),('Evaluación',s['titulo']),('Fecha de creación',s['creada']),
                 ('Formato',s['papel']),('Revisión de clave SHA-256',s['version_sha']),
-                ('Estado','DEFINITIVO' if results['definitivo'] else 'PROVISIONAL'),
+                ('Estado','DEFINITIVO' if definitive else 'PROVISIONAL'),
                 ('Exportado UTC',utcnow()),('Responsable / firma','________________________')]:control.append(row)
     if internal:
         issues=book.create_sheet('Incidencias internas')

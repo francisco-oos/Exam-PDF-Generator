@@ -244,3 +244,40 @@ def test_lector_no_modifica_hoja_pendiente_que_otro_revisa(tmp_path):
     assert improved==sheet and status=="reprocesada_validada"
     assert svc.store.pages(sid)[0]["respuestas"]==["A"]
     svc.close()
+
+
+def test_zip_web_es_provisional_hasta_cierre_y_aprobaciones(tmp_path):
+    from io import BytesIO
+    from zipfile import ZipFile
+    from openpyxl import load_workbook
+
+    app=create_app(tmp_path,start_workers=False)
+    svc=app.state.engine
+    admin=_admin(svc)
+    sid,people=_session(svc)
+    sheet,_=svc.store.register_page(sid,"7"*64,0,_image(),
+        people[0]["token"],["A"],[],"validada")
+    assert svc.store.results(sid)["validados"]==1
+
+    def estado_excel(payload):
+        with ZipFile(BytesIO(payload)) as archive:
+            raw=archive.read("Resultados_Oficiales.xlsx")
+        wb=load_workbook(BytesIO(raw),read_only=True)
+        try:
+            return wb["Control de entrega"]["B6"].value
+        finally:
+            wb.close()
+
+    with TestClient(app) as client:
+        assert client.post("/api/login",json={
+            "usuario":"adminpiloto","password":"ClaveSeguraPrueba123!"}).status_code==200
+        headers={"X-CSRF-Token":client.cookies.get("omr_csrf")}
+        first=client.get(f"/api/applications/{sid}/export")
+        assert first.status_code==200
+        assert estado_excel(first.content)=="PROVISIONAL"
+        svc.approve(admin,sheet)
+        assert client.post(f"/api/applications/{sid}/close",headers=headers).status_code==200
+        last=client.get(f"/api/applications/{sid}/export")
+        assert last.status_code==200
+        assert estado_excel(last.content)=="DEFINITIVO"
+    svc.close()
