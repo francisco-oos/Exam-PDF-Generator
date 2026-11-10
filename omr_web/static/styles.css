@@ -88,3 +88,14 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
   .designerWorkbench .pdfPreview{height:30vh;min-height:180px}
   .designerSection>summary{flex-wrap:wrap;justify-content:flex-start}
 }
+
+
+/* Inicio por tarea: el perfil decide qué herramientas aparecen tras entrar. */
+.workflowChoices{display:grid;grid-template-columns:repeat(auto-fit,minmax(265px,1fr));gap:18px}
+.workflowChoice{display:flex;flex-direction:column;gap:10px;min-height:240px}
+.workflowChoice .lead{flex:1}
+.workflowChoice button{align-self:flex-start}
+.workflowIcon{display:grid;place-items:center;background:#e5f1f3;border-radius:12px;color:#166473;font-size:26px;width:52px;height:52px}
+.advancedDownload{margin-top:12px;padding:12px;border:1px solid #e0e9ed;border-radius:10px}
+.advancedDownload summary{cursor:pointer;font-weight:650;color:#446578}
+.advancedDownload .ghost{margin-top:8px}
