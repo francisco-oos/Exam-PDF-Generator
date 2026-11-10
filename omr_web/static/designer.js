@@ -45,8 +45,11 @@
         q.ancho_imagen_mm??106,'number','min="30" max="165" step="1"')+
       meta('alto_imagen_mm','Alto foto (15–90 mm)',
         q.alto_imagen_mm??62,'number','min="15" max="90" step="1"')+
-      choose('alineacion_imagen','Alineación foto',
-        ['LEFT','CENTER','RIGHT'],q.alineacion_imagen||'CENTER')+
+      '<label>Alineación foto<select data-meta="alineacion_imagen">'+
+      [['LEFT','Izquierda'],['CENTER','Centrada'],['RIGHT','Derecha']]
+        .map(([value,label])=>'<option value="'+value+'"'+
+          ((q.alineacion_imagen||'CENTER')===value?' selected':'')+'>'+label+'</option>')
+        .join('')+'</select></label>'+
       '</div><p class="hint">El PDF conserva la proporción, sin deformar el dibujo.</p>'+
       (q.imagen?'<label class="check"><input type="checkbox" data-remove-image>Quitar imagen actual</label>':'')+
       '<div class="actions"><button type="button" class="ghost" data-remove-q="'+i+
@@ -445,6 +448,8 @@
       '<div id="generationPanel"></div></details></div>'+
       '<aside class="panel designerPreview" id="designerPreview">'+
       '<h3>Vista previa PDF real</h3>'+
+      '<p class="hint">Los cambios de texto, colores, fotografías y medidas se actualizan sin cerrar el visor.</p>'+
+      '<div class="actions"><button type="button" class="ghost" id="refreshPdfPreview">Actualizar vista previa</button></div>'+
       '<div class="actions">'+['Cuadernillo','Respuestas','Acetato'].map(v=>
         '<button type="button" class="secondary" data-preview="'+v+'">'+
         (v==='Respuestas'?'Hoja de respuestas':v)+'</button>').join('')+'</div>'+
@@ -458,6 +463,7 @@
       preview();
     });
     sel(root,'#previewPersonal').onchange=()=>preview();
+    sel(root,'#refreshPdfPreview').onclick=()=>preview();
     sel(root,'#importQ').onsubmit=async e=>{
       e.preventDefault();
       const form=e.target, fd=new FormData(form), name=String(fd.get('name')||''),
