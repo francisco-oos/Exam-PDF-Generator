@@ -237,10 +237,21 @@
     const base="/api/sheets/"+encodeURIComponent(sheet.id);
     const overlay=state.highlight||state.acetate;
     img.onerror=()=>{
-      // Si el PNG original está disponible, no dejar un recuadro roto.
+      const hint=byId("overlayStatus");
+      if(hint)hint.textContent=overlay?
+        "No se pudo alinear la superposición; se muestra el original sin acetato.":
+        "No se pudo cargar la imagen original.";
       if(overlay){img.onerror=null;img.src=base+"/image";}
       else alertBox("No se pudo mostrar la imagen de la hoja.",true);
     };
+    img.onload=()=>{
+      const hint=byId("overlayStatus");
+      if(hint && !hint.textContent.startsWith("No se pudo alinear"))
+        hint.textContent=(state.acetate?
+          "Acetato verde activo · solo revisión visual, no decisión automática.": "");
+    };
+    const hint=byId("overlayStatus");
+    if(hint)hint.textContent="";
     img.src=overlay?
       base+"/overlay?pregunta="+state.question+
       "&resaltar="+state.highlight+"&acetato="+state.acetate+
@@ -257,7 +268,7 @@
     area.innerHTML='<div class="scanBox">'+
       '<div class="panel"><h3>Hoja física y marcas</h3><p class="hint">El visor nunca cambia la evidencia original. El contorno naranja señala la pregunta, las marcas verdes corresponden al acetato.</p>'+
       '<img class="scanImage" alt="Hoja escaneada" id="sheetImage">'+
-      '<div class="actions overlayControls"><label class="check"><input type="checkbox" id="highlightToggle" '+
+      '<p class="hint" id="overlayStatus"></p><div class="actions overlayControls"><label class="check"><input type="checkbox" id="highlightToggle" '+
       (state.highlight?'checked':'')+'> Resaltar reactivo</label>'+
       (["admin","coordinador"].includes(state.user?.rol)?
       '<label class="check"><input type="checkbox" id="acetateToggle" '+
@@ -500,7 +511,8 @@
       ["Ausentes",report.ausentes],["Promedio",report.promedio===null?"—":report.promedio+"%"]
     ].map(x=>'<div class="panel"><div class="metric">'+h(x[1])+'</div><div class="muted">'+h(x[0])+'</div></div>').join("")+'</div>'+
       (canExport()?'<div class="actions"><a class="secondary" href="/api/applications/'+h(state.sid)+
-       '/export">ZIP oficial</a><a class="ghost" href="/api/applications/'+h(state.sid)+
+       '/export">'+(report.pendientes||report.ausentes||!report.validados?
+         'ZIP provisional de resultados':'ZIP de resultados')+'</a><a class="ghost" href="/api/applications/'+h(state.sid)+
        '/export?internal=true">Expediente interno y evidencias</a></div>':'')+
       '<div class="tableWrap"><table><thead><tr><th>Folio</th><th>Nombre</th><th>Aciertos</th><th>Estado</th><th></th></tr></thead><tbody>'+
       report.participantes.map(p=>'<tr><td><code>'+h(p.folio)+'</code></td>'+

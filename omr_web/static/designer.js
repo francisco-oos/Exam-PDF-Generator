@@ -105,7 +105,7 @@
       '<div id="questionRows">'+draft.preguntas.map(fileQuestion).join('')+'</div>'+
       '<div class="actions"><button type="button" class="ghost" id="addQuestion">Añadir pregunta</button>'+
       '<button type="button" class="primary" id="saveDesign">Guardar diseño</button></div>'+
-      '<p class="hint">Las imágenes nuevas se incorporan al guardar; después podrán verse en la vista PDF.</p>'+
+      '<p class="hint">Las fotos y el logotipo recién cargados se incorporan al pulsar Guardar diseño; entonces aparecerán en la vista PDF. Los colores de título, subtítulo, respuestas y acetato son independientes.</p>'+
       '</div><aside class="designerPreview"><h3>Vista previa PDF real</h3>'+
       '<div class="actions">'+['Cuadernillo','Respuestas','Acetato'].map(v=>
         '<button type="button" class="secondary" data-preview="'+v+'">'+

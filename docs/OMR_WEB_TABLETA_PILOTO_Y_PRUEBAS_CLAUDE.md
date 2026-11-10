@@ -422,3 +422,22 @@ de la superposición verde/naranja en las 20 preguntas, comprobar que
 cada rol sólo acceda a lo permitido y que las exportaciones provisionales
 no se interpreten como definitivas. No fusionar `main` hasta la
 aceptación física y enlace del validador de licencias.
+
+### Calibración adicional de marcas Xerox
+
+La comprobación directa en las tres páginas de prueba detectó que dos
+hojas antiguas tenían una separación interior de círculos de alrededor
+de 50 píxeles/fila, mientras la tercera y la geometría nominal usan
+aproximadamente 54 píxeles/fila a 200 DPI. Eso acumulaba desplazamiento
+vertical en los últimos reactivos, aunque el QR y los cuatro cuadrados
+estuvieran perfectamente identificados. `_bubble_centers_in_scan`
+localiza contornos circulares, verifica cuatro columnas y progresión
+regular de filas, y sólo si cumple tolerancias usa esas coordenadas
+medidas para `_recognize` y `render_review_with_acetato`.
+**Nunca** modifica `bubble_positions` ni el formato PDF de impresión.
+Si faltan demasiados círculos, hay ruido o paso irregular, conserva la
+geometría nominal y solicita revisión humana; no aumenta automáticamente
+notas por proximidad. Pruebas sintéticas en
+`tests/test_omr_grid_calibration.py`, incluyendo doble marca,
+geometría actual, geometría comprimida y rejilla inválida. Ninguna
+imagen identificable del usuario se agregó al repositorio.

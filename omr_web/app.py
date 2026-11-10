@@ -376,7 +376,8 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         picture.thumbnail((1400,1900))
         stream=BytesIO()
         picture.save(stream,format="JPEG",quality=80)
-        return Response(stream.getvalue(),media_type="image/jpeg")
+        return Response(stream.getvalue(),media_type="image/jpeg",
+                        headers={"Cache-Control":"no-store"})
 
     @web.post("/api/documents/{digest}/pages/{page}/manual")
     def create_manual_from_library(
@@ -514,7 +515,8 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
                               internal=internal)
         return FileResponse(path,filename=("Expediente_" if internal else
                             "Resultados_")+sid+".zip",
-                            media_type="application/zip")
+                            media_type="application/zip",
+                            headers={"Cache-Control":"no-store"})
 
     @web.get("/api/applications/{sid}/participants/{person_id}/result")
     def participant_result(sid:str,person_id:str,user=Depends(user_of)):
@@ -522,7 +524,8 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         target=engine.outputs/(uuid4().hex+".pdf")
         participant_receipt(engine.store,sid,person_id,target)
         return FileResponse(target,filename="Resultado_"+sid+".pdf",
-                            media_type="application/pdf")
+                            media_type="application/pdf",
+                            headers={"Cache-Control":"no-store"})
 
     static_dir=Path(__file__).resolve().parent/"static"
     @web.get("/")
