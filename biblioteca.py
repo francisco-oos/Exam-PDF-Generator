@@ -52,7 +52,8 @@ def db_connect(db_path: Path) -> sqlite3.Connection:
     conn.execute('PRAGMA foreign_keys=ON')
     conn.execute('PRAGMA busy_timeout=10000')
     previous = {r['name'] for r in conn.execute('PRAGMA table_info(cuestionarios)')}
-    if previous and 'color_acetato' not in previous:
+    if previous and ('color_acetato' not in previous or
+                     'logo_ancho_mm' not in previous):
         # La API de backup incluye transacciones confirmadas del WAL. Nunca
         # copiar a mano una base abierta ni sobrescribir un respaldo anterior.
         backup = db_path.with_name(db_path.name + '.antes-migracion-' + uuid4().hex + '.bak')
@@ -98,6 +99,7 @@ def db_connect(db_path: Path) -> sqlite3.Connection:
         'reutilizable': 'INTEGER NOT NULL DEFAULT 0',
         'color_respuestas': "TEXT NOT NULL DEFAULT '#213A4C'",
         'color_acetato': "TEXT NOT NULL DEFAULT '#167341'",
+        'logo_ancho_mm': "REAL NOT NULL DEFAULT 23.0",
         # Papelera: sólo oculta cuestionarios, conserva íntegros sus BLOB.
         'eliminado_en': 'TEXT',
     }
@@ -126,6 +128,7 @@ class StoredExam:
     reutilizable: bool = False
     color_respuestas: str = DEFAULT_COLOR_ANSWERS
     color_acetato: str = '#167341'
+    logo_ancho_mm: float = 23.0
 
 
 def _check_questions(questions: list[Question] | tuple[Question, ...]):
@@ -142,6 +145,17 @@ def _check_questions(questions: list[Question] | tuple[Question, ...]):
             raise ExamError(f'Pregunta {i}: las respuestas deben ser distintas.')
         if q.correct not in (0,1,2,3):
             raise ExamError(f'Pregunta {i}: respuesta correcta inválida.')
+        from math import isfinite
+        try:
+            width=float(q.image_width_mm)
+            height=float(q.image_height_mm)
+        except (TypeError,ValueError) as exc:
+            raise ExamError(f'Pregunta {i}: medidas de imagen inválidas.') from exc
+        if (not isfinite(width) or not isfinite(height) or
+                not 30<=width<=165 or not 15<=height<=90 or
+                q.image_align not in ('LEFT','CENTER','RIGHT')):
+            raise ExamError(
+                f'Pregunta {i}: ancho 30-165 mm, alto 15-90 mm y alineación válida.')
 
 
 def _metadata(nombre: str, titulo: str, empresa: str, grupo: str, subtitulo: str,
@@ -165,7 +179,8 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
               tamano_papel: str = 'A4', letra: float = 9.0,
               reutilizable: bool = False,
               color_respuestas: str = DEFAULT_COLOR_ANSWERS,
-              color_acetato: str = '#167341') -> str:
+              color_acetato: str = '#167341',
+              logo_ancho_mm: float = 23.0) -> str:
     """Guarda o actualiza por ID, conservando la misma identidad y aumentando revisión."""
     color_titulo, color_subtitulo = _metadata(nombre,titulo,empresa,grupo,subtitulo,
                                                 instrucciones,color_titulo,color_subtitulo)
@@ -175,6 +190,10 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
         raise ExamError('La opción reutilizable debe ser verdadera o falsa.')
     color_respuestas=hex_color(color_respuestas, 'Color de respuestas')
     color_acetato=hex_color(color_acetato, 'Color del acetato')
+    from math import isfinite
+    logo_ancho_mm=float(logo_ancho_mm)
+    if not isfinite(logo_ancho_mm) or not 10<=logo_ancho_mm<=28:
+        raise ExamError('El ancho del logotipo debe estar entre 10 y 28 mm.')
     questions=tuple(questions)
     _check_questions(questions)
     if exam_id is not None and not re.fullmatch(r'[0-9a-f]{32}',exam_id):
@@ -189,7 +208,10 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
             image_name=f'pregunta_{number:03d}{path.suffix.lower()}'
             resources[image_name]=path.read_bytes()
         serial.append({'tema':q.section,'pregunta':q.prompt,'opciones':list(q.options),
-                       'correcta':'ABCD'[q.correct],'imagen':image_name})
+                       'correcta':'ABCD'[q.correct],'imagen':image_name,
+                       'ancho_imagen_mm':float(q.image_width_mm),
+                       'alto_imagen_mm':float(q.image_height_mm),
+                       'alineacion_imagen':q.image_align})
     logo_name=None
     if logo:
         safe_logo=_safe_image(Path(logo),source='Logotipo')
@@ -206,8 +228,8 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
         conn.execute('''INSERT INTO cuestionarios
           (id,nombre,empresa,grupo,titulo,subtitulo,instrucciones,color_titulo,color_subtitulo,
            preguntas_json,logo_archivo,creado_en,actualizado_en,revision,
-           tamano_papel,letra,reutilizable,color_respuestas,color_acetato)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           tamano_papel,letra,reutilizable,color_respuestas,color_acetato,logo_ancho_mm)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET
           nombre=excluded.nombre,empresa=excluded.empresa,grupo=excluded.grupo,
           titulo=excluded.titulo,subtitulo=excluded.subtitulo,instrucciones=excluded.instrucciones,
@@ -216,10 +238,12 @@ def save_exam(db_path: Path, *, nombre: str, empresa: str, grupo: str, titulo: s
           actualizado_en=excluded.actualizado_en,revision=excluded.revision,
           tamano_papel=excluded.tamano_papel,letra=excluded.letra,
           reutilizable=excluded.reutilizable,color_respuestas=excluded.color_respuestas,
-          color_acetato=excluded.color_acetato''',
+          color_acetato=excluded.color_acetato,
+          logo_ancho_mm=excluded.logo_ancho_mm''',
             (exam_id,nombre.strip(),empresa.strip(),grupo.strip(),titulo.strip(),subtitulo.strip(),
              instrucciones.strip(),color_titulo,color_subtitulo,json.dumps(serial,ensure_ascii=False),
-             logo_name,created,now,version,tamano_papel,letra,int(reutilizable),color_respuestas,color_acetato))
+             logo_name,created,now,version,tamano_papel,letra,int(reutilizable),
+             color_respuestas,color_acetato,logo_ancho_mm))
         conn.execute('DELETE FROM recursos WHERE cuestionario_id=?',(exam_id,))
         conn.executemany('INSERT INTO recursos(cuestionario_id,nombre,contenido,sha256) VALUES (?,?,?,?)',
               [(exam_id,name,blob,sha256(blob).hexdigest()) for name,blob in resources.items()])
@@ -311,14 +335,18 @@ def load_exam(db_path: Path, exam_id: str, workdir: Path) -> StoredExam:
     for d in items:
         photo=restore(d['imagen'],images_dir) if d['imagen'] else None
         questions.append(Question(d['tema'],d['pregunta'],tuple(d['opciones']),
-                                  'ABCD'.index(d['correcta']),photo))
+                                  'ABCD'.index(d['correcta']),photo,
+                                  float(d.get('ancho_imagen_mm',106)),
+                                  float(d.get('alto_imagen_mm',62)),
+                                  str(d.get('alineacion_imagen','CENTER'))))
     logo=restore(row['logo_archivo'],folder) if row['logo_archivo'] else None
     return StoredExam(id=row['id'],nombre=row['nombre'],empresa=row['empresa'],grupo=row['grupo'],
        titulo=row['titulo'],subtitulo=row['subtitulo'],instrucciones=row['instrucciones'],
        color_titulo=row['color_titulo'],color_subtitulo=row['color_subtitulo'],
        questions=tuple(questions),logo=logo,revision=row['revision'],
        tamano_papel=row['tamano_papel'],letra=row['letra'],
-       reutilizable=bool(row['reutilizable']),color_respuestas=row['color_respuestas'],color_acetato=row['color_acetato'])
+       reutilizable=bool(row['reutilizable']),color_respuestas=row['color_respuestas'],color_acetato=row['color_acetato'],
+       logo_ancho_mm=row['logo_ancho_mm'])
 
 
 def export_workbook(questions: list[Question] | tuple[Question,...], target: Path) -> Path:
