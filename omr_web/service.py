@@ -528,8 +528,11 @@ class WebService:
                 raise WebError("Reactivo fuera de rango.",422)
             lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
                              (sheet_id,)).fetchone()
-            if lease and lease["vence"]>int(time.time()):
-                raise WebError("Libera la reserva de revisión antes de reabrir.",409)
+            if (lease and lease["vence"]>int(time.time()) and
+                    lease["usuario_id"]!=user["id"]):
+                raise WebError("Otra persona está revisando esta hoja.",409)
+            # Reabrir invalida también la reserva anterior del mismo usuario:
+            # cualquier pestaña vieja perderá su token antes de poder guardar.
             questions=json.loads(db.execute(
                 "SELECT preguntas_json FROM sesiones WHERE id=?",
                 (page["sesion_id"],)).fetchone()["preguntas_json"])
