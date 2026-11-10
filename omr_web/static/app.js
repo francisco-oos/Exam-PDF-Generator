@@ -261,10 +261,25 @@
     const sheet=state.sheet;if(!sheet)return;
     const area=byId("sheetArea");if(!area)return;
     const q=sheet.preguntas[state.question-1];
+    const pending=sheet.dudas.filter(x=>Number.isInteger(x.pregunta));
+    const pendingIds=new Set(pending.map(x=>x.pregunta));
+    const disputed=pendingIds.has(state.question);
     const value=sheet.respuestas[state.question-1]||"BLANCO";
+    const currentIssue=pending.find(x=>x.pregunta===state.question);
+    // La opción nativa muestra el aviso también en Edge/Chrome donde
+    // los estilos CSS de <option> no se aplican uniformemente.
     const questions=sheet.preguntas.map(item=>
       '<option value="'+item.numero+'"'+(item.numero===state.question?" selected":"")+'>'+
+      (pendingIds.has(item.numero)?"⚠ DUDA · ":"✓ ")+
       String(item.numero).padStart(2,"0")+" · "+h(item.pregunta.slice(0,90))+"</option>").join("");
+    const pendingNavigation=pending.length?
+      '<div class="pendingNavigation"><strong>Reactivos que necesitan revisión ('+
+      pending.length+')</strong><div class="actions">'+pending.map(x=>
+        '<button type="button" class="'+(x.pregunta===state.question?
+        'primary':'secondary')+'" data-pending="'+x.pregunta+'">'+
+        String(x.pregunta).padStart(2,"0")+'</button>').join("")+
+      '</div></div>':
+      '<p class="hint">Esta hoja ya no presenta dudas automáticas.</p>';
     area.innerHTML='<div class="scanBox">'+
       '<div class="panel"><h3>Hoja física y marcas</h3><p class="hint">El visor nunca cambia la evidencia original. El contorno naranja señala la pregunta, las marcas verdes corresponden al acetato.</p>'+
       '<img class="scanImage" alt="Hoja escaneada" id="sheetImage">'+
@@ -282,11 +297,18 @@
       h(sheet.evaluacion)+' · Biblioteca: '+h(sheet.biblioteca)+
       (sheet.revision_biblioteca?' · Revisión '+h(sheet.revision_biblioteca):'')+
       '</p></div><label>Reactivo del examen<select id="questionSelect">'+questions+'</select></label>'+
+      pendingNavigation+
       '<div class="questionBox"><b>'+h(q?.tema||"")+'</b><br>'+h(q?.pregunta||"")+'</div>'+
-      '<p class="muted">Lectura automática: <b>'+h(value)+'</b> · dudas restantes: '+sheet.dudas.length+'</p>'+
+      '<p class="muted">Lectura automática: <b>'+
+      (disputed?'PENDIENTE DE REVISIÓN':h(sheet.respuestas[state.question-1]||"Sin marca detectada"))+
+      '</b> · dudas restantes: '+pending.length+'</p>'+
+      (currentIssue?'<p class="pendingReason"><b>Motivo de la duda:</b> '+
+        h(currentIssue.razon||"Lectura inconclusa")+
+        '. Confirma físicamente el lápiz antes de elegir.</p>':'')+
       '<label>Decisión A/B/C/D o BLANCO<select id="decision">'+
-      ["A","B","C","D","BLANCO"].map(c=>'<option '+(c===value?'selected':'')+'>'+c+'</option>').join("")+
-      '</select></label><label>Justificación<textarea id="reason" placeholder="Ej. Dos marcas, se considera BLANCO conforme a la política"></textarea></label>'+
+      (disputed?'<option value="" selected>— Selecciona una decisión —</option>':'')+
+      ["A","B","C","D","BLANCO"].map(c=>'<option '+(!disputed&&c===value?'selected':'')+'>'+c+'</option>').join("")+
+      '</select></label><label>Justificación<textarea id="reason" placeholder="Ej. Dos marcas o grafito tenue; decisión cotejada contra el papel"></textarea></label>'+
       '<div class="actions"><button class="primary" id="saveChoice">Guardar decisión</button>'+
       '<button class="secondary" id="captureWhole">Captura completa</button>'+
       '<button class="ghost" id="releaseSheet">Liberar hoja</button></div>'+
@@ -294,6 +316,10 @@
     byId("questionSelect").onchange=e=>{
       state.question=Number(e.target.value);renderSheet();
     };
+    onButton(area,"[data-pending]",e=>{
+      state.question=Number(e.currentTarget.dataset.pending);
+      renderSheet();
+    });
     byId("highlightToggle").onchange=e=>{
       state.highlight=e.target.checked;showSheetVisual();
     };
@@ -302,6 +328,10 @@
     };
     showSheetVisual();
     byId("saveChoice").onclick=async()=>{
+      if(!byId("decision").value){
+        alertBox("Selecciona A, B, C, D o BLANCO tras revisar la marca física.",true);
+        return;
+      }
       try{
         const result=await api("/sheets/"+sheet.id+"/decisions",{
           method:"PUT",body:{lease:state.lease,expected_revision:state.revision,
