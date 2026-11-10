@@ -611,3 +611,37 @@ def test_imagen_y_logo_embebidos_en_excel_se_integran_al_cuadernillo_final(serve
     colors=_pdf_embeds_colors(doc.content)
     assert _near_color(colors,(0xA2,0x1D,0x55)),colors
     assert _near_color(colors,(0x29,0x6D,0xA1)),colors
+
+
+
+def test_vista_con_json_de_biblioteca_no_pierde_imagen_por_nombre(server):
+    app,client,headers=server
+    exam_id=import_questionnaire(client,headers,with_images=True)
+    detail=client.get("/api/library/"+exam_id).json()
+    assert detail["preguntas"][0]["imagen"].startswith("pregunta_001")
+    # El editor usa sourceIndex; una API externa puede devolver imagen=str.
+    response=client.post("/api/library/"+exam_id+
+                         "/preview?view=Cuadernillo",
+                         headers=headers,json=detail)
+    assert response.status_code==200,response.text
+    colors=_pdf_embeds_colors(response.content)
+    assert _near_color(colors,(0x22,0x44,0x66)),colors
+    assert _near_color(colors,(0x33,0x88,0x55)),colors
+
+
+@pytest.mark.parametrize("width,height,align",[
+    (20,60,"CENTER"),(180,60,"CENTER"),(80,9,"CENTER"),
+    (80,100,"CENTER"),(90,50,"MIDDLE"),
+])
+def test_disenador_rechaza_medidas_o_alineacion_invalidas(
+        server,width,height,align):
+    app,client,headers=server
+    exam_id=import_questionnaire(client,headers)
+    saved=client.get("/api/library/"+exam_id).json()
+    saved["preguntas"][0].update({
+        "ancho_imagen_mm":width,"alto_imagen_mm":height,
+        "alineacion_imagen":align})
+    response=client.post("/api/library/"+exam_id+"/edit",
+       headers=headers,data={"payload":json.dumps(saved)})
+    assert response.status_code==422,response.text
+    assert client.get("/api/library/"+exam_id).json()["revision"]==1
