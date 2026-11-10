@@ -195,3 +195,60 @@ def test_auxiliar_sin_acetato_no_reabre_hojas_ni_consulta_historial(tmp_path):
                     "motivo":"Quiero modificar la clave ya revisada"}).status_code==403
         assert c.get("/api/sheets/"+sheet+"/history").status_code==200
     svc.close()
+
+
+
+def test_expediente_zip_incluye_evidencia_auditada_sin_sustituir_original(tmp_path):
+    """Una hoja de aplicación real entra al ZIP interno con PDF auditado."""
+    from io import BytesIO
+    from zipfile import ZipFile
+    from omr_evaluaciones.motor import create_forms_pdf
+
+    app=create_app(tmp_path,start_workers=False)
+    svc=app.state.engine
+    svc.setup(svc._setup_token,"adminprueba","Admin",
+              "ClaveTemporalSegura123!")
+    sid=svc.store.create_session(
+        "Evaluación con evidencia",[
+            {"tema":"Seguridad","pregunta":"Seguridad","correcta":"A"}],
+        [{"id":"P004","nombre":"Persona ficticia 4"}],"Carta")
+    pdf=create_forms_pdf(svc.store,sid,tmp_path/"hoja_original.pdf")
+    source_sha=hashlib.sha256(pdf.read_bytes()).hexdigest()
+    with TestClient(app) as c:
+        headers=_login(c,"adminprueba","ClaveTemporalSegura123!")
+        user=svc.authenticate(c.cookies.get("omr_sid"))
+        job=svc.add_job(user,pdf)
+        svc._process_pending()
+        result=svc.job(user,job)
+        assert result["estado"]=="terminado",result
+        assert result["resultado"]["sha"]==source_sha
+        sheet=svc.store.pages(sid)[0]
+        if sheet["estado"]=="revisar":
+            claim=svc.claim(user,sheet["id"])
+            svc.save_decisions(user,sheet["id"],claim["lease"],
+                claim["revision"],[{"pregunta":1,"decision":"A"}],
+                "Cotejo físico del examen de prueba")
+            svc.release(user,sheet["id"],claim["lease"])
+        assert svc.store.pages(sid)[0]["estado"]=="validada"
+        original=svc.inbox.original(source_sha)
+        sha_before=hashlib.sha256(original.read_bytes()).hexdigest()
+        archive=c.get("/api/applications/"+sid+"/export?internal=true")
+        assert archive.status_code==200,archive.text[:150]
+        with ZipFile(BytesIO(archive.content)) as zipped:
+            names=zipped.namelist()
+            audited=[x for x in names if x.startswith(
+                "Evidencias_auditadas/") and x.endswith(".pdf")]
+            assert len(audited)==1,names
+            with fitz.open(stream=zipped.read(audited[0]),filetype="pdf") as rendered:
+                text=rendered[0].get_text()
+                assert "1 de 1 aciertos" in text
+                assert "PILOTO" in text
+                assert "Persona ficticia 4" in text
+            assert "Evidencias_Ordenadas.pdf" in names
+            import json
+            manifest=json.loads(zipped.read("Manifiesto.json"))
+            assert audited[0] in manifest["archivos_sha256"]
+            assert manifest["archivos_sha256"][audited[0]]==hashlib.sha256(
+                zipped.read(audited[0])).hexdigest()
+        assert hashlib.sha256(original.read_bytes()).hexdigest()==sha_before
+    svc.close()
