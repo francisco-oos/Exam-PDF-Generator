@@ -223,3 +223,24 @@ def test_repetir_add_job_con_misma_ruta_no_borra_original_en_cola(tmp_path):
     with svc.store.connect() as db:
         assert db.execute("SELECT COUNT(*) FROM web_trabajos").fetchone()[0]==1
     svc.close()
+
+
+def test_lector_no_modifica_hoja_pendiente_que_otro_revisa(tmp_path):
+    svc=WebService(tmp_path,start_workers=False)
+    admin=_admin(svc)
+    sid,people=_session(svc)
+    token=people[0]["token"]
+    sheet,_=svc.store.register_page(sid,"4"*64,0,_image(),token,
+         [None],[{"pregunta":1,"razon":"Lápiz tenue"}],"revisar")
+    claim=svc.claim(admin,sheet)
+    newer,state=svc.store.register_page(sid,"4"*64,0,_image(),token,
+         ["A"],[],"validada")
+    assert newer==sheet and state=="repetida"
+    assert svc.store.pages(sid)[0]["respuestas"]==[None]
+    assert svc.get_sheet(admin,sheet)["revision"]==claim["revision"]
+    svc.release(admin,sheet,claim["lease"])
+    improved,status=svc.store.register_page(sid,"4"*64,0,_image(),token,
+         ["A"],[],"validada")
+    assert improved==sheet and status=="reprocesada_validada"
+    assert svc.store.pages(sid)[0]["respuestas"]==["A"]
+    svc.close()

@@ -21,7 +21,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, time
 from uuid import uuid4
 from zipfile import ZipFile, BadZipFile
 
@@ -361,8 +361,16 @@ class OMRStore:
                     WHERE hoja_id=? AND revisor!='Motor OMR'
                 """,(original['id'],)).fetchone()[0]
                 prev_doubts=json.loads(original['dudas_json'])
+                # El motor CLI no tiene tabla web_reclamos. Si hay servidor,
+                # nunca mejorar automáticamente una hoja en revisión humana
+                # activa: su versión/lease quedaría obsoleta silenciosamente.
+                has_claims=db.execute("""SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='web_reclamos'""").fetchone()
+                claimed=bool(has_claims and db.execute("""
+                    SELECT 1 FROM web_reclamos WHERE hoja_id=? AND vence>?
+                """,(original['id'],int(time()))).fetchone())
                 better=(
-                    human==0 and token is not None and
+                    not claimed and human==0 and token is not None and
                     state in ('validada','revisar') and
                     (original['token'] is None or original['token']==token) and
                     (original['estado']=='sin_identificar' or
