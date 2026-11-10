@@ -247,8 +247,16 @@ def new_questions(items:list[dict], original, replacements=None):
         # nunca hereda accidentalmente la imagen de otra por cambio de orden.
         keep=item.get("imagen")
         original_image=None
-        if isinstance(keep,int) and 0<=keep<len(original.questions):
+        if type(keep) is int and 0<=keep<len(original.questions):
             original_image=original.questions[keep].image
+        elif isinstance(keep,str) and keep:
+            # También aceptar el JSON obtenido de GET /library/{id}, que
+            # devuelve nombres de recurso en lugar de índices del editor.
+            matches=[q.image for q in original.questions
+                     if q.image is not None and q.image.name==keep]
+            if len(matches)!=1:
+                raise WebError(f"Pregunta {i}: imagen de biblioteca desconocida.",422)
+            original_image=matches[0]
         photo=replacements.get(i,original_image)
         result.append(Question(
             str(item.get("tema","")),str(item.get("pregunta","")),
