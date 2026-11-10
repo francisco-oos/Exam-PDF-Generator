@@ -34,7 +34,7 @@ def test_mover_copia_conserva_pdf_imagen_usuarios_y_respuestas(tmp_path):
     folder.mkdir(parents=True)
     (folder / "Sesion_OMR.txt").write_text(f"Sesión {sid}\n", encoding="utf-8")
     service.store.update_lote(sid, folder)
-    original = b"%PDF-1.4\n%archivo sintético\n%%EOF\n"
+    original = b"%PDF-1.4\n%archivo sintetico\n%%EOF\n"
     digest = hashlib.sha256(original).hexdigest()
     pdf = service.inbox.originals / (digest + ".pdf")
     pdf.write_bytes(original)
