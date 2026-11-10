@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from omr_evaluaciones.documentos import sha_file
+from omr_evaluaciones.expedientes import export_session_bundle, participant_receipt
 from .service import WebError, WebService
 from .designer import import_exam, serialize_exam, update_exam, preview_exam, resource, import_roster
 
