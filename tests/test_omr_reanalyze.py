@@ -66,6 +66,8 @@ def test_reanalyze_archived_pdf_improves_only_machine_reading(tmp_path):
         digest=first["resultado"]["sha"]
         original=svc.store.pages(sid)[0]
         assert original["estado"]=="validada",original
+        first_doc=client.get("/api/documents").json()[0]
+        assert first_doc["veces_recibido"]==1
         original_id=original["id"]
         original_token=original["token"]
         old_image=original["imagen"]
@@ -78,7 +80,6 @@ def test_reanalyze_archived_pdf_improves_only_machine_reading(tmp_path):
                 json.dumps([{"pregunta":1,"razon":"Lector antiguo"},
                             {"pregunta":2,"razon":"Lector antiguo"}]),
                 original_id))
-        assert client.get("/api/documents")[0:0] if False else True
         # Solo el administrador con CSRF puede iniciar nueva lectura.
         assert client.post(f"/api/documents/{digest}/reanalyze").status_code==403
         bad=client.post("/api/documents/"+("z"*64)+"/reanalyze",
@@ -95,6 +96,7 @@ def test_reanalyze_archived_pdf_improves_only_machine_reading(tmp_path):
         assert finish["estado"]=="terminado",finish
         data=finish["resultado"]["aplicaciones"][0]
         assert data["reprocesadas"]==1,data
+        assert client.get("/api/documents").json()[0]["veces_recibido"]==1
         assert data["comparacion"]==[{
             "pagina":1,"antes":2,"despues":0,
             "estado":"validada","mejora_aplicada":True}],data

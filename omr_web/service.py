@@ -754,7 +754,10 @@ class WebService:
                             (row["operador_id"],)).fetchone()
         if not user or not user["activo"]:
             raise WebError("El operador fue desactivado.")
-        sha,archived=self.inbox.archive(source,inspection,operator=user["nombre"])
+        from_archive=source.resolve().is_relative_to(self.inbox.originals.resolve())
+        sha,archived=self.inbox.archive(
+            source,inspection,operator=user["nombre"],
+            record_ingress=not from_archive)
         imported=[]
         withheld=0
         for group in inspection["grupos"]:

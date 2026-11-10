@@ -106,7 +106,8 @@ class DocumentInbox:
                 raise ValueError('El archivo no tiene cabecera PDF.')
         return path
 
-    def archive(self, source, inspection, *, operator='Operador'):
+    def archive(self, source, inspection, *, operator='Operador',
+                record_ingress=True):
         """Copia una vez y registra TODAS las páginas, verificadas o pendientes.
 
         Esta operación ocurre DESPUÉS de la confirmación del operador. Si
@@ -147,12 +148,15 @@ class DocumentInbox:
                 INSERT OR IGNORE INTO documentos_omr(sha,ruta,tamano,paginas,recibido)
                 VALUES(?,?,?,?,?)
             """,(digest,str(dst),dst.stat().st_size,n,utcnow()))
-            db.execute("""
-                INSERT INTO ingresos_documentos_omr(
-                    id,sha,fecha,operador,nombre_original,nota)
-                VALUES(?,?,?,?,?,?)
-            """,(uuid4().hex,digest,utcnow(),operator[:90],
-                 source.name[:255],'PDF recibido y conservado'))
+            # Relectura de un PDF conservado no es un NUEVO ingreso:
+            # preservar nombre original y contador de veces recibidas.
+            if record_ingress:
+                db.execute("""
+                    INSERT INTO ingresos_documentos_omr(
+                        id,sha,fecha,operador,nombre_original,nota)
+                    VALUES(?,?,?,?,?,?)
+                """,(uuid4().hex,digest,utcnow(),operator[:90],
+                     source.name[:255],'PDF recibido y conservado'))
             for item in items:
                 index=item['pagina']-1
                 sid=item.get('sesion_id')
@@ -194,8 +198,9 @@ class DocumentInbox:
                 """,(digest,index,sid,folio,person,None,
                      'identificada' if sid else 'pendiente',
                      item.get('diagnostico','')[:500],utcnow()))
-            self._event(db,digest,None,'ingreso',operator,
-                        f'{source.name} · {n} páginas · QR firmado verificado')
+            self._event(db,digest,None,
+                        'ingreso' if record_ingress else 'reanalisis',
+                        operator,f'{source.name} · {n} páginas · QR firmado verificado')
         return digest, dst
 
     def mark_processed(self, digest, sid, report, *, operator='Lector OMR'):
