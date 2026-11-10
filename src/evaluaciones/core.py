@@ -207,6 +207,7 @@ def read_questions(path: Path) -> list[Question]:
         book = load_workbook(path, read_only=True, data_only=False, keep_links=False)
     except Exception as exc:
         raise ExamError('No se pudo abrir el Excel. Comprueba que no esté dañado.') from exc
+    rows=None
     try:
         if 'Preguntas' not in book.sheetnames:
             raise ExamError('Falta la hoja llamada "Preguntas".')
@@ -252,6 +253,12 @@ def read_questions(path: Path) -> list[Question]:
             raise ExamError('La plantilla no contiene preguntas.')
         return questions
     finally:
+        # read_only deja el XML de la fila dentro del generador; si una
+        # imagen falta, la excepción detiene la iteración prematuramente.
+        # Cerrar el generador primero libera el XLSX en Windows, incluso
+        # cuando falla la validación de una pregunta.
+        if rows is not None:
+            rows.close()
         book.close()
 
 

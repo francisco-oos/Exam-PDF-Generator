@@ -11,6 +11,7 @@ import re
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zipfile import ZipFile
 
 from fastapi import UploadFile
 
@@ -87,7 +88,19 @@ def recover_embedded_question_images(sheet:Path,images_dir:Path) -> set[str]:
                 raise WebError(f"Fila {row}: usa imagen PNG/JPEG.",422)
             name=f"foto_excel_fila_{row:03d}"+(
                 ".jpg" if fmt in ("jpg","jpeg") else ".png")
-            data=photo._data()
+            try:
+                data=photo._data()
+            except (OSError,ValueError):
+                # Algunas versiones de openpyxl cierran el stream
+                # temporal de la imagen al terminar load_workbook().
+                # Recuperar los bytes directamente del XLSX original.
+                member=str(photo.path).lstrip("/")
+                with ZipFile(sheet) as archive:
+                    if member not in archive.namelist():
+                        raise WebError(
+                            f"Fila {row}: no se encontró la imagen original "
+                            "en el XLSX; importa esa foto como PNG/JPG.",422)
+                    data=archive.read(member)
             if len(data)>MAX_IMAGE_BYTES:
                 raise WebError(f"Fila {row}: imagen superior a 4 MB.",413)
             path=images_dir/name
