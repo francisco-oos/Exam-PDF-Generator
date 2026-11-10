@@ -223,13 +223,20 @@ def test_expediente_zip_incluye_evidencia_auditada_sin_sustituir_original(tmp_pa
         assert result["estado"]=="terminado",result
         assert result["resultado"]["sha"]==source_sha
         sheet=svc.store.pages(sid)[0]
-        if sheet["estado"]=="revisar":
-            claim=svc.claim(user,sheet["id"])
-            svc.save_decisions(user,sheet["id"],claim["lease"],
-                claim["revision"],[{"pregunta":1,"decision":"A"}],
-                "Cotejo físico del examen de prueba")
-            svc.release(user,sheet["id"],claim["lease"])
+        # Un formulario EN BLANCO puede estar clasificado como validado,
+        # pero eso no significa un acierto. La prueba debe capturar A
+        # explícitamente y registrar la re-corrección si estaba cerrada.
+        if sheet["estado"]=="validada":
+            svc.reopen_validated(
+                user,sheet["id"],1,
+                "Revisión de la muestra ficticia para comprobar nota")
+        claim=svc.claim(user,sheet["id"])
+        svc.save_decisions(user,sheet["id"],claim["lease"],
+            claim["revision"],[{"pregunta":1,"decision":"A"}],
+            "Cotejo físico del examen de prueba")
+        svc.release(user,sheet["id"],claim["lease"])
         assert svc.store.pages(sid)[0]["estado"]=="validada"
+        assert svc.store.results(sid)["participantes"][0]["aciertos"]==1
         original=svc.inbox.original(source_sha)
         sha_before=hashlib.sha256(original.read_bytes()).hexdigest()
         archive=c.get("/api/applications/"+sid+"/export?internal=true")
