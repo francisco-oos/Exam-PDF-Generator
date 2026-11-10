@@ -544,9 +544,14 @@
        '/export">'+(report.pendientes||report.ausentes||!report.validados?
          'ZIP provisional de resultados':'ZIP de resultados')+'</a><a class="ghost" href="/api/applications/'+h(state.sid)+
        '/export?internal=true">Expediente interno y evidencias</a></div>':'')+
-      '<div class="tableWrap"><table><thead><tr><th>Folio</th><th>Nombre</th><th>Aciertos</th><th>Estado</th><th></th></tr></thead><tbody>'+
+      '<p class="hint">Los temas por reforzar se calculan únicamente en hojas validadas; no revelan respuestas correctas. El PDF individual contiene el detalle de aciertos por tema y sugerencias de estudio.</p>'+
+      '<div class="tableWrap"><table><thead><tr><th>Folio</th><th>Nombre</th><th>Aciertos</th><th>Temas por reforzar</th><th>Estado</th><th></th></tr></thead><tbody>'+
       report.participantes.map(p=>'<tr><td><code>'+h(p.folio)+'</code></td>'+
-      '<td>'+h(p.nombre)+'</td><td>'+h(p.aciertos===null?"—":p.aciertos)+'</td>'+
+      '<td>'+h(p.nombre)+'</td><td>'+h(p.aciertos===null?"—":p.aciertos+"/"+p.preguntas)+'</td>'+
+      '<td>'+h(p.estado==="validado"?
+        (p.areas_mejora?.length?
+          p.areas_mejora.slice(0,3).map(t=>t.tema+" ("+t.aciertos+"/"+t.preguntas+")").join(" · "):
+          "Sin temas pendientes en esta prueba"):"Pendiente de validación")+'</td>'+
       '<td>'+h(p.estado)+'</td><td>'+(canExport()?
         '<a class="listLink" href="/api/applications/'+h(state.sid)+
         '/participants/'+encodeURIComponent(p.id)+'/result">PDF individual</a>':'')+
