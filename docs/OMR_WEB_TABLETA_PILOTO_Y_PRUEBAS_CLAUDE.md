@@ -2,7 +2,7 @@
 
 **Rama:** `feature/omr-tablet-lan-multiusuario-v1`  
 **Base:** `feature/omr-web-multiusuario` (a su vez derivada del PR #13).  
-**Estado:** piloto funcional con backend y frontend web; NO habilitado para producción ni como licencia comercial.  
+**Estado:** piloto web implementado con instalación aislada y pruebas CI; la aceptación física y producción están pendientes.  
 **Fecha:** 2026-11-09.  
 **Responsable de pruebas físicas:** Claude, con revisión humana y evidencia local.
 
@@ -21,13 +21,24 @@ La nueva carpeta `omr_web/` contiene:
 - `run.py`: servidor local, bloqueo de modo producción sin licencia real,
   controles HTTPS para acceso desde otros dispositivos.
 - `certificate.py`: certificado HTTPS temporal de piloto para una IP LAN.
+- `runtime.py`: una ruta estable de datos, independientemente del
+  directorio desde el cual Windows o Linux inicia el servidor.
+- `doctor.py`: diagnóstico previo de dependencias nativas, Python,
+  disco, SQLite, puerto y requisitos de TLS.
+- `relocate.py`: comprobación de evidencia y reparación de rutas
+  absolutas después de copiar el piloto a otro equipo; nunca automática.
+- Iniciadores `Instalar_OMR_Web_*` y `Iniciar_OMR_Web_*`:
+  instalación única y arranque posterior sin conexión.
 
 Reutiliza sin reescribir los motores probados:
 `biblioteca.py`, `generacion_integrada.py`,
 `omr_evaluaciones/motor.py`, `documentos.py`, `expedientes.py`.
 
-**Una sola fuente de verdad:** `datos/omr/sesiones.sqlite3` y sus PDFs/PNG
-originales. Las tablas web nuevas son aditivas: `web_usuarios`,
+**Una sola fuente de verdad por piloto:** por defecto
+`datos/omr_web_piloto/omr/sesiones.sqlite3`, los PDF/PNG originales
+y `datos/omr_web_piloto/biblioteca.sqlite3`. El escritorio conserva
+`datos/omr/` y `datos/biblioteca.sqlite3` sin compartir escrituras.
+Las tablas web nuevas son aditivas: `web_usuarios`,
 `web_sesiones`, `web_asignaciones`, `web_reclamos`,
 `web_eventos`, `web_trabajos` y `web_aprobaciones`.
 No existe SQLite replicada por capturista ni se comparte el archivo en SMB.
@@ -36,10 +47,16 @@ No existe SQLite replicada por capturista ni se comparte el archivo en SMB.
 cuentas, red local y revisión optimista, pero no se comparten bases,
 usuarios, calificaciones ni sus tablas de puestos/departamentos.
 
-## 2. Preparar el equipo servidor sin perder datos
+## 2. Instalar primero en laptop Windows
 
-1. En la tableta o PC Windows, instalar Git y Python 3.11–3.13.
-2. Clonar el repositorio y seleccionar la rama experimental:
+**Prerrequisitos:** Windows 10/11 x64, Python 3.11–3.13 de 64 bits,
+Git y navegador actual (Edge, Chrome o Firefox). La primera instalación
+requiere Internet; las posteriores ejecuciones funcionan sin reinstalar.
+Reservar espacio de almacenamiento para PDF, PNG y respaldos; el
+diagnóstico avisa por debajo de 500 MiB libres. En Linux también se
+requiere `libzbar0` del sistema operativo.
+
+1. Clonar el repositorio seleccionando únicamente la rama experimental:
 
 ```powershell
 git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
@@ -48,46 +65,92 @@ git fetch origin
 git switch --track origin/feature/omr-tablet-lan-multiusuario-v1
 ```
 
-3. Si ya existen datos reales, antes de probar **cerrar Tk/servidor** y
-   copiar `datos/omr/` y `datos/biblioteca.sqlite3` enteros a una
-   carpeta de respaldo aislada. **Primero probar con una copia** de los datos.
-   Esta rama crea nuevas tablas al iniciarse y no se recomienda alternar
-   escritor web/Tk simultáneos sobre la misma base.
-4. Para piloto local ejecutar:
+2. Instalar **una sola vez** (con Internet):
+
+```powershell
+.\Instalar_OMR_Web_Windows.bat
+```
+
+  El instalador utiliza Python compatible, instala las dependencias
+  de `requirements-web.txt` en el entorno aislado
+  `.venv-omr-web/` y ejecuta el diagnóstico.
+
+3. Arrancar sin conexión, sin `pip install` al abrir:
 
 ```powershell
 .\Iniciar_OMR_Web_Windows.bat
 ```
 
-5. Abrir `http://127.0.0.1:8877` en la misma tableta. En el primer inicio
-   tomar el **código de instalación de la consola** y crear el usuario
-   administrador con contraseña individual de al menos 12 caracteres.
-   El código no se guarda en GitHub ni se comparte por mensajes.
-6. Administrar capturistas desde **Usuarios**. Cada uno recibirá su propia
-   cuenta y una contraseña temporal que debe cambiar al entrar.
+  Abre `http://127.0.0.1:8877`, crea el administrador con el
+  código mostrado en la misma consola y una contraseña de al menos
+  12 caracteres. Luego asigna usuarios y aplicaciones. Para comprobar
+  el entorno sin iniciar el servidor:
 
-El script instala `requirements-web.txt`, incluido el motor OMR. El
-frontend funciona sin conexión a Internet después de la instalación.
+```powershell
+.\Iniciar_OMR_Web_Windows.bat --verificar
+```
+
+4. Por defecto, **las nuevas aplicaciones se guardan sólo en**
+  `datos/omr_web_piloto/`. El directorio puede cambiarse con
+  `OMR_WEB_DATA`; si es relativo se interpreta desde el repositorio.
+  No se comparte nunca una misma SQLite entre Tk y web ejecutándose.
+
+5. **Respaldo seguro:** detener el servidor y Tk antes de copiar;
+  respaldar la carpeta completa del piloto (ambas SQLite, originales,
+  escaneos, entradas, salidas, evidencias y directorios auxiliares).
+  No basta copiar sólo `sesiones.sqlite3` durante operaciones WAL.
+  Las copias contienen datos personales, claves de examen y HMAC;
+  conservarlas en almacenamiento cifrado y fuera de GitHub.
+
+6. **Restaurar sin sobrescribir:** copiar el respaldo completo a otra
+  carpeta, por ejemplo `datos/omr_web_restore/`. Antes de arrancarla,
+  ejecutar el diagnóstico de rutas sobre la copia. El chequeo predeterminado
+  es de solo lectura y la reparación requiere bandera explícita:
+
+```powershell
+$env:OMR_WEB_DATA = "datos/omr_web_restore"
+.\.venv-omr-web\Scripts\python.exe -m omr_web.relocate
+# Si confirma todos los archivos, y con ambos procesos detenidos:
+.\.venv-omr-web\Scripts\python.exe -m omr_web.relocate --apply --confirm-stopped
+.\Iniciar_OMR_Web_Windows.bat
+```
+
+  La reparación preserva folios, notas, usuarios y revisiones; valida
+  la copia de cada PDF original con SHA-256. Si falta evidencia o
+  no corresponde el lote, **no aplica cambios parciales**.
+  Al restaurar a tableta cambia la variable al nuevo directorio en
+  ese equipo. No apuntar la nueva aplicación al respaldo original.
+
+7. En Linux ejecutar `bash Instalar_OMR_Web_Linux.sh` y luego
+  `bash Iniciar_OMR_Web_Linux.sh`. Usar un usuario local dedicado
+  y un volumen protegido; no habilitar un servicio de arranque
+  automático hasta pasar la prueba en laptop y la restauración.
+
+8. **Limitación:** un ZIP con bases de otra prueba no puede convertirse
+  simplemente en una nueva evaluación: su clave HMAC, folios y
+  datos deben conservarse juntos. Inspeccionar la estructura real de
+  la copia antes de restaurar; no importar automáticamente datos.zip.
+
 
 ## 3. Acceso de otros capturistas por Wi-Fi LAN (HTTPS)
 
 No exponer HTTP sin cifrar al Wi-Fi, porque se intercambian contraseñas,
-PDF personales y resultados. Para una prueba temporal en una LAN controlada:
+PDF personales y resultados. Para una prueba temporal **después de aprobar la laptop**, en una LAN controlada:
 
 1. Conocer la IP fija de la tableta en la red, por ejemplo `192.168.1.40`
    (sustituir por la IP REAL que aparezca en el equipo).
 2. Instalar dependencias y generar el certificado **una sola vez**:
 
 ```powershell
-.\.venv\Scripts\python.exe -m omr_web.certificate 192.168.1.40
+.\.venv-omr-web\Scripts\python.exe -m omr_web.certificate 192.168.1.40
 ```
 
 3. En esa ventana de PowerShell, activar servidor LAN cifrado:
 
 ```powershell
 $env:OMR_WEB_BIND = "0.0.0.0"
-$env:OMR_WEB_CERT = "datos/omr/certs/server.pem"
-$env:OMR_WEB_KEY = "datos/omr/certs/server.key"
+$env:OMR_WEB_CERT = "datos/omr_web_piloto/omr/certs/server.pem"
+$env:OMR_WEB_KEY = "datos/omr_web_piloto/omr/certs/server.key"
 .\Iniciar_OMR_Web_Windows.bat
 ```
 
@@ -156,9 +219,9 @@ $env:OMR_WEB_KEY = "datos/omr/certs/server.key"
 Ejecutar desde la raíz:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest -q tests/test_omr_web.py
-.\.venv\Scripts\python.exe -m pytest -q
+.\.venv-omr-web\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv-omr-web\Scripts\python.exe -m pytest -q tests/test_omr_web.py
+.\.venv-omr-web\Scripts\python.exe -m pytest -q
 ```
 
 Las pruebas web verifican:
@@ -177,24 +240,37 @@ Las pruebas web verifican:
 - Importación XLSX y generación de hojas firmadas desde la web.
 - Restricción de evidencias, respuestas y aplicaciones ajenas.
 - Certificado TLS con clave privada local y sin sobrescritura.
+- Diagnóstico de instalación sin CDN, Node, conexión recurrente ni mezcla
+  de datos/entorno Tk.
+- Reubicación sintética entre laptop y tableta: imágenes, original SHA,
+  notas y bitácora iguales; abortar si falta un archivo.
+- Las suites de origen del editor Tk continúan ejecutándose en Windows/Linux.
 
 ## 7. Relevo a Claude para aceptación física
 
 **No publicar** los archivos reales suministrados por el propietario.
 Los ZIP de datos/plantillas y el PDF del escáner deben tratarse como
 material privado; copiar a un entorno local aislado, nunca versionarlos.
-Referencias de la conversación:
+Referencias de la conversación (PRIVADAS, sólo para pruebas físicas):
 - `datos.zip`: 2 sesiones OMR, 4 participantes y 2 hojas ya archivadas.
 - `evaluacion-de-conocimientos_20261109_130901_54fcd8b(1).zip`:
   paquete impreso con cuadernillo/acetato/hojas firmadas.
 - `Prueba evaluacion_09112026131837.PDF`: 3 páginas Xerox de otra prueba.
+
+No se han subido los ZIP ni el PDF real a GitHub ni se han ejecutado
+en CI. Se conservan como originales para la laptop, no como fixtures
+del repositorio. Copiar en el equipo a una carpeta privada fuera de Git
+o `datos/pruebas_fisicas/` (ignorada por Git); registrar su SHA-256.
+Primero se inspecciona la estructura de `datos.zip` y se prueba sobre
+una copia aislada. No perder la clave HMAC al separar escaneos de sesiones.
+Las imágenes de Xerox y lápiz #2 requieren revisión humana.
 
 Claude debe colaborar como **tester**, no rehacer la arquitectura sin un
 reporte de falla. Casos de aceptación:
 
 | Caso | Prueba | Esperado |
 |---|---|---|
-| W01 | Inicio limpio en tableta Windows | Python, server, UI, login y libros |
+| W01 | Inicio en laptop Windows y luego tableta | Python, API, frontend, cuenta y biblioteca |
 | W02 | Abrir desde segundo dispositivo por HTTPS | Sesión por capturista y sin archivos compartidos |
 | W03 | 2 capturistas reclaman mismo folio | Uno obtiene hoja y otro ve ocupada/409 |
 | W04 | Dos correcciones con revisión anterior | La obsoleta se rechaza; no pisa la correcta |
@@ -209,6 +285,9 @@ reporte de falla. Casos de aceptación:
 | W13 | Restaurar backup SQLite y documentos | Hash, folios, anotaciones sin pérdida |
 | W14 | Roles y acceso entre aplicaciones | 401/403; ningún dato ajeno |
 | W15 | Intento iniciar como producción sin licencia | Rechazo explícito, sin activación ficticia |
+| W16 | Apagar Wi-Fi tras instalar en laptop | Inicio, QR y revisión local sin conexión ni pip |
+| W17 | Restauración de copia en otra ruta/equipo | HASH, imágenes, folios, respuestas y bitácoras idénticos |
+| W18 | Capturista intenta abrir acetato y paquetes | 403; no recibe claves ni folios PDF |
 
 Registrar resultado PASA/FALLA, tiempo, versión, navegador, SO,
 número de hojas, perfil de lápiz, página afectada y mensaje exacto.
