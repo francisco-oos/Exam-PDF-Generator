@@ -8,7 +8,7 @@
   const sel = (root, q) => root.querySelector(q);
   const all = (root, q) => Array.from(root.querySelectorAll(q));
   let api, alertBox, root, onCreated, exams=[], draft=null, examId=null,
-      previewURL=null, activeView="Cuadernillo";
+      previewURL=null, activeView="Cuadernillo", previewSeq=0;
 
   const meta = (id, label, value, kind="text", extra="") =>
     '<label>'+h(label)+'<input data-meta="'+h(id)+'" type="'+kind+
@@ -76,7 +76,7 @@
     if(!panel||!draft)return;
     panel.innerHTML='<h2>Diseñar cuestionario · revisión '+h(draft.revision)+'</h2>'+
       '<p class="hint">La edición queda en la biblioteca. Aplicaciones ya impresas mantienen su propia versión y QR.</p>'+
-      '<div class="cols">'+
+      '<div class="designerLayout"><div class="designerControls"><div class="cols">'+
       meta('nombre','Nombre en biblioteca',draft.nombre)+
       meta('titulo','Título del examen',draft.titulo)+
       meta('empresa','Empresa',draft.empresa)+
@@ -105,14 +105,14 @@
       '<div class="actions"><button type="button" class="ghost" id="addQuestion">Añadir pregunta</button>'+
       '<button type="button" class="primary" id="saveDesign">Guardar diseño</button></div>'+
       '<p class="hint">Las imágenes nuevas se incorporan al guardar; después podrán verse en la vista PDF.</p>'+
-      '<hr class="hr"><h3>Vista previa PDF real</h3>'+
+      '</div><aside class="designerPreview"><h3>Vista previa PDF real</h3>'+
       '<div class="actions">'+['Cuadernillo','Respuestas','Acetato'].map(v=>
         '<button type="button" class="secondary" data-preview="'+v+'">'+
         (v==='Respuestas'?'Hoja de respuestas':v)+'</button>').join('')+'</div>'+
       '<label class="check"><input type="checkbox" id="previewPersonal">'+
       'Mostrar un participante y QR de EJEMPLO (no emite folios)</label>'+
       '<p class="hint">Sin lista, las hojas son genéricas sin QR. En ambas modalidades la geometría de burbujas y acetato coincide.</p>'+
-      '<iframe id="pdfPreview" class="pdfPreview" title="Vista de impresión del examen"></iframe>';
+      '<iframe id="pdfPreview" class="pdfPreview" title="Vista de impresión del examen"></iframe></aside></div>';
     all(panel,'[data-remove-q]').forEach(button=>button.onclick=()=>{
       readEditor();
       if(draft.preguntas.length===1){alertBox('Necesitas conservar una pregunta.',true);return;}
@@ -132,6 +132,8 @@
     });
     sel(panel,'#previewPersonal').checked=!!sel(root,'#rosterInput')?.value.trim();
     sel(panel,'#previewPersonal').onchange=()=>preview();
+    all(panel,'[data-meta]').forEach(field=>
+      field.addEventListener('change',()=>preview()));
     const modeGen=sel(root,'#applicationMode'),paperGen=sel(root,'#applicationPaper');
     if(modeGen)modeGen.value=draft.modo;
     if(paperGen)paperGen.value=draft.papel;
@@ -164,6 +166,7 @@
     }))};
     if(sel(root,'#examSelector'))sel(root,'#examSelector').value=id;
     showEditor();
+    await preview();
   }
   function parseRow(line){
     // CSV básico con comillas y escape doble; pegar también desde Excel (TAB).
@@ -263,6 +266,7 @@
   }
   async function preview(){
     if(!examId)return;
+    const seq=++previewSeq;
     const config=cleanPayload();
     config.con_personal=!!sel(root,'#previewPersonal')?.checked;
     const csrf=document.cookie.split('; ').find(x=>x.startsWith('omr_csrf='));
@@ -277,6 +281,7 @@
         throw Error(detail.error||detail.detail||'No se generó vista PDF.');
       }
       const blob=await response.blob();
+      if(seq!==previewSeq || !sel(root,'#pdfPreview'))return;
       const previous=previewURL;
       previewURL=URL.createObjectURL(blob);
       sel(root,'#pdfPreview').src=previewURL;
@@ -285,6 +290,7 @@
   }
   async function start(params){
     ({api,alertBox,root,onCreated}=params);
+    previewSeq++;
     if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;}
     exams=await api('/library');
     root.innerHTML='<div class="panel"><h2>Plantillas aprobadas</h2>'+

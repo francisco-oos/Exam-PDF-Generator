@@ -420,7 +420,7 @@
       '<label>Nombre<input name="nombre" required></label>'+
       '<label>Contraseña temporal de al menos 12 caracteres<input type="password" name="password" minlength="12" required></label>'+
       '<label>Rol<select name="rol"><option value="auxiliar">Auxiliar de calificación</option>'+
-      '<option value="coordinador">Coordinador</option><option value="auditor">Auditor</option></select></label>'+
+      '<option value="admin">Administrador</option></select></label>'+
       '<button class="primary">Crear cuenta</button></form>'+
       '<form id="assignForm" class="panel"><h3>Asignar evaluación</h3>'+
       '<label>Usuario<select name="usuario_id">'+users.map(u=>
