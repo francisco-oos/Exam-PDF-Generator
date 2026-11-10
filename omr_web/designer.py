@@ -23,7 +23,7 @@ from .service import WebError
 
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_BOOK_BYTES = 8 * 1024 * 1024
-IMAGE = re.compile(r"^[^./\\\\:][^/\\\\:]{0,150}\\.(png|jpg|jpeg)$",re.I)
+IMAGE = re.compile(r"^[^./\\\\:][^/\\\\:]{0,150}\.(png|jpg|jpeg)$",re.I)
 INDEXED_IMAGE = re.compile(r"^q([1-9][0-9]{0,2})__(.+)$",re.I)
 
 
@@ -236,7 +236,7 @@ def preview_exam(db,exam_id:str,config:dict,view:str) -> bytes:
 
 
 def resource(db,exam_id:str,name:str):
-    if not re.fullmatch(r"(?:logo|pregunta_[0-9]{3})\\.(?:png|jpg|jpeg)",name):
+    if not re.fullmatch(r"(?:logo|pregunta_[0-9]{3})\.(?:png|jpg|jpeg)",name):
         raise WebError("Recurso inválido.",404)
     with db_connect(db) as conn:
         row=conn.execute("SELECT contenido,sha256 FROM recursos "
