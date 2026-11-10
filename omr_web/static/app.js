@@ -270,7 +270,7 @@
     // los estilos CSS de <option> no se aplican uniformemente.
     const questions=sheet.preguntas.map(item=>
       '<option value="'+item.numero+'"'+(item.numero===state.question?" selected":"")+'>'+
-      (pendingIds.has(item.numero)?"⚠ DUDA · ":"✓ ")+
+      (pendingIds.has(item.numero)?"⚠ DUDA · ":"— ")+
       String(item.numero).padStart(2,"0")+" · "+h(item.pregunta.slice(0,90))+"</option>").join("");
     const pendingNavigation=pending.length?
       '<div class="pendingNavigation"><strong>Reactivos que necesitan revisión ('+
@@ -340,6 +340,9 @@
         state.revision=result.revision;
         alertBox("Corrección guardada con auditoría.");
         state.sheet=await api("/sheets/"+sheet.id);
+        const following=state.sheet.dudas.filter(x=>Number.isInteger(x.pregunta));
+        const next=following.find(x=>x.pregunta>state.question)||following[0];
+        if(next)state.question=next.pregunta;
         await renderSheet();
         await queueTable();
       }catch(err){alertBox(err.message,true);}
