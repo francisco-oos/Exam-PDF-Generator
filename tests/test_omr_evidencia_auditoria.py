@@ -294,6 +294,11 @@ def test_worktree_copia_reutiliza_imagen_archivada_con_ruta_absoluta_anterior(tm
         audit=c.get("/api/sheets/"+sheet+"/evidence?acetato=true")
         assert audit.status_code==200,audit.text[:200]
         assert audit.content.startswith(b"%PDF")
+        # Windows/Python 3.13 puede retrasar el cierre de conexiones SQLite
+        # ya fuera de alcance: liberar referencias cíclicas antes de borrar
+        # la copia original, sin tocar la base reubicada.
+        import gc
+        gc.collect()
         # El otro directorio puede desaparecer sin inutilizar el worktree.
         shutil.rmtree(origin)
         assert c.get("/api/sheets/"+sheet+"/image").status_code==200
