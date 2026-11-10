@@ -355,3 +355,70 @@ dentro de la infraestructura de oficina:
 
 **No fusionar a main ni conectar con Tracking Core** antes de que el
 usuario apruebe resultados de Claude y se pruebe la restauración.
+
+
+## Prueba física Xerox — reparación de visor, exportaciones y segunda vía de calificación
+
+**Evidencia real compartida por el operador:** el PDF de 3 páginas, reemitido
+únicamente como prueba con QR nuevos, fue leído en el piloto: total 3,
+sin identificar 0, aplicaciones 2 (2 páginas + 1 página), validadas 0,
+revisar 3. Este resultado **no** demuestra que las 20 marcas se lean
+correctamente: una hoja registró 12 dudas y hubo que verificar visualmente.
+Los QR originales perdidos no pueden reconstruir su HMAC: el paquete
+Xerox fue prueba y no certificación histórica.
+
+**Errores reproducidos y correcciones:**
+- Las rutas de PDF individual y ZIP invocaban `participant_receipt` y
+  `export_session_bundle` sin importarlos en `omr_web/app.py`; devolvían
+  `NameError` e HTTP 500. Se importan desde
+  `omr_evaluaciones/expedientes.py`. Un PDF individual con notas todavía
+  pendientes se entrega como *provisional*; no se inventan aciertos.
+- En el visor de revisión se eliminó el botón de resaltado de una sola
+  ocasión. Los checks **Resaltar reactivo** y **Superponer acetato** conservan
+  estado mientras se cambia de pregunta/hoja. La capa no altera el PNG ni
+  el PDF original; el recuadro se dibuja fino y separado de las burbujas.
+  El acetato sólo lo pueden activar admin/coordinador: un auxiliar no recibe
+  claves correctas. Si la imagen falla, se muestra la evidencia original.
+- El motor de impresión OMR no recibía el logotipo, aunque el cuadernillo
+  sí. Ahora hoja normal QR, hoja genérica sin QR y previsualización PDF
+  admiten logo dentro de un espacio reservado del encabezado, sin mover
+  marcadores, burbujas ni QR. También se transmite el color de subtítulo.
+  Los colores originales de título, subtítulo, respuestas y acetato
+  siguen siendo independientes. Los recursos nuevos se ven después de
+  **Guardar diseño**; editar la biblioteca jamás cambia una hoja ya emitida.
+- La Bandeja PDF permite reintentar cargar la imagen de una página y
+  conserva el original por SHA-256.
+
+### Dos modalidades de **calificación** (distintas de Normal/Ecológico de impresión)
+
+**1. Automática QR**: PDF de escáner → descifrar identidad mediante QR
+firmado HMAC + token de sesión → rectificar imagen por cuatro marcadores →
+medir marcas → revisión individual de dudas → resultado. El QR y la clave
+de la sesión real deben existir y corresponderse.
+
+**2. Manual con acetato y biblioteca**: subir PDF sin QR validable →
+Bandeja PDF → Ver páginas → **Identificar manualmente y seleccionar examen**
+(sólo páginas pendientes, sin dueño) → seleccionar cuestionario almacenado,
+papel Carta/A4/Oficio, ID, nombre, grupo y motivo → el servidor crea
+**otra sesión de captura manual**, un folio **interno nuevo**,
+`cuestionario_id`, revisión, y copia de evidencia. Las 20 respuestas
+permanecen **SIN REVISAR**, sin ninguna puntuación automática. Revisar
+manualmente cada marca y guardar captura completa con justificación;
+el resultado no se valida hasta que se resuelvan todas. Los auxiliares
+pueden revisar aplicaciones asignadas sin ver acetato/clave; sólo el
+administrador efectúa vinculaciones de identidad.
+
+**Limitación intencional:** las sesiones manuales iniciales son una por
+página vinculada. El folio interno no se presenta como el QR impreso ni
+suplanta el folio perdido. No se permite vincular manualmente una página
+que ya fue procesada por una sesión QR. El usuario debe cotejar la
+identidad de la hoja física y la revisión correcta del cuestionario:
+el sistema no la deduce por OCR ni por título parecido.
+
+**Validación requerida antes de tableta o producción:** pruebas con el
+PDF original y reemitido en copia aislada, imprimir al 100% una hoja
+de control con logo y colores, verificar físicamente la coincidencia
+de la superposición verde/naranja en las 20 preguntas, comprobar que
+cada rol sólo acceda a lo permitido y que las exportaciones provisionales
+no se interpreten como definitivas. No fusionar `main` hasta la
+aceptación física y enlace del validador de licencias.
