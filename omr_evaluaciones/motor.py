@@ -911,11 +911,19 @@ def _decode_qr(gray, *, allow_full=True):
         candidate=(roi if factor==1. else
                    cv2.resize(roi,None,fx=factor,fy=factor,
                               interpolation=cv2.INTER_CUBIC))
-        text,points,_=detector.detectAndDecode(candidate)
+        try:
+            text,points,_=detector.detectAndDecode(candidate)
+        except cv2.error:
+            # OpenCV 4.14 puede detectar cuatro puntos colineales y
+            # lanzar error en QR rotado: seguir con los otros lectores.
+            continue
         if text and points is not None:
             return text
     if allow_full:
-        text,points,_=detector.detectAndDecode(gray)
+        try:
+            text,points,_=detector.detectAndDecode(gray)
+        except cv2.error:
+            text,points=None,None
         if text and points is not None:
             center=points.reshape(-1,2).mean(axis=0)
             if .64*w<center[0]<.99*w and .04*h<center[1]<.36*h:
