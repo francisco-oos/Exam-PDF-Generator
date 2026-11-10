@@ -522,7 +522,10 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     def participant_result(sid:str,person_id:str,user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador"},sid=sid)
         target=engine.outputs/(uuid4().hex+".pdf")
-        participant_receipt(engine.store,sid,person_id,target)
+        try:
+            participant_receipt(engine.store,sid,person_id,target)
+        except ValueError as exc:
+            raise WebError(str(exc),404) from exc
         return FileResponse(target,filename="Resultado_"+sid+".pdf",
                             media_type="application/pdf",
                             headers={"Cache-Control":"no-store"})

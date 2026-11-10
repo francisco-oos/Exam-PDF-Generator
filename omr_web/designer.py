@@ -120,7 +120,10 @@ async def import_exam(db, workbook:UploadFile, *, name:str, title:str,
         sheet=await save_upload(workbook,root/"Preguntas.xlsx",MAX_BOOK_BYTES)
         images_dir=root/"imagenes"
         images_dir.mkdir()
-        seen=recover_embedded_question_images(sheet,images_dir)
+        try:
+            seen=recover_embedded_question_images(sheet,images_dir)
+        except ValueError as exc:
+            raise WebError(str(exc),422) from exc
         for upload in images:
             name_image=filename_of(upload,image=True)
             if name_image.lower() in seen:
@@ -258,6 +261,8 @@ async def update_exam(db,exam_id:str,raw:str,images:list[UploadFile],
             except ValueError as exc:
                 raise WebError(str(exc),422) from exc
         items=data.get("preguntas",[])
+        if not isinstance(items,list) or any(i>len(items) for i in replacements):
+            raise WebError("La imagen nueva no corresponde a una pregunta existente.",422)
         questions=new_questions(items,exam,replacements)
         try:
             saved=save_exam(

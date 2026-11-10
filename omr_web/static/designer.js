@@ -348,7 +348,7 @@
     root.innerHTML='<div class="panel"><h2>Plantillas aprobadas</h2>'+
       '<div class="actions"><a class="ghost" href="/api/templates/preguntas">Descargar Excel de preguntas</a>'+
       '<a class="ghost" href="/api/templates/personal">Descargar Excel de personal</a></div>'+
-      '<p class="hint">El Excel de preguntas tiene Preguntas, Ejemplo y Guía. Las imágenes mencionadas en la columna Imagen se cargan junto al XLSX; no se aceptan rutas de la PC del capturista.</p></div>'+
+      '<p class="hint">Imágenes: puedes escribir en la columna Imagen el nombre exacto del PNG/JPG y adjuntar ese archivo, o pegar una imagen dentro de Excel anclada a la fila del reactivo. Se conserva en biblioteca y aparece en el cuadernillo PDF. Para logotipo usa el campo independiente; no se aceptan rutas de tu computadora.</p></div>'+
       '<form id="importQ" class="panel"><h2>Importar preguntas y crear cuestionario</h2>'+
       '<div class="cols">'+
       '<label>Nombre en biblioteca<input name="name" required placeholder="Evaluación de Cabos"></label>'+
