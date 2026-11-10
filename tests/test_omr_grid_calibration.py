@@ -102,7 +102,7 @@ def test_xerox_filogramas_lapiz_texturizado_y_filas_comprimidas():
     w,h=PAPERS["Carta"]
     gray=np.full((round(h*scale),round(w*scale)),255,dtype=np.uint8)
     rng=np.random.default_rng(20261110)
-    r=round(4.7*scale)
+    r=round(4.7*scale)+2  # El lápiz cubre un poco más que la máscara de medida.
     yy,xx=np.ogrid[-r:r+1,-r:r+1]
     inner=(xx*xx+yy*yy)<r*r
     for i in range(20):
