@@ -424,6 +424,65 @@ def test_diez_capturistas_reciben_diez_hojas_diferentes(tmp_path):
     svc.close()
 
 
+def test_cinco_capturistas_procesan_50_hojas_sin_duplicados(tmp_path):
+    """W10 sintético: operaciones simultáneas, sin sustituir papel físico."""
+    import numpy as np
+
+    service=WebService(tmp_path,start_workers=False)
+    service.setup(service._setup_token,"administrador","Admin","AdminSeguro123456")
+    token,_,_=service.login("administrador","AdminSeguro123456")
+    admin=service.authenticate(token)
+    participants=[{"id":f"P{i:03d}","nombre":f"Persona de prueba {i}"}
+                  for i in range(50)]
+    sid=service.store.create_session(
+        "Prueba de carga", [{"tema":"Material","pregunta":"Reactivo",
+                             "correcta":"A"}],participants,"Carta")
+    image=np.full((250,180,3),255,dtype=np.uint8)
+    for index,participant in enumerate(service.store.session(sid)["personal"]):
+        service.store.register_page(
+            sid,secrets.token_hex(32),index,image,participant["token"],
+            [None],[{"pregunta":1,"razon":"Marca ambigua"}],"revisar")
+    users=[user_for(service,f"captura{i:02d}",f"TemporalRevision{i:02d}!",
+                    "capturista",sid,admin)[0] for i in range(5)]
+
+    def complete(user):
+        processed=[]
+        while True:
+            try:
+                claim=service.claim_next(user,sid)
+            except WebError as exc:
+                if exc.status==404:
+                    break
+                raise
+            sheet_id=claim["hoja_id"]
+            saved=service.save_decisions(
+                user,sheet_id,claim["lease"],claim["revision"],
+                [{"pregunta":1,"decision":"A"}],"Revisión de prueba")
+            assert saved["estado"]=="validada"
+            service.release(user,sheet_id,claim["lease"])
+            processed.append(sheet_id)
+        return processed
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        completed=list(pool.map(complete,users))
+    sheet_ids=[sid for part in completed for sid in part]
+    assert len(sheet_ids)==50
+    assert len(set(sheet_ids))==50
+    assert service.store.results(sid)["validados"]==50
+    with service.store.connect() as db:
+        count=db.execute(
+            "SELECT COUNT(*) FROM web_eventos WHERE accion='CORRECCION'"
+        ).fetchone()[0]
+        assert count==50
+    with pytest.raises(WebError,match="requiere revisión del coordinador"):
+        service.claim(users[0],sheet_ids[0])
+    with pytest.raises(WebError,match="requiere revisión del coordinador"):
+        service.save_decisions(
+            users[0],sheet_ids[0],"lease_vieja",1,
+            [{"pregunta":1,"decision":"B"}],"Cambio no autorizado")
+    service.close()
+
+
 def test_modo_produccion_bloqueado_sin_validador_licencia(tmp_path,monkeypatch):
     monkeypatch.setenv("OMR_WEB_MODE","production")
     with pytest.raises(RuntimeError,match="licencia central"):

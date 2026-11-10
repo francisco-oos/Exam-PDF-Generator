@@ -166,6 +166,10 @@ Las pruebas web verifican:
 - Cambio forzoso de contraseñas temporales.
 - Dos capturistas intentan reclamar la misma hoja al mismo tiempo:
   solo uno puede obtenerla.
+- Cinco capturistas procesan 50 hojas sintéticas concurrentes sin folios
+  repetidos; no sustituye W10 de papel físico, RAM ni tiempos reales.
+- Una hoja validada ya no puede reabrirse ni editarse por capturista;
+  solo el coordinador o administrador puede corregirla con auditoría.
 - Revisión optimista: el segundo guardado desactualizado devuelve HTTP 409.
 - Bitácora y respuestas completas válidas sin exponer clave.
 - Persistencia de cola al reiniciar, reimportación idempotente.

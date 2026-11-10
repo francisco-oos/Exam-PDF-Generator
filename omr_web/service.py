@@ -313,6 +313,8 @@ class WebService:
             self.require(user,sid=page["sesion_id"])
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Hoja sin identidad válida o en conflicto.", 409)
+            if page["estado"]=="validada" and user["rol"]=="capturista":
+                raise WebError("Una hoja validada requiere revisión del coordinador.",409)
             old=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
                            (sheet_id,)).fetchone()
             if old and old["vence"]>now and old["usuario_id"]!=user["id"]:
@@ -392,6 +394,8 @@ class WebService:
                 raise WebError("La hoja cambió. Actualízala antes de guardar.",409)
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Identifica o resuelve antes esta hoja.",409)
+            if page["estado"]=="validada" and user["rol"]=="capturista":
+                raise WebError("Una hoja validada requiere revisión del coordinador.",409)
             answers=json.loads(page["respuestas_json"])
             issues=json.loads(page["dudas_json"])
             taken=set()
