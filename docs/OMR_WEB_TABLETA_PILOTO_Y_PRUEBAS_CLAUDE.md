@@ -766,3 +766,14 @@ Respuestas / Acetato, guardar y generar modo Normal y Ecológico. Revisar
 físicamente tamaño y colocación en Carta/Oficio, especialmente con
 cuadernillos de varias páginas. **No fusionar al flujo estable ni
 producción antes de cerrar CI y esta aceptación física.**
+
+
+## Conciliación, reescaneos y cola multiadministrador · PR #15 (10 noviembre)
+
+**Regla de calificación:** un nuevo PDF o una nueva página con el mismo QR/folio jamás modifica la hoja previamente calificada. Las reimportaciones equivalentes se registran como repetidas; las discrepantes se conservan como `duplicado`, sin emitir nota definitiva hasta resolver el conflicto. Sólo administración/coordinación puede **descartar el reescaneo** con motivo de al menos 10 caracteres, conservando ambos originales y la auditoría; nunca se reemplaza silenciosamente la nota histórica. Si la hoja inicial aún no está validada, hay que revisarla primero.
+
+**Concurrencia:** cada comprobación de folio y alta de hoja se realiza bajo `BEGIN IMMEDIATE` en SQLite para evitar dos hojas efectivas por carrera. Una única cola de PDF por instalación de datos emplea un candado exclusivo del sistema operativo para coordinar incluso múltiples procesos FastAPI; solamente quien lo posee recupera trabajos interrumpidos. El identificador SHA-256 deduplica ingresos simultáneos idénticos que aún están pendientes o procesándose; el estado indica posición real de cola, sin prometer minutos. Las reclamaciones de revisión siguen siendo exclusivas por hoja (lease de cinco minutos, versión optimista, bitácora). **No copiar un archivo SQLite abierto entre equipos.**
+
+**Conciliación y cierre:** `GET /api/applications/{sid}/closure` muestra cada persona de la lista en estado pendiente por `SIN_ESCANEO`, `REVISION_PENDIENTE`, `DUPLICADO_POR_RESOLVER` o `APROBACION_PENDIENTE`. Es un reporte por folio, no una baja ni descuento de participantes. También informa hojas sin identificar, revisiones ocupadas y PDFs esperando procesamiento. `POST /api/applications/{sid}/close` sólo cierra cuando esos contadores están en cero y todas las hojas válidas tienen aprobación 2/2; tras cerrar se bloquea la incorporación de notas, incluso desde el motor. Los ZIP descargados antes del cierre deben considerarse **provisionales** y no comprobantes definitivos.
+
+**Pruebas requeridas:** subir un mismo folio en PDFs con respuestas iguales y distintas; comprobar la invariabilidad de la nota original y la resolución documentada, importar en paralelo con administradores diferentes, reiniciar un trabajador con PDFs en cola, reclamar/guardar desde varias tabletas, observar listado íntegro de ausencias y verificar bloqueo del cierre hasta aprobar 2/2. Ejecutar sobre datos ficticios y luego sobre copia de Xerox, nunca sobre producción. No fusionar la PR hasta las pruebas físicas y autorización expresa.

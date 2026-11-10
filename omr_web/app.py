@@ -475,6 +475,10 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         engine.approve(user,sheet_id)
         return {"ok":True}
 
+    @web.post("/api/sheets/{sheet_id}/resolve-duplicate")
+    def resolve_duplicate(sheet_id:str,data:dict,user=Depends(write_user)):
+        return engine.resolve_duplicate(user,sheet_id,data.get("motivo",""))
+
     @web.post("/api/scans")
     async def upload(file: UploadFile=File(...),user=Depends(write_user)):
         engine.require(user,roles={"admin","coordinador"})

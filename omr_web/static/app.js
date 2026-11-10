@@ -211,16 +211,32 @@
     area.innerHTML='<p class="muted">Hojas que requieren intervención: <b>'+list.length+'</b></p>'+
       '<div class="tableWrap"><table><thead><tr><th>Folio</th><th>Participante</th><th>Estado</th><th>Dudas</th><th>Acción</th></tr></thead><tbody>'+
       (list.length?list.map(x=>'<tr><td><code>'+h(x.folio||"Sin QR")+'</code></td>'+
-      '<td>'+h(x.nombre)+'</td><td><span class="tag '+(x.ocupada_por_otro?"warn":"")+'">'+
-      h(x.ocupada_por_otro?"Ocupada":"Disponible")+'</span></td><td>'+x.dudas+
-      '</td><td><button class="secondary" data-sheet="'+h(x.id)+'"'+
-      (x.ocupada_por_otro||x.estado==="duplicado"?' disabled':'')+
-      '>Revisar</button></td></tr>').join(""):
+      '<td>'+h(x.nombre)+'</td><td><span class="tag '+(x.ocupada_por_otro||x.estado==="duplicado"?"warn":"")+'">'+
+      h(x.estado==="duplicado"?"Reescaneo duplicado":x.ocupada_por_otro?"Ocupada":"Disponible")+'</span></td><td>'+x.dudas+
+      '</td><td>'+(x.estado==="duplicado"?
+        (canExport()?'<button class="secondary" data-discard="'+h(x.id)+'">Resolver duplicado</button>':
+        '<span class="muted">Requiere coordinador</span>'):
+        '<button class="secondary" data-sheet="'+h(x.id)+'"'+
+        (x.ocupada_por_otro?' disabled':'')+
+        '>Revisar</button>')+'</td></tr>').join(""):
       '<tr><td colspan="5">No hay hojas pendientes de corrección.</td></tr>')+
       '</tbody></table></div>';
     onButton(area,"[data-sheet]",async e=>{
       try{await openSheet(e.currentTarget.dataset.sheet);}
       catch(err){alertBox(err.message,true);await queueTable();}
+    });
+    onButton(area,"[data-discard]",async e=>{
+      const id=e.currentTarget.dataset.discard;
+      const reason=prompt("La nota ORIGINAL no cambiará. Explica por qué el nuevo escaneo debe archivarse como duplicado descartado (mínimo 10 caracteres):");
+      if(reason===null)return;
+      if(reason.trim().length<10){alertBox("Justificación demasiado corta.",true);return;}
+      if(!confirm("¿Descartar SOLO el nuevo escaneo conflictivo? El archivo original y la auditoría se conservan."))return;
+      try{
+        await api("/sheets/"+id+"/resolve-duplicate",{
+          method:"POST",body:{motivo:reason.trim()}});
+        alertBox("Reescaneo descartado con auditoría. Nota original conservada.");
+        await queueTable();
+      }catch(err){alertBox(err.message,true);}
     });
   }
   async function openSheet(id){
@@ -425,7 +441,8 @@
     try{
       const job=await api("/jobs/"+jobId);
       el.innerHTML='<p>Trabajo <code>'+h(job.id)+'</code> · <b>'+h(job.estado)+
-        '</b></p><pre>'+h(JSON.stringify(job.resultado,null,2))+'</pre>'+
+        '</b>'+(job.posicion_cola?' · lugar en cola: '+h(job.posicion_cola):'')+
+        '</p><pre>'+h(JSON.stringify(job.resultado,null,2))+'</pre>'+
         (job.error?'<p class="tag bad">'+h(job.error)+'</p>':'');
       if(["pendiente","procesando"].includes(job.estado) && state.view==="escaneo")
         setTimeout(()=>pollJob(jobId),1600);
@@ -585,6 +602,7 @@
       await results();
     };
     const report=await api("/applications/"+state.sid+"/results");
+    const closure=canExport()?await api("/applications/"+state.sid+"/closure"):null;
     const eligible=report.participantes.filter(x=>x.hoja_id);
     if(!eligible.some(x=>x.id===state.selectedResult))
       state.selectedResult=eligible[0]?.id||null;
@@ -594,6 +612,25 @@
       ["Promedio",report.promedio===null?"—":report.promedio+"%"]
     ].map(x=>'<div class="panel"><div class="metric">'+h(x[1])+
       '</div><div class="muted">'+h(x[0])+'</div></div>').join("")+'</div>'+
+      (closure?'<div class="panel"><h3>Conciliación previa a entregar resultados</h3>'+
+        '<p class="hint">Estado: <strong>'+h(closure.estado)+
+        '</strong>. Lista: '+h(closure.total_lista)+' personas. '+
+        (closure.listo?'Todas las personas están calificadas y aprobadas.':
+        'Faltan '+h(closure.cantidad_pendientes)+' personas, '+
+        h(closure.sin_identificar)+' hojas sin identificar, '+
+        h(closure.revisiones_activas)+' hojas ocupadas y '+
+        h(closure.trabajos_en_cola)+' trabajos en cola.')+'</p>'+
+        (closure.faltantes.length?'<div class="tableWrap"><table><thead>'+
+        '<tr><th>Folio</th><th>Participante</th><th>Pendiente</th></tr>'+
+        '</thead><tbody>'+closure.faltantes.map(p=>
+          '<tr><td><code>'+h(p.folio)+'</code></td><td>'+h(p.nombre)+
+          '</td><td><span class="tag warn">'+h(p.motivo.replaceAll("_"," "))+
+          '</span></td></tr>').join("")+'</tbody></table></div>':'')+
+        (closure.estado==="abierta"?
+          '<div class="actions"><button class="primary" id="closeApplication" '+
+          (!closure.listo?'disabled':'')+'>Cerrar evaluación conciliada</button></div>':
+          '<p class="hint">Evaluación cerrada: los escaneos nuevos no modificarán las notas.</p>')+
+        '</div>':'')+
       (canExport()?'<div class="actions"><a class="secondary" href="/api/applications/'+
        encodeURIComponent(state.sid)+'/export">ZIP de resultados</a>'+
        '<a class="ghost" href="/api/applications/'+encodeURIComponent(state.sid)+
@@ -610,9 +647,12 @@
           (p.areas_mejora?.length?p.areas_mejora.slice(0,3).map(t=>
             t.tema+" ("+t.aciertos+"/"+t.preguntas+")").join(" · "):
           "Sin temas pendientes en esta prueba"):"Pendiente de validación")+'</td>'+
-        '<td>'+h(p.estado)+'</td><td><div class="actions">'+
+        '<td>'+h(p.estado==="ausente"?"Pendiente · sin escaneo":p.estado)+'</td><td><div class="actions">'+
         (p.hoja_id?'<button type="button" class="secondary" data-result="'+
           h(p.id)+'">Ver evidencia</button>':'<span class="hint">Sin escaneo</span>')+
+        (canExport()&&report.estado_cierre==="abierta"&&p.estado==="validado"&&!p.aprobacion&&p.hoja_id?
+          '<button type="button" class="secondary" data-approve="'+h(p.hoja_id)+
+          '">Aprobar 2/2</button>':'')+
         (canExport()?'<a class="listLink" href="/api/applications/'+
           encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
           '/result">Reporte individual</a>':'')+
@@ -622,6 +662,22 @@
       state.selectedResult=e.currentTarget.dataset.result;
       try{await showResultDetail(report);}
       catch(err){alertBox(err.message,true);}
+    });
+    onButton(byId("resultsBody"),"[data-approve]",async e=>{
+      if(!confirm("¿Confirmas la revisión física y apruebas esta calificación como segundo control?"))return;
+      try{
+        await api("/sheets/"+e.currentTarget.dataset.approve+"/approve",{method:"POST"});
+        alertBox("Calificación aprobada; se actualizó la conciliación.");
+        await results();
+      }catch(err){alertBox(err.message,true);}
+    });
+    onButton(byId("resultsBody"),"#closeApplication",async ()=>{
+      if(!confirm("¿Cerrar la evaluación? No podrá recibir nuevos escaneos ni correcciones en este piloto."))return;
+      try{
+        await api("/applications/"+state.sid+"/close",{method:"POST"});
+        alertBox("Evaluación cerrada, lista completa y aprobada.");
+        await refreshApps();await results();
+      }catch(err){alertBox(err.message,true);await results();}
     });
     if(state.selectedResult)await showResultDetail(report);
   }

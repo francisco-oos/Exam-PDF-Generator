@@ -671,6 +671,43 @@ class WebService:
                     "aprobacion":approvals.get(by_person.get(p["id"])),
                 } for p in report["participantes"]]}
 
+    def resolve_duplicate(self,user,sheet_id,reason):
+        """Descarta exclusivamente el reescaneo conflictivo, nunca la nota anterior.
+
+        Requiere una hoja primaria validada y un motivo explícito. La evidencia
+        y el PDF original del duplicado siguen archivados, con auditoría.
+        """
+        self.require(user,roles={"admin","coordinador"})
+        reason=str(reason or "").strip()
+        if len(reason)<10:
+            raise WebError("Indica el motivo de descarte (mínimo 10 caracteres).",422)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            page=db.execute("SELECT * FROM hojas WHERE id=?",(sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
+            if page["estado"]!="duplicado" or not page["token"]:
+                raise WebError("Sólo se puede descartar un reescaneo duplicado.",409)
+            primary=db.execute("""SELECT id FROM hojas
+                WHERE sesion_id=? AND token=? AND id<>?
+                  AND estado='validada' ORDER BY creada,id LIMIT 1""",
+                (page["sesion_id"],page["token"],sheet_id)).fetchone()
+            if not primary:
+                raise WebError("Primero se debe validar la hoja original del folio.",409)
+            db.execute("UPDATE hojas SET estado='descartada' WHERE id=?",(sheet_id,))
+            db.execute("""INSERT INTO web_auditoria_revision(
+                hoja_id,tipo,pregunta,anterior,nueva,aciertos_antes,
+                aciertos_despues,motivo,usuario_id,fecha)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (sheet_id,"DESCARTAR_REESCANEO",None,"duplicado","descartada",
+                 None,None,reason[:600],user["id"],utcnow()))
+            self._event(db,user["id"],sheet_id,"DESCARTAR_REESCANEO",
+                        "Original protegido: "+primary["id"]+"; "+reason)
+        return {"hoja_id":sheet_id,"estado":"descartada",
+                "original_conservado":primary["id"]}
+
     def closure_summary(self,user,sid):
         """Pre-cierre: ningún ausente se disfraza de calificado."""
         self.require(user,roles={"admin","coordinador"},sid=sid)
