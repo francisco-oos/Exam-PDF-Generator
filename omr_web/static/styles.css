@@ -99,3 +99,8 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
 .advancedDownload{margin-top:12px;padding:12px;border:1px solid #e0e9ed;border-radius:10px}
 .advancedDownload summary{cursor:pointer;font-weight:650;color:#446578}
 .advancedDownload .ghost{margin-top:8px}
+
+/* Segunda firma sólo después de abrir evidencia y reconocer su revisión. */
+.auditApprove{margin-top:14px;padding:14px;background:#f3f9f8;border:1px solid #c8e1df;border-radius:11px}
+.auditApprove h4{margin:0 0 8px}
+.auditApprove .check{margin:12px 0}

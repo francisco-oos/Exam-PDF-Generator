@@ -230,3 +230,14 @@ def test_cola_compartida_administradores_vs_coordinador_y_auxiliar(sample):
             assert jobs.status_code==200 and len(jobs.json())==2
     finally:
         app.state.engine.close()
+
+
+def test_la_segunda_firma_se_presenta_solo_tras_cotejar_la_ficha():
+    from pathlib import Path
+    script=(Path(__file__).resolve().parents[1]/
+            "omr_web"/"static"/"app.js").read_text(encoding="utf-8")
+    # No ofrecer firma directa desde tabla: entrar a ficha con imagen primero.
+    assert 'data-approve="' not in script
+    assert 'id="secondReviewConfirm"' in script
+    assert 'id="approveFromEvidence"' in script
+    assert 'confirmation.checked' in script

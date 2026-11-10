@@ -886,3 +886,13 @@ rectificadas de 1700 × 2200 píxeles (Carta a 200 dpi). Una imagen de
 240 × 190 px no tiene las cuatro marcas ni la geometría homologada:
 el sistema debe rechazar el acetato alineado. Eso NO es un fallo de
 Xerox ni prueba de lectura de lápiz real.
+
+
+**Segundo control sin firmas a ciegas:** se eliminó el botón
+Aprobar 2/2 de la tabla general. El segundo operador debe abrir la ficha
+individual, confrontar escaneo/acetato/folio/nota e historial, confirmar
+explícitamente el cotejo y entonces puede aprobar. El botón permanece
+deshabilitado hasta la confirmación, y el servidor exige rol autorizado,
+evaluación abierta, hoja validada, ausencia de otro lease y (si hubo
+corrección manual) persona distinta del último corrector. La confirmación
+visual no sustituye la comprobación en papel físico.

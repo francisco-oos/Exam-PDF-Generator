@@ -766,11 +766,8 @@
         (p.hoja_id?'<button type="button" class="secondary" data-result="'+
           h(p.id)+'">'+(canExport()?'Ver resultado y descargar':'Ver evidencia')+'</button>':
           '<span class="hint">Sin escaneo</span>')+
-        (canExport()&&report.estado_cierre==="abierta"&&p.estado==="validado"&&!p.aprobacion&&p.hoja_id?
-          (p.requiere_otro_aprobador?
-            '<span class="tag warn">Otra cuenta debe aprobar 2/2</span>':
-            '<button type="button" class="secondary" data-approve="'+h(p.hoja_id)+
-            '">Aprobar 2/2</button>'):'')+
+        (canExport()&&report.estado_cierre==="abierta"&&p.estado==="validado"&&!p.aprobacion&&p.hoja_id&&p.requiere_otro_aprobador?
+          '<span class="tag warn">Otra cuenta debe aprobar 2/2</span>':'')+
         ''+
         '</div></td></tr>').join("")+'</tbody></table></div>'+
       '<section id="resultDetail"></section>';
@@ -778,14 +775,6 @@
       state.selectedResult=e.currentTarget.dataset.result;
       try{await showResultDetail(report);}
       catch(err){alertBox(err.message,true);}
-    });
-    onButton(byId("resultsBody"),"[data-approve]",async e=>{
-      if(!confirm("¿Confirmas la revisión física y apruebas esta calificación como segundo control?"))return;
-      try{
-        await api("/sheets/"+e.currentTarget.dataset.approve+"/approve",{method:"POST"});
-        alertBox("Calificación aprobada; se actualizó la conciliación.");
-        await results();
-      }catch(err){alertBox(err.message,true);}
     });
     onButton(byId("resultsBody"),"#closeApplication",async ()=>{
       if(!confirm("¿Cerrar la evaluación? No podrá recibir nuevos escaneos ni correcciones en este piloto."))return;
@@ -847,6 +836,14 @@
         '<p class="hint">La hoja sola ya está incluida en el PDF interno auditado. Úsala únicamente para investigar incidencias sin compartir todo el informe.</p>'+
         '<a class="ghost" id="auditPdfDownload" href="'+doc+
         '/evidence?acetato='+state.resultAcetate+'">PDF de evidencia aislada</a></details>':'')+
+      (canExport()&&valid&&report.estado_cierre==="abierta"&&!history.aprobacion?
+        (p.requiere_otro_aprobador?
+          '<div class="auditApprove"><h4>Segunda firma pendiente</h4>'+
+          '<p class="hint">Tú hiciste la última corrección. Otra cuenta administrativa o de coordinación deberá cotejar esta evidencia y aprobarla.</p></div>':
+          '<div class="auditApprove"><h4>Segundo control · aprobación 2/2</h4>'+
+          '<p class="hint">Verifica el folio, las marcas de la hoja, el resultado y el historial antes de aprobar. El acetato no sustituye el cotejo físico.</p>'+
+          '<label class="check"><input id="secondReviewConfirm" type="checkbox"> Confirmo que revisé esta evidencia y la calificación.</label>'+
+          '<button class="primary" id="approveFromEvidence" disabled>Aprobar después del cotejo</button></div>'):'')+
       (canExport()?'<div class="auditReopen">'+
         '<h4>Re-corregir una hoja validada</h4>'+
         '<p class="hint">Sólo administrador/coordinador. Reabrir suspende temporalmente la nota, registra la nota anterior y exige motivo. Después se corrige desde Revisión de hojas.</p>'+
@@ -892,6 +889,21 @@
       if(byId("auditPdfDownload"))byId("auditPdfDownload").href=
         doc+"/evidence?acetato="+state.resultAcetate;
     };
+    const confirmation=byId("secondReviewConfirm");
+    if(confirmation){
+      const approveButton=byId("approveFromEvidence");
+      confirmation.onchange=()=>{approveButton.disabled=!confirmation.checked;};
+      approveButton.onclick=async()=>{
+        if(!confirmation.checked)return;
+        if(!confirm("¿Confirmas que cotejaste la hoja física y su historial para aprobar 2/2?"))return;
+        approveButton.disabled=true;
+        try{
+          await api("/sheets/"+encodeURIComponent(sheetId)+"/approve",{method:"POST"});
+          alertBox("Segunda revisión aprobada y registrada.");
+          await results();
+        }catch(err){alertBox(err.message,true);await results();}
+      };
+    }
     if(byId("reopenSheet"))byId("reopenSheet").onclick=async()=>{
       if(!valid)return;
       const q=Number(byId("reopenQuestion").value);
