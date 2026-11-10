@@ -436,10 +436,17 @@ class WebService:
                 raise WebError("La hoja cambió. Actualízala antes de guardar.",409)
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Identifica o resuelve antes esta hoja.",409)
-            if page["estado"]=="validada" and user["rol"]=="capturista":
-                raise WebError("Una hoja validada requiere revisión del coordinador.",409)
+            if page["estado"]=="validada":
+                raise WebError(
+                    "La hoja ya fue validada: abre una re-corrección "
+                    "autorizada desde Resultados.",409)
             answers=json.loads(page["respuestas_json"])
             issues=json.loads(page["dudas_json"])
+            original=list(answers)
+            questions=json.loads(db.execute(
+                "SELECT preguntas_json FROM sesiones WHERE id=?",
+                (page["sesion_id"],)).fetchone()["preguntas_json"])
+            before_score=sum(a==q["correcta"] for a,q in zip(original,questions))
             taken=set()
             for change in changes:
                 q=change.get("pregunta")
@@ -455,6 +462,17 @@ class WebService:
                     (hoja_id,pregunta,decision,motivo,revisor,fecha)
                     VALUES(?,?,?,?,?,?)""",
                     (sheet_id,q,decision,reason[:600],user["nombre"],utcnow()))
+            after_score=sum(a==q["correcta"] for a,q in zip(answers,questions))
+            for change in changes:
+                index=change["pregunta"]-1
+                db.execute("""INSERT INTO web_auditoria_revision(
+                    hoja_id,tipo,pregunta,anterior,nueva,aciertos_antes,
+                    aciertos_despues,motivo,usuario_id,fecha)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (sheet_id,"CORRECCION",index+1,
+                     original[index] or "BLANCO",change["decision"],
+                     before_score,after_score,reason.strip()[:600],
+                     user["id"],utcnow()))
             status="revisar" if issues else "validada"
             db.execute("""UPDATE hojas SET respuestas_json=?,
                 dudas_json=?,estado=? WHERE id=?""",
