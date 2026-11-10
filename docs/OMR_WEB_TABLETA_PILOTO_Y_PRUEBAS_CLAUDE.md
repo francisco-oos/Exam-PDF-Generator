@@ -543,3 +543,103 @@ y sin revisiones humanas: conserva registro histórico y los PDF.
 Si la comparación indica que no se aplicó mejora, comprobar si existen decisiones humanas, lectura ya actualizada o duda legítima. No borrar la base ni rehacer la sesión para forzar una nota.
 
 **Aceptación física propuesta:** consultar las mismas tres hojas después de reanalizar y comparar **12→0, 10→0, 1→1** sobre la copia técnica, sin convertir la pregunta 9 de la tercera hoja en acierto. Repetir en Xerox y distintas intensidades de lápiz, marcas dobles, borrados, inclinaciones y escaneos de otra escala; si hay discordancias, rechazar automatización y mantener revisión humana.
+
+
+## Evolución experimental: Resultados con evidencia auditada y re-corrección v1
+
+**Rama exclusiva:** feature/omr-auditoria-evidencias-recorreccion-v1,
+creada desde el commit 08a72ed8165bf1f5e89011fbbc6a9172a474fb7b
+de feature/omr-tablet-lan-multiusuario-v1. **No modificar la rama
+estable de prueba ni main**; PR de esta evolución contra esa rama.
+
+### Resultado, evidencia y acetato en una misma vista
+
+En Resultados, seleccionar **Ver evidencia** de un participante con
+una única hoja efectiva abre un diseño de dos columnas: resumen de
+aciertos, nota, áreas de mejora y acciones a la izquierda; escaneo
+archivado y el acetato sobrepuesto a la derecha. Una casilla cambia
+la capa; la lectura es exclusiva del servidor y nunca persiste una
+imagen sobre la evidencia original. Los responsables se consultan
+en el historial por hoja. Un participante ausente o con dos hojas en
+conflicto no recibe una evidencia atribuida automáticamente.
+
+**PDF individual + evidencia** conserva la primera página de
+calificación y agrega una página de evidencia auditada horizontal:
+escaneo entero, acetato verde, ID, nombre, folio, estado,
+aciertos/total y porcentaje **solo si la hoja está validada**,
+último responsable y fecha UTC, eventos recientes y SHA del PDF
+original. **PDF de evidencia auditada** ofrece esa sola página.
+El texto visible "PILOTO / NO ES DOCUMENTO OFICIAL" pertenece a la
+COPIA generada; no modifica ni tapa el texto impreso en la hoja.
+El escaneo y el PDF original siguen disponibles sin edición.
+El expediente interno ZIP incluye una evidencia auditada por
+participante con una única hoja validada. Los PDFs que mezclan
+aplicaciones se mantienen segregados.
+
+Un resultado automático validado sin corrección humana se distingue
+por el historial del motor ("Motor OMR"). Una re-corrección sin
+terminar suspende la calificación definitiva, incluso si antes
+había obtenido aciertos. No presentar el resultado antiguo como
+vigente mientras la aclaración está abierta.
+
+### Re-corrección controlada después de validar
+
+1. Solo Administrador o rol heredado Coordinador, con sesión propia,
+   puede usar **Re-corregir**. Los Auxiliares pueden corregir hojas
+   pendientes asignadas, nunca reabrir una ya validada ni ver el
+   acetato con claves correctas.
+2. Se elige un reactivo y un motivo obligatorio (10 o más caracteres).
+   El servidor valida estado VALIDADA, identidad/folio, asignación
+   y conflicto con la reserva de otro operador.
+3. La reapertura inserta entradas INMUTABLES en revisiones,
+   web_auditoria_revision y web_eventos, anotando responsable,
+   respuesta previa, aciertos previos, motivo y fecha UTC. Revoca
+   cualquier aprobación anterior y las reservas viejas; marca
+   únicamente ese reactivo como DUDA.
+4. En Revisión de hojas se reclama una NUEVA reserva con versión
+   optimista. Guardar decisión exige justificación y escribe
+   respuesta anterior, respuesta nueva, aciertos antes/después,
+   usuario y fecha UTC en la misma transacción que actualiza la
+   hoja. La versión previa no se elimina.
+5. El resultado se recalcula con la clave de la sesión ORIGINAL,
+   nunca la biblioteca modificada posteriormente. Cualquier
+   re-reapertura vuelve a requerir motivo y nueva evidencia.
+6. La API no permite guardar sobre una hoja validada sin la
+   reapertura expresa; conserva las reglas antiguas de error para
+   los auxiliares. Ninguna llamada altera PDF o PNG originales.
+
+**Tabla nueva aditiva:** web_auditoria_revision, con claves foráneas
+a hojas y usuarios. No migra destructivamente la base Xerox ni cambia
+las estructuras del motor OMR. Historial previo del motor sigue
+disponible bajo registros_historicos.
+
+### Rutas y permisos
+
+- GET /api/applications/{sid}/results: resumen enriquecido, sin clave
+  ni HMAC; solo admin/coordinador/auditor asignado.
+- GET /api/sheets/{id}/history: historial de un único folio;
+  admin/coordinador/auditor autorizado, sin claves correctas.
+- GET /api/sheets/{id}/evidence?acetato=true: PDF derivado;
+  acetato exclusivamente admin/coordinador. Sin acetato: vista
+  read-only autorizada para auditor.
+- POST /api/sheets/{id}/reopen: admin/coordinador con CSRF,
+  pregunta y motivo; sin reserva concurrente ajena.
+- PUT /api/sheets/{id}/decisions: mantiene reserva exclusiva,
+  revisión optimista y motivo obligatorio, añade antes/después.
+
+### Pruebas y aceptación
+
+tests/test_omr_evidencia_auditoria.py usa personas ficticias y
+escaneo sintético en un directorio temporal: pendiente → validada
+(2/2) → reabierta (sin nota definitiva) → re-corrección (1/2).
+Valida eventos históricos, antes/después, permisos, PDF individual
+con evidencia anexa, SHA del PNG original intacto y persistencia
+al reiniciar el servicio. Las suites originales siguen ejecutándose.
+
+La prueba física se hará **sólo en copia Xerox aislada y respaldada**.
+Confirmar la geometría de los 20 círculos y el contraste del acetato,
+abrir PDF individual, cotejar nota con el registro, reabrir un reactivo
+ficticio, cambiar decisión y verificar que el registro indique quién
+y por qué. Confirmar que el original no cambió y que un Auxiliar
+no puede reabrir ni descargar la clave. No fusionar ni integrar
+licencia central sin aprobación física y cierre de CI.
