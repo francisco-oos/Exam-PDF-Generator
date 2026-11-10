@@ -196,3 +196,34 @@ def test_archivos_exportados_se_nombran_por_folio_y_no_acumulan_temporales(sampl
             assert not list(svc.outputs.glob("*.pdf"))
     finally:
         app.state.engine.close()
+
+
+def test_cola_compartida_administradores_vs_coordinador_y_auxiliar(sample):
+    from omr_web.app import create_app
+    from fastapi.testclient import TestClient
+    svc,admin,sid,people=sample
+    coordinator=second_user(svc,admin,"coordinador",role="coordinador",sid=sid)
+    auxiliary=second_user(svc,admin,"auxiliarcola",sid=sid)
+    own=svc.incoming/"ingreso-admin.pdf"
+    own.write_bytes(b"%PDF-1.4\nadmin\n%%EOF")
+    other=svc.incoming/"ingreso-coordinador.pdf"
+    other.write_bytes(b"%PDF-1.4\ncoord\n%%EOF")
+    job_admin=svc.add_job(admin,own)
+    job_coord=svc.add_job(coordinator,other)
+    admin_list=svc.list_jobs(admin)
+    assert {r["id"] for r in admin_list}=={job_admin,job_coord}
+    assert all("ruta" not in row and "archivo_sha" not in row for row in admin_list)
+    assert {r["id"] for r in svc.list_jobs(coordinator)}=={job_coord}
+    with pytest.raises(WebError) as denied:
+        svc.list_jobs(auxiliary)
+    assert denied.value.status==403
+    app=create_app(svc.root,start_workers=False)
+    try:
+        with TestClient(app) as client:
+            response=client.post("/api/login",json={
+                "usuario":"adminprueba","password":"ClaveDefinitivaAdmin2026!"})
+            assert response.status_code==200
+            jobs=client.get("/api/jobs")
+            assert jobs.status_code==200 and len(jobs.json())==2
+    finally:
+        app.state.engine.close()

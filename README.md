@@ -18,7 +18,7 @@ escaneos/respaldos. En PowerShell:
 git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 git fetch origin
-git switch --track origin/feature/omr-tablet-lan-multiusuario-v1
+git switch --track origin/feature/omr-auditoria-evidencias-recorreccion-v1
 .\Instalar_OMR_Web_Windows.bat
 .\Iniciar_OMR_Web_Windows.bat
 ```
@@ -31,7 +31,7 @@ no usa por defecto la base `datos/omr/` del escritorio.
 
 Consulta la [guía única de instalación, diagnóstico, respaldo, reubicación,
 pruebas y relevo a Claude](docs/OMR_WEB_TABLETA_PILOTO_Y_PRUEBAS_CLAUDE.md).
-Esta evolución permanece en el [PR #14](https://github.com/francisco-oos/Exam-PDF-Generator/pull/14),
+Esta evolución experimental se revisa en el [PR #15](https://github.com/francisco-oos/Exam-PDF-Generator/pull/15),
 sin licencia central ni instalación física aprobada.
 
 ### Diseñador web completo y perfiles (piloto)

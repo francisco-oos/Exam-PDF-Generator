@@ -1053,6 +1053,23 @@ class WebService:
                 "resultado":json.loads(row["resultado"]),
                 "posicion_cola":position,"creado":row["creado"]}
 
+    def list_jobs(self,user):
+        """Cola persistente, sin exponer rutas locales ni trabajos ajenos."""
+        self.require(user,roles={"admin","coordinador"})
+        with self.store.connect() as db:
+            if user["rol"]=="admin":
+                rows=db.execute("""SELECT j.id,u.nombre AS operador
+                    FROM web_trabajos j JOIN web_usuarios u ON u.id=j.operador_id
+                    ORDER BY j.creado DESC,j.id DESC LIMIT 30""").fetchall()
+            else:
+                rows=db.execute("""SELECT j.id,u.nombre AS operador
+                    FROM web_trabajos j JOIN web_usuarios u ON u.id=j.operador_id
+                    WHERE j.operador_id=?
+                    ORDER BY j.creado DESC,j.id DESC LIMIT 30""",
+                    (user["id"],)).fetchall()
+        return [self.job(user,row["id"]) | {"operador":row["operador"]}
+                for row in rows]
+
     def wake(self):
         if self._executor and self._wake_lock.acquire(blocking=False):
             self._executor.submit(self._process_pending)

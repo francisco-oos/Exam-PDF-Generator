@@ -507,6 +507,10 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         finally:
             await file.close()
 
+    @web.get("/api/jobs")
+    def jobs(user=Depends(user_of)):
+        return engine.list_jobs(user)
+
     @web.get("/api/jobs/{job_id}")
     def job(job_id:str,user=Depends(user_of)):
         return engine.job(user,job_id)

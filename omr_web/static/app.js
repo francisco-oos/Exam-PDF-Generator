@@ -6,7 +6,7 @@
   const state = {user:null, apps:[], sid:null, view:"inicio", sheet:null,
                  lease:null, revision:0, question:1,
                  highlight:true, acetate:false, resultAcetate:true,
-                 selectedResult:null, jobs:[], timer:null, flow:null};
+                 selectedResult:null, jobs:[], timer:null, flow:null, jobsWatch:0};
   const h = value => String(value ?? "").replace(/[&<>"']/g,
     c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const cookie = name => {
@@ -504,13 +504,46 @@
       '<label>PDF multipágina de Xerox o cualquier escáner<input type="file" id="scanPdf" accept=".pdf,application/pdf" required></label>'+
       '<button class="primary">Archivar y reconocer</button>'+
       '<p class="hint">El motor trabaja en segundo plano. Puedes salir de esta pantalla y consultar el ID de trabajo.</p></form>'+
-      '<div class="panel"><h3>Estado del procesamiento</h3><div id="scanProgress" class="muted">Sin trabajos activos.</div></div>';
+      '<div class="panel"><h3>Estado del último envío</h3><div id="scanProgress" class="muted">Sin trabajos activos.</div></div>'+
+      '<div class="panel"><h3>Cola de escaneos</h3><p class="hint">Compartida entre administradores. Solo se muestra el estado y el operador, nunca la ruta local del PDF. Se actualiza mientras esta pantalla está abierta.</p><div id="scanJobs" class="muted">Consultando trabajos...</div></div>';
+    const watcher=++state.jobsWatch;
+    async function refreshJobs(){
+      if(watcher!==state.jobsWatch||state.view!=="escaneo")return;
+      const target=byId("scanJobs");if(!target)return;
+      try{
+        const jobs=await api("/jobs");
+        target.innerHTML=jobs.length?
+          '<div class="tableWrap"><table><thead><tr><th>Trabajo</th><th>Operador</th><th>Estado</th><th>Cola</th><th>Acción</th></tr></thead><tbody>'+
+          jobs.map(j=>'<tr><td><code>'+h(j.id.slice(0,12))+'</code></td>'+
+            '<td>'+h(j.operador)+'</td><td>'+h(j.estado)+
+            (j.error?'<p class="tag bad">'+h(j.error)+'</p>':'')+'</td>'+
+            '<td>'+h(j.posicion_cola||"—")+'</td><td>'+
+            (j.estado==="error"?'<button class="secondary" data-retry="'+h(j.id)+'">Reintentar</button>':
+             '<button class="ghost" data-job="'+h(j.id)+'">Ver detalle</button>')+
+            '</td></tr>').join("")+'</tbody></table></div>':
+          '<p class="hint">No hay trabajos registrados.</p>';
+        onButton(target,"[data-job]",e=>pollJob(e.currentTarget.dataset.job));
+        onButton(target,"[data-retry]",async e=>{
+          const jid=e.currentTarget.dataset.retry;
+          if(!confirm("¿Reintentar el PDF fallido sin crear otro ingreso?"))return;
+          try{await api("/jobs/"+jid+"/retry",{method:"POST"});
+            alertBox("Trabajo devuelto a la cola de procesamiento.");
+            await refreshJobs();
+          }catch(err){alertBox(err.message,true);}
+        });
+      }catch(err){target.textContent="No se pudo consultar la cola: "+err.message;}
+      if(watcher===state.jobsWatch&&state.view==="escaneo")
+        setTimeout(refreshJobs,3500);
+    }
+    await refreshJobs();
     byId("scanForm").onsubmit=async e=>{
       e.preventDefault();const f=byId("scanPdf").files[0];
       if(!f)return;const body=new FormData();body.append("file",f);
       try{const job=await api("/scans",{method:"POST",body});
         alertBox("Documento recibido. ID: "+job.trabajo_id);
         pollJob(job.trabajo_id);
+        // El seguimiento del último envío continúa sin recargar la página.
+        // La cola compartida se refresca automáticamente.
       }catch(err){alertBox(err.message,true);}
     };
   }

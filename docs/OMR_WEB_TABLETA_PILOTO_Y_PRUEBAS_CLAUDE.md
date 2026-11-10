@@ -62,7 +62,7 @@ requiere `libzbar0` del sistema operativo.
 git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 git fetch origin
-git switch --track origin/feature/omr-tablet-lan-multiusuario-v1
+git switch --track origin/feature/omr-auditoria-evidencias-recorreccion-v1
 ```
 
 2. Instalar **una sola vez** (con Internet):
@@ -864,3 +864,17 @@ para atender una solicitud se eliminan SOLO después de servir la respuesta;
 los originales de escáner, PNG evidenciales, lotes de impresión, SQLite y
 respaldos NO se eliminan. Los temporales viejos de versiones anteriores
 no se purgan automáticamente. Regresión: test_archivos_exportados_se_nombran_por_folio_y_no_acumulan_temporales.
+
+
+### Bandeja de trabajos multiadministrador
+
+La pantalla **Importar escaneos** presenta una cola persistente de
+30 trabajos recientes, ordenados por recepción, con ID acotado,
+operador, estado (pendiente/procesando/terminado/error), posición FIFO
+y reintento explícito para fallidos. GET /api/jobs usa el rol en el
+servidor: admin puede ver la cola completa; coordinador únicamente
+sus ingresos; auxiliares y auditores reciben 403. La respuesta nunca
+incluye rutas absolutas, claves ni el contenido del PDF. La vista se
+actualiza cada 3.5 segundos solo mientras está abierta y no cambia
+el candado global de procesamiento, que sigue siendo exclusivo.
+El ID original de un trabajo reintentado se conserva.
