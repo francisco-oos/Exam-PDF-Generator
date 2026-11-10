@@ -203,7 +203,8 @@ def _effective_pages(store: OMRStore, inbox: DocumentInbox, sid: str):
 
 def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
                           destination: Path,*,internal=True,
-                          include_originals=True,audit_pdf_factory=None):
+                          include_originals=True,audit_pdf_factory=None,
+                          detailed_history_factory=None):
     """ZIP de resultados y evidencias para la aplicación especificada.
 
     Modo interno: XLSX con bitácora, PDF de hojas efectivas,
@@ -235,6 +236,8 @@ def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
         if internal:
             content['Bitacora.pdf']=_history_pdf(store,sid)
             content['Historial_Documental.pdf']=_document_history_pdf(inbox,sid)
+            if detailed_history_factory is not None:
+                content['Bitacora_Revisiones_Detallada.pdf']=detailed_history_factory()
             if selections:
                 evidence=folder/'Evidencias_Ordenadas.pdf'
                 inbox.assemble(

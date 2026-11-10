@@ -149,3 +149,44 @@ def audit_evidence_pdf(store,sheet_id,*,acetato=True,history=None):
         "%Y-%m-%d %H:%M"))
     pdf.showPage();pdf.save()
     return out.getvalue()
+
+
+
+def detailed_history_pdf(store,sid):
+    """Bitácora detallada por aplicación, una copia exportable sin claves."""
+    from omr_evaluaciones.expedientes import _paragraph_pdf
+    session=store.session(sid)
+    with store.connect() as db:
+        rows=[dict(x) for x in db.execute("""
+            SELECT a.tipo,a.pregunta,a.anterior,a.nueva,
+                   a.aciertos_antes,a.aciertos_despues,a.motivo,a.fecha,
+                   h.id AS hoja_id,p.folio,p.nombre AS participante,
+                   u.nombre AS responsable,u.usuario AS cuenta
+            FROM web_auditoria_revision a
+            JOIN hojas h ON h.id=a.hoja_id
+            JOIN participantes p ON p.sesion_id=h.sesion_id AND p.token=h.token
+            JOIN web_usuarios u ON u.id=a.usuario_id
+            WHERE h.sesion_id=?
+            ORDER BY a.id
+        """,(sid,))]
+    lines=["Aplicacion: "+sid,
+           "Evaluacion: "+str(session.get("nombre_evaluacion") or session["titulo"]),
+           "Este reporte es derivado. La evidencia y las decisiones originales se conservan.",
+           "Aclaraciones registradas: "+str(len(rows))]
+    for event in rows:
+        question=("Pregunta "+str(event["pregunta"])
+                  if event["pregunta"] is not None else "Hoja completa")
+        grade=(str(event["aciertos_antes"])+" > "+
+               str(event["aciertos_despues"]))
+        lines.extend([
+            event["fecha"]+" · "+event["tipo"]+" · "+
+              event["responsable"]+" ("+event["cuenta"]+")",
+            "Folio: "+event["folio"]+" · "+event["participante"]+
+              " · "+question+" · "+str(event["anterior"] or "—")+
+              " > "+str(event["nueva"] or "—")+
+              " · Aciertos: "+grade,
+            "Motivo: "+event["motivo"],
+        ])
+    if not rows:
+        lines.append("Sin reaperturas o correcciones web detalladas.")
+    return _paragraph_pdf("Bitacora detallada de re-correcciones",lines)

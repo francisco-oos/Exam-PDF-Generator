@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from omr_evaluaciones.documentos import sha_file
 from omr_evaluaciones.expedientes import export_session_bundle, participant_receipt
 from .service import WebError, WebService
-from .evidencia import audit_evidence_pdf
+from .evidencia import audit_evidence_pdf, detailed_history_pdf
 from .designer import import_exam, serialize_exam, update_exam, preview_exam, resource, import_roster
 
 MAX_UPLOAD = 100 * 1024 * 1024
@@ -547,6 +547,9 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
                 (lambda sheet_id: audit_evidence_pdf(
                     engine.store,sheet_id,acetato=True,
                     history=engine.sheet_history(user,sheet_id)))
+                if internal else None),
+            detailed_history_factory=(
+                (lambda: detailed_history_pdf(engine.store,sid))
                 if internal else None))
         return FileResponse(path,filename=("Expediente_" if internal else
                             "Resultados_")+sid+".zip",
