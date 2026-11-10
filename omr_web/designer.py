@@ -11,14 +11,13 @@ import re
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from zipfile import ZipFile
 
 from fastapi import UploadFile
 
 from biblioteca import db_connect, hex_color, load_exam, save_exam
 from omr_evaluaciones.motor import read_roster
 from preview_pdf import build_preview_pdf
-from src.evaluaciones.core import Question, _safe_image, read_questions
+from src.evaluaciones.core import Question, _safe_image, _inspect_archive, read_questions
 from vista_previa import PreviewData
 from .service import WebError
 
@@ -52,6 +51,62 @@ async def save_upload(upload: UploadFile, target: Path, limit: int) -> Path:
     return target
 
 
+def recover_embedded_question_images(sheet:Path,images_dir:Path) -> set[str]:
+    """Lee fotos incrustadas en XLSX y las asocia a la fila anclada.
+
+    Openpyxl read_only no expone las fotos: las extraemos y escribimos
+    su nombre en la columna Imagen (H) sin adivinar asociaciones dudosas.
+    """
+    _inspect_archive(sheet)
+    from openpyxl import load_workbook
+    try:
+        book=load_workbook(sheet,read_only=False,data_only=False,keep_links=False)
+    except Exception as exc:
+        raise WebError("No se pudieron leer las imágenes del Excel.",422) from exc
+    try:
+        if "Preguntas" not in book.sheetnames:
+            return set()  # read_questions mostrará el problema de plantilla
+        page=book["Preguntas"]
+        photos=list(page._images)
+        if len(photos)>100:
+            raise WebError("Máximo 100 imágenes en la plantilla.",422)
+        created=set()
+        for photo in photos:
+            anchor=getattr(photo.anchor,"_from",None)
+            row=int(anchor.row)+1 if anchor is not None else 0
+            if row<2 or row>101:
+                raise WebError(
+                    "Una foto pegada no está en una fila de pregunta. "
+                    "Ancla cada foto a su reactivo (desde la fila 2).",422)
+            if page.cell(row=row,column=8).value not in (None,""):
+                raise WebError(
+                    f"Fila {row}: hay una foto incrustada y también un nombre "
+                    "en la columna Imagen. Utiliza sólo uno de ellos.",422)
+            fmt=str(getattr(photo,"format","") or "").lower()
+            if fmt not in ("png","jpg","jpeg"):
+                raise WebError(f"Fila {row}: usa imagen PNG/JPEG.",422)
+            name=f"foto_excel_fila_{row:03d}"+(
+                ".jpg" if fmt in ("jpg","jpeg") else ".png")
+            data=photo._data()
+            if len(data)>MAX_IMAGE_BYTES:
+                raise WebError(f"Fila {row}: imagen superior a 4 MB.",413)
+            path=images_dir/name
+            if path.exists():
+                raise WebError(f"Fila {row}: más de una foto incrustada.",422)
+            path.write_bytes(data)
+            try:
+                _safe_image(path,source=f"Fila {row}/Imagen incrustada")
+            except ValueError as exc:
+                raise WebError(str(exc),422) from exc
+            page.cell(row=row,column=8,value=name)
+            created.add(name.lower())
+        if photos:
+            book.save(sheet)
+        return created
+    finally:
+        book.close()
+
+
 async def import_exam(db, workbook:UploadFile, *, name:str, title:str,
                       images:list[UploadFile], logo:UploadFile|None,
                       meta:dict):
@@ -63,28 +118,15 @@ async def import_exam(db, workbook:UploadFile, *, name:str, title:str,
     with TemporaryDirectory(prefix="omr_web_diseno_") as tmp:
         root=Path(tmp)
         sheet=await save_upload(workbook,root/"Preguntas.xlsx",MAX_BOOK_BYTES)
-        # openpyxl/read_only lee las celdas, NO asigna imágenes incrustadas
-        # automáticamente a una pregunta. Evitar éxito falso sin imagen.
-        try:
-            with ZipFile(sheet) as archive:
-                embedded=any(info.filename.lower().startswith("xl/media/")
-                             for info in archive.infolist())
-        except Exception:
-            embedded=False  # read_questions produce el error XLSX adecuado
-        if embedded:
-            raise WebError(
-                "El Excel contiene fotos pegadas dentro de celdas. "
-                "Esta plantilla usa la columna Imagen con el nombre exacto "
-                "(ej. equipo.png); selecciona esos PNG/JPG por separado "
-                "en Imágenes de reactivos. La foto pegada no se puede "
-                "asociar automáticamente con una pregunta.",422)
         images_dir=root/"imagenes"
         images_dir.mkdir()
-        seen=set()
+        seen=recover_embedded_question_images(sheet,images_dir)
         for upload in images:
             name_image=filename_of(upload,image=True)
             if name_image.lower() in seen:
                 raise WebError("Nombre de imagen repetido en el paquete.")
+            if (images_dir/name_image).exists():
+                raise WebError("La imagen seleccionada coincide con una foto incrustada en Excel.",422)
             seen.add(name_image.lower())
             path=await save_upload(upload,images_dir/name_image,MAX_IMAGE_BYTES)
             try:
