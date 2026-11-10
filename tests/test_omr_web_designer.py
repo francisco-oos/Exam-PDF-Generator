@@ -314,3 +314,149 @@ def test_clave_no_sale_a_auxiliar_asignado(server):
                              headers=csrf,json={}).status_code==403
         assert reviewer.post("/api/applications",headers=csrf,json={
             "cuestionario_id":eid,"participantes":[]}).status_code==403
+
+
+def _pdf_embeds_colors(pdf_data):
+    """Comprobar recursos visuales en el PDF, no solo BLOB guardados."""
+    import fitz
+    from PIL import Image
+    found=[]
+    with fitz.open(stream=pdf_data,filetype="pdf") as pdf:
+        for page in pdf:
+            for element in page.get_images(full=True):
+                payload=pdf.extract_image(element[0])["image"]
+                with Image.open(BytesIO(payload)) as picture:
+                    color=picture.convert("RGB").resize((1,1)).getpixel((0,0))
+                found.append(color)
+    return found
+
+
+def _near_color(colors,wanted,tolerance=25):
+    return any(max(abs(a-b) for a,b in zip(rgb,wanted))<=tolerance
+               for rgb in colors)
+
+
+@pytest.mark.parametrize("mode",["normal","ecologico"])
+@pytest.mark.parametrize("roster",[[],[{"id":"P001","nombre":"Persona ficticia"}]])
+def test_imagen_de_columna_excel_y_logo_visibles_en_pdf_final(server,mode,roster):
+    app,c,headers=server
+    eid=import_questionnaire(c,headers,with_images=True)
+    expected_photo=(0x22,0x44,0x66)
+    expected_logo=(0x33,0x88,0x55)
+
+    preview=c.post("/api/library/"+eid+"/preview?view=Cuadernillo",
+                   headers=headers,json={"modo":mode,"con_personal":bool(roster)})
+    assert preview.status_code==200,preview.text[:180]
+    colors=_pdf_embeds_colors(preview.content)
+    assert _near_color(colors,expected_photo),colors
+    assert _near_color(colors,expected_logo),colors
+
+    response=c.post("/api/applications",headers=headers,json={
+        "cuestionario_id":eid,"modalidad":mode,"papel":"Carta",
+        "participantes":roster})
+    assert response.status_code==200,response.text
+    out=response.json()
+    base=("/api/applications/"+out["sid"]+"/files/" if roster else
+          "/api/print-lots/"+out["lote_id"]+"/files/")
+    actual=c.get(base+"Cuadernillo.pdf")
+    assert actual.status_code==200,actual.text[:180]
+    colors=_pdf_embeds_colors(actual.content)
+    assert _near_color(colors,expected_photo),colors
+    assert _near_color(colors,expected_logo),colors
+    sheet=c.get(base+"Hoja_respuestas.pdf")
+    assert sheet.status_code==200
+    assert _near_color(_pdf_embeds_colors(sheet.content),expected_logo)
+
+
+def test_imagen_agregada_desde_interfaz_reemplazo_y_reordenacion(server):
+    app,c,headers=server
+    eid=import_questionnaire(c,headers,with_images=True)
+    original=c.get("/api/library/"+eid).json()
+    original["preguntas"].append({
+        "tema":"Prueba de campo","pregunta":"¿Qué operación corresponde?",
+        "opciones":["A uno","B dos","C tres","D cuatro"],"correcta":"B",
+        "imagen":None})
+    original["preguntas"][0]["imagen"]=0
+    camera=picture("#C52C91")
+    new_logo=picture("#BFE52A")
+    changed=c.post("/api/library/"+eid+"/edit",headers=headers,files=[
+        ("payload",(None,json.dumps(original,ensure_ascii=False))),
+        ("images",("q2__foto_nueva.png",camera,"image/png")),
+        ("logo",("actualizado.png",new_logo,"image/png"))])
+    assert changed.status_code==200,changed.text
+    exam=c.get("/api/library/"+eid).json()
+    assert exam["revision"]==2
+    assert len(exam["preguntas"])==2
+    assert exam["preguntas"][0]["imagen"]=="pregunta_001.png"
+    assert exam["preguntas"][1]["imagen"]=="pregunta_002.png"
+    assert c.get("/api/library/"+eid+"/images/pregunta_002.png").content==camera
+    assert c.get("/api/library/"+eid+"/images/logo.png").content==new_logo
+    preview=c.post("/api/library/"+eid+"/preview?view=Cuadernillo",
+                   headers=headers,json={})
+    assert preview.status_code==200,preview.text[:180]
+    colors=_pdf_embeds_colors(preview.content)
+    assert _near_color(colors,(0xC5,0x2C,0x91)),colors
+    assert _near_color(colors,(0xBF,0xE5,0x2A)),colors
+    assert _near_color(colors,(0x22,0x44,0x66)),colors
+
+    # Eliminar pregunta 1 debe conservar FOTO de la antigua pregunta 2;
+    # la asociación viene de sourceIndex, no del número en pantalla.
+    exam["preguntas"]=[{**exam["preguntas"][1],"imagen":1}]
+    after=c.post("/api/library/"+eid+"/edit",headers=headers,
+                 data={"payload":json.dumps(exam,ensure_ascii=False)})
+    assert after.status_code==200,after.text
+    revised=c.get("/api/library/"+eid).json()
+    assert revised["revision"]==3
+    assert len(revised["preguntas"])==1
+    assert revised["preguntas"][0]["imagen"]=="pregunta_001.png"
+    assert c.get("/api/library/"+eid+"/images/pregunta_001.png").content==camera
+    assert c.get("/api/library/"+eid+"/images/pregunta_002.png").status_code==404
+
+
+def test_imagen_invalida_y_imagen_no_referenciada_devuelven_422(server):
+    app,c,headers=server
+    required_xlsx=workbook("equipo.png")
+    invalid=c.post("/api/library/import?name=Imagen+mala&title=Ensayo",
+         headers=headers,files=[
+             ("file",("preguntas.xlsx",required_xlsx,
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+             ("images",("equipo.png",b"No es realmente PNG","image/png"))])
+    assert invalid.status_code==422,invalid.text
+    assert "imagen" in invalid.text.lower()
+
+    absent=c.post("/api/library/import?name=Foto+ausente&title=Ensayo",
+        headers=headers,files={
+            "file":("preguntas.xlsx",required_xlsx,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert absent.status_code==422,absent.text
+
+    extras=c.post("/api/library/import?name=Foto+sin+columna&title=Ensayo",
+        headers=headers,files=[
+          ("file",("preguntas.xlsx",workbook(""),
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+          ("images",("equipo.png",picture(),"image/png"))])
+    assert extras.status_code==422,extras.text
+    assert "columna Imagen" in extras.text
+
+    eid=import_questionnaire(c,headers)
+    exam=c.get("/api/library/"+eid).json()
+    corrupted=c.post("/api/library/"+eid+"/edit",headers=headers,files=[
+        ("payload",(None,json.dumps(exam))),
+        ("images",("q1__mala.png",b"Content failed","image/png"))])
+    assert corrupted.status_code==422,corrupted.text
+    assert c.get("/api/library/"+eid).json()["revision"]==1
+
+
+def test_foto_incrustada_en_excel_no_se_ignora_silenciosamente(server):
+    from openpyxl.drawing.image import Image as XlsxImage
+    app,c,headers=server
+    workbook_object=load_workbook(BytesIO(workbook("")))
+    photo=XlsxImage(BytesIO(picture("#8844bb")))
+    workbook_object["Preguntas"].add_image(photo,"H2")
+    data=BytesIO();workbook_object.save(data);workbook_object.close()
+    r=c.post("/api/library/import?name=Excel+con+dibujo&title=Evaluacion",
+             headers=headers,files={
+               "file":("preguntas.xlsx",data.getvalue(),
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert r.status_code==422,r.text
+    assert "fotos pegadas" in r.text
