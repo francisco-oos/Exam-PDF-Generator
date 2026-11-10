@@ -21,7 +21,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, time
 from uuid import uuid4
 from zipfile import ZipFile, BadZipFile
 
@@ -345,6 +345,13 @@ class OMRStore:
                 raise OSError('No fue posible archivar el escaneo.')
 
         with self.connect() as db:
+            # Serializar la comprobación del folio y su inserción incluso cuando
+            # dos administradores importan PDFs diferentes a la vez.
+            db.execute("BEGIN IMMEDIATE")
+            session_state=db.execute("SELECT estado FROM sesiones WHERE id=?",
+                                     (sid,)).fetchone()
+            if session_state is None or session_state["estado"]!="abierta":
+                raise ValueError("Evaluación inexistente o cerrada: no se modifica su calificación.")
             original=db.execute("""
                 SELECT * FROM hojas WHERE sesion_id=? AND archivo_sha=? AND pagina=?
             """,(sid,source_sha,page_idx)).fetchone()
@@ -354,8 +361,16 @@ class OMRStore:
                     WHERE hoja_id=? AND revisor!='Motor OMR'
                 """,(original['id'],)).fetchone()[0]
                 prev_doubts=json.loads(original['dudas_json'])
+                # El motor CLI no tiene tabla web_reclamos. Si hay servidor,
+                # nunca mejorar automáticamente una hoja en revisión humana
+                # activa: su versión/lease quedaría obsoleta silenciosamente.
+                has_claims=db.execute("""SELECT 1 FROM sqlite_master
+                    WHERE type='table' AND name='web_reclamos'""").fetchone()
+                claimed=bool(has_claims and db.execute("""
+                    SELECT 1 FROM web_reclamos WHERE hoja_id=? AND vence>?
+                """,(original['id'],int(time()))).fetchone())
                 better=(
-                    human==0 and token is not None and
+                    not claimed and human==0 and token is not None and
                     state in ('validada','revisar') and
                     (original['token'] is None or original['token']==token) and
                     (original['estado']=='sin_identificar' or
@@ -582,7 +597,7 @@ class OMRStore:
 def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
                         empresa='', grupo='', subtitulo='',
                         color_titulo='#213A4C', color_respuestas='#213A4C',
-                        color_subtitulo='#5E7180',logo=None,preview=False):
+                        color_subtitulo='#5E7180',logo=None,preview=False,logo_ancho_mm=23.0):
     """Hoja institucional: una sola geometría para PDF, QR y lectura de escáner.
 
     Usa bubble_positions y corner_centers sin alteraciones. El aspecto adopta
@@ -591,7 +606,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
     """
     from reportlab.lib import colors
     from reportlab.pdfbase import pdfmetrics
-    from src.evaluaciones.core import _font, _safe_image
+    from src.evaluaciones.core import _font, _safe_image, _white_background
     from PIL import ImageOps
     normal, bold = _font()
     paper = session['papel']
@@ -620,9 +635,10 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
     if logo:
         validated=_safe_image(Path(logo),source='Logotipo OMR')
         with Image.open(validated) as original:
-            picture=ImageOps.exif_transpose(original).convert('RGB')
+            picture=_white_background(ImageOps.exif_transpose(original))
             picture.thumbnail((300,300),Image.Resampling.LANCZOS)
-            cnv.drawImage(ImageReader(picture),44,h-107,width=43,height=43,
+            dim=min(52,max(19,43*float(logo_ancho_mm)/23.))
+            cnv.drawImage(ImageReader(picture),44,h-107,width=dim,height=dim,
                           preserveAspectRatio=True,anchor='c')
         title_x=97
     cnv.setFillColor(tint)
@@ -699,7 +715,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
 def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
                      empresa='',grupo='',subtitulo='',
                      color_titulo='#213A4C',color_respuestas='#213A4C',
-                     color_subtitulo='#5E7180',logo=None,person_ids=None):
+                     color_subtitulo='#5E7180',logo=None,person_ids=None,logo_ancho_mm=23.0):
     """Imprime las hojas QR desde el diseño único; no genera otro examen.
 
     Cada código tiene HMAC de la misma sesión persistida que utilizará el lector.
@@ -721,7 +737,8 @@ def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
             continue
         _draw_formulario_omr(cnv,s,p,empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                             color_titulo=color_titulo,color_respuestas=color_respuestas,
-                            color_subtitulo=color_subtitulo,logo=logo)
+                            color_subtitulo=color_subtitulo,logo=logo,
+                            logo_ancho_mm=logo_ancho_mm)
     cnv.save()
     return path
 
@@ -780,7 +797,7 @@ def preview_formulario_omr(questions, title, paper, *,
                           empresa='',grupo='',subtitulo='',
                           color_titulo='#213A4C',color_respuestas='#213A4C',
                           color_subtitulo='#5E7180',logo=None,nombre='Ejemplo de participante',identifier='000001',
-                          con_personal=True):
+                          con_personal=True,logo_ancho_mm=23.0):
     """Muestra el aspecto exacto sin crear folios utilizables ni escribir disco."""
     from io import BytesIO
     validate_questions(questions)
@@ -794,7 +811,7 @@ def preview_formulario_omr(questions, title, paper, *,
                         empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                         color_titulo=color_titulo,
                         color_respuestas=color_respuestas,
-                        color_subtitulo=color_subtitulo,logo=logo,preview=True)
+                        color_subtitulo=color_subtitulo,logo=logo,preview=True,logo_ancho_mm=logo_ancho_mm)
     cnv.save()
     return data.getvalue()
 
@@ -803,7 +820,7 @@ def preview_formulario_omr(questions, title, paper, *,
 def create_generic_forms_pdf(questions, title, paper, target, *,
                              empresa='',grupo='',subtitulo='',
                              color_titulo='#213A4C',color_respuestas='#213A4C',
-                             color_subtitulo='#5E7180',logo=None):
+                             color_subtitulo='#5E7180',logo=None,logo_ancho_mm=23.0):
     """Hoja anónima con EXACTA geometría OMR y espacios manuscritos, sin QR.
 
     El diseño no cambia al cargar personal: solo se rellenan datos y QR.
@@ -817,7 +834,8 @@ def create_generic_forms_pdf(questions, title, paper, target, *,
     _draw_formulario_omr(cnv,session,None,empresa=empresa,grupo=grupo,
                          subtitulo=subtitulo,color_titulo=color_titulo,
                          color_respuestas=color_respuestas,
-                         color_subtitulo=color_subtitulo,logo=logo)
+                         color_subtitulo=color_subtitulo,logo=logo,
+                            logo_ancho_mm=logo_ancho_mm)
     cnv.save()
     return path
 
@@ -908,11 +926,19 @@ def _decode_qr(gray, *, allow_full=True):
         candidate=(roi if factor==1. else
                    cv2.resize(roi,None,fx=factor,fy=factor,
                               interpolation=cv2.INTER_CUBIC))
-        text,points,_=detector.detectAndDecode(candidate)
+        try:
+            text,points,_=detector.detectAndDecode(candidate)
+        except cv2.error:
+            # OpenCV 4.14 puede detectar cuatro puntos colineales y
+            # lanzar error en QR rotado: seguir con los otros lectores.
+            continue
         if text and points is not None:
             return text
     if allow_full:
-        text,points,_=detector.detectAndDecode(gray)
+        try:
+            text,points,_=detector.detectAndDecode(gray)
+        except cv2.error:
+            text,points=None,None
         if text and points is not None:
             center=points.reshape(-1,2).mean(axis=0)
             if .64*w<center[0]<.99*w and .04*h<center[1]<.36*h:
@@ -1444,7 +1470,8 @@ def scan_document(store:OMRStore,sid:str,pdf_path:Path, *, page_indices=None):
     return report
 
 
-def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
+def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False,
+                  *, definitive_override:bool|None=None):
     """XLSX de entrega sin clave correcta ni datos de marcas por defecto.
 
     La hoja confidencial Incidencias solo se añade al archivo interno.
@@ -1454,6 +1481,10 @@ def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
     from openpyxl.styles import Font,PatternFill,Alignment,Border,Side
     from openpyxl.utils import get_column_letter
     results=store.results(sid);s=results['sesion'];people=results['participantes']
+    # El motor CLI conserva la compatibilidad histórica. La web puede
+    # exigir un cierre formal y aprobación 2/2 antes de rotular DEFINITIVO.
+    definitive=(results['definitivo'] if definitive_override is None
+                else bool(definitive_override))
     def xl(value):
         # Evitar que nombres y comentarios importados se conviertan en fórmulas Excel.
         if isinstance(value,str) and value.lstrip().startswith(('=','+','-','@')):
@@ -1465,7 +1496,7 @@ def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
              'Preguntas','Aciertos','Blancos','Porcentaje','Estado']
     official.append([f'Resultados · {s["titulo"]} · sesión {sid}'])
     official.append([f'Fecha: {s["creada"]} · Versión: {s["version_sha"][:12]} · '+
-                     ('DEFINITIVO' if results['definitivo'] else 'PROVISIONAL')])
+                     ('DEFINITIVO' if definitive else 'PROVISIONAL')])
     official.append(headers)
     for row in people:
         official.append([row['folio'],xl(row['id']),xl(row['nombre']),xl(row['area']),xl(row['grupo']),xl(row['turno']),
@@ -1486,7 +1517,7 @@ def export_report(store:OMRStore,sid:str,output:Path,internal:bool=False):
     control=book.create_sheet('Control de entrega')
     for row in [('Sesión',sid),('Evaluación',s['titulo']),('Fecha de creación',s['creada']),
                 ('Formato',s['papel']),('Revisión de clave SHA-256',s['version_sha']),
-                ('Estado','DEFINITIVO' if results['definitivo'] else 'PROVISIONAL'),
+                ('Estado','DEFINITIVO' if definitive else 'PROVISIONAL'),
                 ('Exportado UTC',utcnow()),('Responsable / firma','________________________')]:control.append(row)
     if internal:
         issues=book.create_sheet('Incidencias internas')

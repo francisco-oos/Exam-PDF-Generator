@@ -9,7 +9,7 @@
   const all = (root, q) => Array.from(root.querySelectorAll(q));
   let api, alertBox, root, onCreated, exams=[], draft=null, examId=null,
       previewURL=null, activeView="Cuadernillo", previewSeq=0,
-      savedDesign=null, pendingLogo=null;
+      savedDesign=null, pendingLogo=null, previewTimer=null;
 
   const meta = (id, label, value, kind="text", extra="") =>
     '<label>'+h(label)+'<input data-meta="'+h(id)+'" type="'+kind+
@@ -20,6 +20,10 @@
     '<label>'+h(label)+'<select data-meta="'+h(id)+'">'+
     options(values,value)+'</select></label>';
 
+  function schedulePreview(){
+    clearTimeout(previewTimer);
+    previewTimer=setTimeout(()=>preview(),450);
+  }
   function fileQuestion(q,i){
     return '<details class="questionEditor" data-question="'+i+'">'+
       '<summary><b>Pregunta '+(i+1)+'</b> · '+h(q.pregunta.slice(0,85))+
@@ -36,7 +40,17 @@
            encodeURIComponent(examId)+'/images/'+encodeURIComponent(q.imagen)+'">Ver actual</a>':'')+
       '<input type="file" accept=".png,.jpg,.jpeg" data-image="'+i+'">'+
       (q.pendingImage?'<span class="hint">Pendiente: '+h(q.pendingImage.name)+'</span>':'')+
-      '</label></div>'+
+      '</label></div><div class="cols">'+
+      meta('ancho_imagen_mm','Ancho foto (30–165 mm)',
+        q.ancho_imagen_mm??106,'number','min="30" max="165" step="1"')+
+      meta('alto_imagen_mm','Alto foto (15–90 mm)',
+        q.alto_imagen_mm??62,'number','min="15" max="90" step="1"')+
+      '<label>Alineación foto<select data-meta="alineacion_imagen">'+
+      [['LEFT','Izquierda'],['CENTER','Centrada'],['RIGHT','Derecha']]
+        .map(([value,label])=>'<option value="'+value+'"'+
+          ((q.alineacion_imagen||'CENTER')===value?' selected':'')+'>'+label+'</option>')
+        .join('')+'</select></label>'+
+      '</div><p class="hint">El PDF conserva la proporción, sin deformar el dibujo.</p>'+
       (q.imagen?'<label class="check"><input type="checkbox" data-remove-image>Quitar imagen actual</label>':'')+
       '<div class="actions"><button type="button" class="ghost" data-remove-q="'+i+
       '">Eliminar pregunta</button></div></details>';
@@ -74,9 +88,13 @@
       color_respuestas:draft.color_respuestas,
       color_acetato:draft.color_acetato,
       quitar_logo:!!draft.quitarLogo&&!pendingLogo,
+      logo_ancho_mm:Number(draft.logo_ancho_mm??23),
       preguntas:draft.preguntas.map(q=>({
         tema:q.tema,pregunta:q.pregunta,opciones:q.opciones,
         correcta:q.correcta,
+        ancho_imagen_mm:Number(q.ancho_imagen_mm??106),
+        alto_imagen_mm:Number(q.alto_imagen_mm??62),
+        alineacion_imagen:q.alineacion_imagen||'CENTER',
         imagen:q.quitarImagen?null:q.sourceIndex
       }))
     };
@@ -86,7 +104,7 @@
     if(!panel||!draft)return;
     panel.innerHTML='<h2>Diseñar cuestionario · revisión '+h(draft.revision)+'</h2>'+
       '<p class="hint">La edición queda en la biblioteca. Aplicaciones ya impresas mantienen su propia versión y QR.</p>'+
-      '<div class="designerLayout"><div class="designerControls"><div class="cols">'+
+      '<div class="designerControls"><div class="cols">'+
       meta('nombre','Nombre en biblioteca',draft.nombre)+
       meta('titulo','Título del examen',draft.titulo)+
       meta('empresa','Empresa',draft.empresa)+
@@ -111,20 +129,16 @@
       (pendingLogo?'<p class="hint">Logotipo pendiente: '+h(pendingLogo.name)+'</p>':'')+
       (draft.logo?'<label class="check"><input id="removeLogo" type="checkbox" '+
         (draft.quitarLogo?'checked':'')+'>Quitar logotipo</label>':'')+
+      '</div><div class="cols">'+
+      meta('logo_ancho_mm','Ancho logotipo (10–28 mm)',
+        draft.logo_ancho_mm??23,'number','min="10" max="28" step="1"')+
       '</div><h3>Preguntas y respuestas</h3>'+
       '<p class="hint">Cada pregunta admite cuatro opciones, una respuesta correcta y una imagen. El acetato siempre usa esa clave.</p>'+
       '<div id="questionRows">'+draft.preguntas.map(fileQuestion).join('')+'</div>'+
       '<div class="actions"><button type="button" class="ghost" id="addQuestion">Añadir pregunta</button>'+
       '<button type="button" class="primary" id="saveDesign">Guardar diseño</button></div>'+
-      '<p class="hint">Las fotos y el logotipo recién cargados se incorporan al pulsar Guardar diseño; entonces aparecerán en la vista PDF. Los colores de título, subtítulo, respuestas y acetato son independientes.</p>'+
-      '</div><aside class="designerPreview"><h3>Vista previa PDF real</h3>'+
-      '<div class="actions">'+['Cuadernillo','Respuestas','Acetato'].map(v=>
-        '<button type="button" class="secondary" data-preview="'+v+'">'+
-        (v==='Respuestas'?'Hoja de respuestas':v)+'</button>').join('')+'</div>'+
-      '<label class="check"><input type="checkbox" id="previewPersonal">'+
-      'Mostrar un participante y QR de EJEMPLO (no emite folios)</label>'+
-      '<p class="hint">Sin lista, las hojas son genéricas sin QR. En ambas modalidades la geometría de burbujas y acetato coincide.</p>'+
-      '<iframe id="pdfPreview" class="pdfPreview" title="Vista de impresión del examen"></iframe></aside></div>';
+      '<p class="hint">La vista previa incluye temporalmente fotos y logo seleccionados; sólo Guardar diseño los conserva en la biblioteca.</p>'+
+      '</div>';
     all(panel,'[data-remove-q]').forEach(button=>button.onclick=()=>{
       readEditor();
       if(draft.preguntas.length===1){alertBox('Necesitas conservar una pregunta.',true);return;}
@@ -135,7 +149,8 @@
       if(draft.preguntas.length>=100){alertBox('Máximo 100 preguntas.',true);return;}
       draft.preguntas.push({tema:'',pregunta:'',opciones:['','','',''],
         correcta:'A',imagen:null,sourceIndex:null,quitarImagen:false,
-        pendingImage:null});
+        pendingImage:null,ancho_imagen_mm:106,
+        alto_imagen_mm:62,alineacion_imagen:'CENTER'});
       showEditor();
       all(panel,'.questionEditor').at(-1)?.setAttribute('open','');
     };
@@ -147,12 +162,14 @@
       if(input.files?.length){q.pendingImage=input.files[0];q.quitarImagen=false;
         const remove=sel(input.closest('[data-question]'),'[data-remove-image]');
         if(remove)remove.checked=false;
+        schedulePreview();
       }
     });
     sel(panel,'#designerLogo').onchange=e=>{
       if(e.target.files?.length){pendingLogo=e.target.files[0];draft.quitarLogo=false;
         const remove=sel(panel,'#removeLogo');
         if(remove)remove.checked=false;
+        schedulePreview();
       }
     };
     const removeLogo=sel(panel,'#removeLogo');
@@ -162,6 +179,7 @@
         pendingLogo=null;
         sel(panel,'#designerLogo').value='';
       }
+      schedulePreview();
     };
     all(panel,'[data-remove-image]').forEach(box=>box.onchange=e=>{
       if(!e.target.checked)return;
@@ -170,14 +188,12 @@
       draft.preguntas[index].pendingImage=null;
       const input=sel(row,'[data-image]');
       if(input)input.value='';
+      schedulePreview();
     });
-    all(panel,'[data-preview]').forEach(button=>button.onclick=()=>{
-      activeView=button.dataset.preview;preview();
+    all(panel,'[data-meta]').forEach(field=>{
+      field.addEventListener('input',()=>schedulePreview());
+      field.addEventListener('change',()=>schedulePreview());
     });
-    sel(panel,'#previewPersonal').checked=!!sel(root,'#rosterInput')?.value.trim();
-    sel(panel,'#previewPersonal').onchange=()=>preview();
-    all(panel,'[data-meta]').forEach(field=>
-      field.addEventListener('change',()=>preview()));
     const modeGen=sel(root,'#applicationMode'),paperGen=sel(root,'#applicationPaper');
     if(modeGen)modeGen.value=draft.modo;
     if(paperGen)paperGen.value=draft.papel;
@@ -242,78 +258,162 @@
               grupo:cols[3]||'',turno:cols[4]||''};
     });
   }
+  async function savePackage(url,name,handle=null){
+    if(handle){
+      const response=await fetch(url,{credentials:"same-origin"});
+      if(!response.ok)throw Error("No se pudo descargar el paquete (HTTP "+response.status+").");
+      const writable=await handle.createWritable();
+      try{
+        if(response.body)await response.body.pipeTo(writable);
+        else{
+          await writable.write(await response.blob());
+          await writable.close();
+        }
+      }catch(err){
+        try{await writable.abort();}catch(_ignored){}
+        throw err;
+      }
+    }else{
+      const link=document.createElement("a");
+      link.href=url;link.download=name;
+      document.body.appendChild(link);link.click();link.remove();
+    }
+  }
   async function renderGeneration(){
     const panel=sel(root,'#generationPanel');
-    if(!panel)return;
-    panel.innerHTML='<h2>Emitir e imprimir</h2>'+
-      '<p>Elige Normal o Ecológico. La lista es <b>opcional</b>. QR y folios sólo cuando hay participantes.</p>'+
+    const roster=sel(root,'#rosterPanel');
+    if(!panel||!roster)return;
+    roster.innerHTML='<h2>Personal a evaluar (opcional)</h2>'+
+      '<p class="hint">Esta lista se usa al emitir el examen, no al importar las preguntas. Sin participantes se imprimen hojas manuales sin QR.</p>'+
+      '<div class="actions"><a class="ghost" href="/api/templates/personal">Descargar plantilla de personal XLSX</a></div>'+
+      '<label>Cargar lista CSV o Excel XLSX<input id="rosterFile" type="file" accept=".csv,.xlsx"></label>'+
+      '<p class="hint">Columnas: ID_personal, Nombre, Area_adscripcion, Grupo y Turno. Los ID con ceros deben almacenarse como texto en Excel.</p>'+
+      '<label>Participantes preparados (puedes revisar o pegar desde Excel)'+
+      '<textarea id="rosterInput" rows="5" placeholder="000001,Persona ficticia,Área A,Equipo 1,Día"></textarea></label>'+
+      '<div id="rosterCount" class="hint">Sin lista: corrección manual con acetato.</div>';
+    panel.innerHTML='<h2>Emitir evaluación</h2>'+
+      '<p class="hint">El cuestionario y el diseño ya están guardados en la biblioteca. Cada emisión crea folios QR nuevos: hazla una sola vez y vuelve a descargar después desde Aplicaciones.</p>'+
       '<div class="cols"><label>Nombre de la aplicación<input id="appName" placeholder="Ej. Cabos turno C"></label>'+
       '<label>Modalidad<select id="applicationMode"><option value="normal">Normal · cuadernillo individual</option>'+
       '<option value="ecologico">Ecológico · cuadernillo reutilizable</option></select></label>'+
       '<label>Papel<select id="applicationPaper"><option>Carta</option><option>A4</option><option>Oficio</option></select></label>'+
-      '</div><h3>Lista de personal (opcional)</h3>'+
-      '<a class="ghost" href="/api/templates/personal">Descargar plantilla de personal XLSX</a>'+
-      '<label>Cargar CSV o Excel XLSX<input id="rosterFile" type="file" accept=".csv,.xlsx"></label>'+
-      '<p class="hint">El archivo puede tener ID_personal, Nombre, Area_adscripcion, Grupo y Turno. Sólo ID y Nombre son obligatorios; se conservan ceros iniciales si Excel los almacena como texto.</p>'+
-      '<label>También puedes escribir o pegar desde Excel: ID, Nombre, Área, Grupo, Turno'+
-      '<textarea id="rosterInput" rows="6" placeholder="000001,Persona ficticia,Área A,Equipo 1,Día"></textarea></label>'+
-      '<div id="rosterCount" class="hint">Sin lista: hoja sin QR y corrección manual con acetato.</div>'+
-      '<div class="actions"><button id="generateFiles" class="primary">Generar documentos del examen</button></div>'+
+      '</div><p id="linkedRoster" class="hint">Personal: sin lista (acetato manual).</p>'+
+      '<div class="actions"><button id="generateFiles" class="primary">Generar evaluación y guardar paquete completo</button>'+
+      '<button type="button" id="newIssuance" class="ghost" hidden>Emitir otra aplicación nueva</button></div>'+
+      '<p class="hint">En Edge/Chrome compatible se solicitará dónde guardar el ZIP antes de generar. Si el navegador no permite el selector, el ZIP irá a Descargas; puedes activar «Preguntar dónde guardar cada archivo» en su configuración.</p>'+
       '<div id="createdFiles"></div><div id="manualHistory"></div>';
     sel(panel,'#applicationMode').value=draft?.modo||'ecologico';
     sel(panel,'#applicationPaper').value=draft?.papel||'Carta';
-    sel(panel,'#rosterFile').onchange=async e=>{
+    function countRoster(){
+      try{
+        const list=peopleFromText();
+        const message=list.length?
+          list.length+' participantes preparados; se emitirán folios QR firmados.':
+          'Sin lista: hoja sin QR y corrección manual con acetato.';
+        sel(roster,'#rosterCount').textContent=message;
+        sel(panel,'#linkedRoster').textContent='Personal: '+(list.length?
+          list.length+' participantes asociados.':'sin lista; acetato manual.');
+      }catch(err){
+        sel(roster,'#rosterCount').textContent=err.message;
+        sel(panel,'#linkedRoster').textContent='Revisa la lista: '+err.message;
+      }
+    }
+    sel(roster,'#rosterFile').onchange=async e=>{
       const file=e.currentTarget.files[0];
       if(!file)return;
       const form=new FormData();form.append('file',file);
       try{
         const resp=await api('/roster/import',{method:'POST',body:form});
-        sel(panel,'#rosterInput').value=resp.participantes.map(p=>
+        sel(roster,'#rosterInput').value=resp.participantes.map(p=>
           [p.id,p.nombre,p.area,p.grupo,p.turno].map(csv).join(',')).join('\n');
-        sel(panel,'#rosterCount').textContent=resp.cantidad+' participantes leídos; revisa los campos antes de generar.';
-        alertBox('Lista de personal importada y validada.');
+        countRoster();
+        alertBox('Lista validada: '+resp.cantidad+' participantes.');
       }catch(err){alertBox(err.message,true);}
     };
-    sel(panel,'#rosterInput').oninput=()=>{
-      try{
-        const list=peopleFromText();
-        sel(panel,'#rosterCount').textContent=list.length?
-          list.length+' participantes: se emitirán folios QR firmados.':
-          'Sin lista: la corrección será manual con el acetato.';
-      }catch(err){sel(panel,'#rosterCount').textContent=err.message;}
-    };
+    sel(roster,'#rosterInput').oninput=countRoster;
     await refreshManualHistory();
+    let issued=null,requestId=null,lastPayload=null,working=false;
+    sel(panel,'#newIssuance').onclick=()=>{
+      if(!issued||!confirm('¿Crear OTRA aplicación con nuevos folios QR? La anterior se conserva en Aplicaciones.'))return;
+      issued=null;requestId=null;lastPayload=null;
+      sel(panel,'#createdFiles').innerHTML='';
+      sel(panel,'#generateFiles').disabled=false;
+      sel(panel,'#newIssuance').hidden=true;
+      alertBox('Preparado para una nueva emisión. Revisa nombre, modalidad y participantes.');
+    };
     sel(panel,'#generateFiles').onclick=async e=>{
-      if(!examId){alertBox('Selecciona un cuestionario.',true);return;}
+      if(working||issued)return;
       const button=e.currentTarget;
+      let handle=null;
       try{
-        // Un examen emitido es inmutable: impedir que campos aún sin guardar
-        // parezcan formar parte de la versión usada para los folios.
+        if(!examId)throw Error('Selecciona un cuestionario.');
         if(JSON.stringify(cleanPayload())!==savedDesign)
           throw Error('Primero guarda los cambios del diseño y después genera el examen.');
         const people=peopleFromText();
         if(people.length>500)throw Error('Máximo 500 participantes por aplicación.');
         if(people.some(p=>!p.id||!p.nombre))
           throw Error('Cada participante debe tener ID y nombre.');
-        button.disabled=true;
-        const resp=await api('/applications',{method:'POST',body:{
+        const payload={
           cuestionario_id:examId,nombre:sel(panel,'#appName').value,
           modalidad:sel(panel,'#applicationMode').value,
-          papel:sel(panel,'#applicationPaper').value,participantes:people}});
+          papel:sel(panel,'#applicationPaper').value,participantes:people};
+        const serialized=JSON.stringify(payload);
+        if(serialized!==lastPayload){
+          requestId=window.crypto?.randomUUID?.() ||
+            '00000000-0000-4000-8000-'+Math.random().toString(16).slice(2).padEnd(12,'0').slice(0,12);
+          lastPayload=serialized;
+        }
+        if(typeof window.showSaveFilePicker==='function'){
+          try{
+            handle=await window.showSaveFilePicker({
+              suggestedName:'Material_OMR_'+(payload.nombre||'evaluacion').replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,55)+'.zip',
+              types:[{description:'Paquete OMR comprimido',accept:{'application/zip':['.zip']}}],
+              excludeAcceptAllOption:false
+            });
+          }catch(error){
+            if(error.name==='AbortError')return; // Cancelar NO crea otra aplicación.
+            throw error;
+          }
+        }
+        working=true;button.disabled=true;
+        const resp=await api('/applications',{method:'POST',body:{
+          ...payload,solicitud_id:requestId}});
+        issued=resp;
         const dir=resp.sid?'/api/applications/'+encodeURIComponent(resp.sid)+
           '/files/':'/api/print-lots/'+encodeURIComponent(resp.lote_id)+'/files/';
+        const pkg=resp.sid?'/api/applications/'+encodeURIComponent(resp.sid)+
+          '/package':'/api/print-lots/'+encodeURIComponent(resp.lote_id)+'/package';
+        const zipName='Paquete_OMR_'+(resp.sid||resp.lote_id)+'.zip';
         sel(panel,'#createdFiles').innerHTML='<div class="panel">'+
-          '<h3>'+(resp.tipo==='omr'?'Aplicación OMR: '+h(resp.sid):
-             'Lote genérico sin QR')+'</h3>'+
-          '<p>'+h(resp.aviso||'Lista de participantes asociada con folios firmados.')+'</p>'+
+          '<h3>'+(resp.tipo==='omr'?'Aplicación creada: '+h(resp.sid):
+            'Lote manual generado')+'</h3>'+
+          '<p>'+h(resp.aviso||'Participantes y folios QR guardados. No vuelvas a emitir para reimprimir.')+'</p>'+
+          '<div class="actions"><button type="button" class="primary" id="downloadAll">Guardar paquete completo ZIP</button></div>'+
+          '<details class="advancedDownload"><summary>Descargas individuales (opcional)</summary>'+
           '<div class="actions">'+resp.archivos.map(file=>
-             '<a class="secondary" href="'+dir+encodeURIComponent(file)+'">'+h(file)+'</a>').join('')+'</div>'+
-          '<p class="hint">Imprimir al 100 % sin ajustar escala. La hoja de respuestas y su acetato deben ser del mismo lote.</p></div>';
+            '<a class="secondary" href="'+dir+encodeURIComponent(file)+'">'+h(file)+'</a>').join('')+
+          '</div></details>'+
+          '<p class="hint">Imprime al 100 % sin ajustar la escala. El ZIP contiene la clave y el acetato, de uso interno.</p></div>';
+        sel(panel,'#newIssuance').hidden=false;
+        sel(panel,'#downloadAll').onclick=async()=>{
+          try{
+            let hdl=null;
+            if(typeof window.showSaveFilePicker==='function')
+              hdl=await window.showSaveFilePicker({
+                suggestedName:zipName,types:[{description:'ZIP OMR',accept:{'application/zip':['.zip']}}]});
+            await savePackage(pkg,zipName,hdl);
+          }catch(error){if(error.name!=='AbortError')alertBox(error.message,true);}
+        };
         if(resp.sid&&onCreated)await onCreated(resp.sid);
         if(resp.tipo==='manual')await refreshManualHistory();
-        alertBox('Material del examen generado correctamente.');
+        try{
+          await savePackage(pkg,zipName,handle);
+          alertBox('Evaluación creada. Paquete completo enviado a guardar.');
+        }catch(error){
+          alertBox('Aplicación creada; descarga el ZIP con «Guardar paquete completo»: '+error.message,true);
+        }
       }catch(err){alertBox(err.message,true);}
-      finally{button.disabled=false;}
+      finally{working=false;if(!issued)button.disabled=false;}
     };
   }
   async function refreshManualHistory(){
@@ -339,11 +439,33 @@
     config.con_personal=!!sel(root,'#previewPersonal')?.checked;
     const csrf=document.cookie.split('; ').find(x=>x.startsWith('omr_csrf='));
     const token=csrf?decodeURIComponent(csrf.slice('omr_csrf='.length)):'';
+    const pending=draft.preguntas.some(q=>q.pendingImage)||!!pendingLogo;
+    const status=sel(root,'#previewStatus');
+    if(status)status.textContent='Actualizando vista previa PDF…';
+    const endpoint='/api/library/'+encodeURIComponent(examId)+
+      (pending?'/preview-live?view=':'/preview?view=')+
+      encodeURIComponent(activeView);
+    const headers={'X-CSRF-Token':token};
+    let payload;
+    if(pending){
+      const form=new FormData();
+      form.append('config',JSON.stringify(config));
+      for(const [i,q] of draft.preguntas.entries()){
+        if(q.pendingImage){
+          const file=q.pendingImage;
+          form.append('images',new File([file],'q'+(i+1)+'__'+file.name,
+                                        {type:file.type}));
+        }
+      }
+      if(pendingLogo)form.append('logo',pendingLogo);
+      payload=form;
+    }else{
+      headers['Content-Type']='application/json';
+      payload=JSON.stringify(config);
+    }
     try{
-      const response=await fetch('/api/library/'+encodeURIComponent(examId)+
-        '/preview?view='+encodeURIComponent(activeView),{
-          method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':token},
-          credentials:'same-origin',body:JSON.stringify(config)});
+      const response=await fetch(endpoint,{
+        method:'POST',headers,credentials:'same-origin',body:payload});
       if(!response.ok){
         const detail=await response.json().catch(()=>({}));
         throw Error(detail.error||detail.detail||'No se generó vista PDF.');
@@ -354,23 +476,33 @@
       previewURL=URL.createObjectURL(blob);
       sel(root,'#pdfPreview').src=previewURL;
       if(previous)URL.revokeObjectURL(previous);
-    }catch(err){alertBox(err.message,true);}
+      if(status)status.textContent=pending?
+        'Vista temporal con fotos o logo aún sin guardar.' :
+        'Vista exacta de la revisión actual.';
+    }catch(err){
+      if(seq!==previewSeq)return;
+      if(status)status.textContent='Vista previa: '+err.message;
+      alertBox(err.message,true);
+    }
   }
   async function start(params){
     ({api,alertBox,root,onCreated}=params);
     previewSeq++;
     if(previewURL){URL.revokeObjectURL(previewURL);previewURL=null;}
     exams=await api('/library');
-    root.innerHTML='<div class="panel"><h2>Plantillas aprobadas</h2>'+
-      '<div class="actions"><a class="ghost" href="/api/templates/preguntas">Descargar Excel de preguntas</a>'+
-      '<a class="ghost" href="/api/templates/personal">Descargar Excel de personal</a></div>'+
-      '<p class="hint">Imágenes: puedes escribir en la columna Imagen el nombre exacto del PNG/JPG y adjuntar ese archivo, o pegar una imagen dentro de Excel anclada a la fila del reactivo. Se conserva en biblioteca y aparece en el cuadernillo PDF. Para logotipo usa el campo independiente; no se aceptan rutas de tu computadora.</p></div>'+
-      '<form id="importQ" class="panel"><h2>Importar preguntas y crear cuestionario</h2>'+
-      '<div class="cols">'+
+    root.innerHTML='<div class="designerWorkbench"><div class="designerSteps">'+
+      '<details class="panel designerSection" id="importSection">'+
+      '<summary><b>Importar preguntas y crear cuestionario</b>'+
+      '<small>Plantilla Excel, imágenes y logo</small></summary>'+
+      '<p class="hint">Método recomendado: inserta la imagen PNG en la fila de su pregunta dentro de Excel (anclada desde fila 2). Se recupera automáticamente, sin volver a adjuntarla. Si la columna Imagen (H) contiene solo el nombre del archivo, usa la opción avanzada siguiente.</p>'+
+      '<div class="actions"><a class="ghost" href="/api/templates/preguntas">Descargar plantilla de preguntas</a></div>'+
+      '<form id="importQ"><div class="cols">'+
       '<label>Nombre en biblioteca<input name="name" required placeholder="Evaluación de Cabos"></label>'+
       '<label>Título de impresión<input name="title" required placeholder="Evaluación de conocimientos"></label>'+
       '<label>Excel de preguntas (.xlsx)<input name="file" type="file" accept=".xlsx" required></label>'+
-      '<label>Imágenes de reactivos (PNG/JPG, opcional)<input name="images" type="file" accept=".png,.jpg,.jpeg" multiple></label>'+
+      '<details class="advancedDownload"><summary>Solo si tu Excel contiene nombres de imagen, adjuntar archivos PNG/JPG</summary>'+
+      '<label>Archivos referenciados por nombre en columna Imagen (H)<input name="images" type="file" accept=".png,.jpg,.jpeg" multiple></label>'+
+      '<p class="hint">No adjuntes aquí imágenes ya incrustadas en Excel: se importarían dos veces.</p></details>'+
       '<label>Logotipo (opcional)<input name="logo" type="file" accept=".png,.jpg,.jpeg"></label>'+
       '</div><details><summary>Datos y diseño inicial</summary>'+
       '<div class="cols">'+
@@ -380,18 +512,46 @@
       choose('papel','Papel',['Carta','A4','Oficio'],'Carta').replace('data-meta=','name=')+
       choose('modo','Modalidad',['normal','ecologico'],'ecologico').replace('data-meta=','name=')+
       meta('letra','Tamaño de letra',9,'number','min="8" max="12" step="0.5"').replace('data-meta=','name=')+
+      meta('logo_ancho_mm','Ancho logotipo en mm (10–28)',23,
+        'number','min="10" max="28" step="1"').replace('data-meta=','name=')+
       meta('color_titulo','Color título','#213A4C','color').replace('data-meta=','name=')+
       meta('color_subtitulo','Color subtítulo','#5E7180','color').replace('data-meta=','name=')+
       meta('color_respuestas','Color hoja','#213A4C','color').replace('data-meta=','name=')+
       meta('color_acetato','Color acetato','#167341','color').replace('data-meta=','name=')+
       '</div><label>Instrucciones<textarea name="instrucciones">Selecciona una sola respuesta por pregunta.</textarea></label>'+
-      '</details><div class="actions"><button class="primary">Importar a biblioteca</button></div></form>'+
-      '<div class="panel"><h2>Biblioteca de cuestionarios</h2>'+
+      '</details><div class="actions"><button class="primary">Importar a biblioteca</button></div></form></details>'+
+      '<details class="panel designerSection" id="librarySection" open>'+
+      '<summary><b>Biblioteca de cuestionarios</b><small>Seleccionar versión para editar</small></summary>'+
       '<label>Seleccionar y editar<select id="examSelector"><option value="">Selecciona un cuestionario…</option>'+
       exams.map(x=>'<option value="'+h(x.id)+'">'+h(x.nombre)+' · '+x.total+' preguntas (rev. '+x.revision+')</option>').join('')+
-      '</select></label></div>'+
-      '<div class="panel" id="designerPanel"></div>'+
-      '<div class="panel" id="generationPanel"></div>';
+      '</select></label></details>'+
+      '<details class="panel designerSection" id="designSection" open>'+
+      '<summary><b>Diseñar cuestionario</b><small>Preguntas, colores, medidas y fotos</small></summary>'+
+      '<div id="designerPanel"></div></details>'+
+      '<details class="panel designerSection" id="rosterSection">'+
+      '<summary><b>Personal a evaluar (opcional)</b><small>Importar Excel o CSV una sola vez</small></summary>'+
+      '<div id="rosterPanel"></div></details>'+
+      '<details class="panel designerSection" id="generationSection">'+
+      '<summary><b>Emitir e imprimir</b><small>Nombre, modalidad, papel y paquete ZIP</small></summary>'+
+      '<div id="generationPanel"></div></details></div>'+
+      '<aside class="panel designerPreview" id="designerPreview">'+
+      '<h3>Vista previa PDF real</h3>'+
+      '<p class="hint">Los cambios de texto, colores, fotografías y medidas se actualizan sin cerrar el visor.</p>'+
+      '<div class="actions"><button type="button" class="ghost" id="refreshPdfPreview">Actualizar vista previa</button></div>'+
+      '<div class="actions">'+['Cuadernillo','Respuestas','Acetato'].map(v=>
+        '<button type="button" class="secondary" data-preview="'+v+'">'+
+        (v==='Respuestas'?'Hoja de respuestas':v)+'</button>').join('')+'</div>'+
+      '<label class="check"><input type="checkbox" id="previewPersonal">'+
+      'Mostrar participante y QR de EJEMPLO (no emite folios)</label>'+
+      '<p class="hint" id="previewStatus">Selecciona un cuestionario para ver la vista previa.</p>'+
+      '<iframe id="pdfPreview" class="pdfPreview" title="Vista real de impresión del examen"></iframe>'+
+      '</aside></div>';
+    all(root,'[data-preview]').forEach(button=>button.onclick=()=>{
+      activeView=button.dataset.preview;
+      preview();
+    });
+    sel(root,'#previewPersonal').onchange=()=>preview();
+    sel(root,'#refreshPdfPreview').onclick=()=>preview();
     sel(root,'#importQ').onsubmit=async e=>{
       e.preventDefault();
       const form=e.target, fd=new FormData(form), name=String(fd.get('name')||''),

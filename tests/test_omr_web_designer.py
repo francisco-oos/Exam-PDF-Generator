@@ -509,3 +509,139 @@ def test_dos_fotos_excel_en_filas_distintas_no_se_intercambian(server):
     colors=_pdf_embeds_colors(pdf.content)
     assert _near_color(colors,(0xEE,0x33,0x44)),colors
     assert _near_color(colors,(0x22,0xAA,0x55)),colors
+
+
+
+@pytest.mark.parametrize("mode,people",[
+    ("normal",[{"id":"000740","nombre":"Persona ficticia"}]),
+    ("ecologico",[]),
+])
+def test_preview_live_logo_imagen_escala_y_pdf_final_sin_guardar_antes(
+        server,mode,people):
+    """Adjuntos nuevos visibles antes de guardar; impresión usa mismas medidas."""
+    import fitz
+    app,client,headers=server
+    exam_id=import_questionnaire(client,headers)
+    original=client.get("/api/library/"+exam_id).json()
+    config=json.loads(json.dumps(original))
+    config["modo"]=mode
+    config["papel"]="Carta"
+    config["logo_ancho_mm"]=18
+    config["preguntas"][0].update({
+        "ancho_imagen_mm":55,"alto_imagen_mm":25,
+        "alineacion_imagen":"RIGHT"})
+    photo=picture("#AC3F7B")
+    logo=picture("#49A656")
+    form=[
+        ("config",(None,json.dumps(config,ensure_ascii=False))),
+        ("images",("q1__imagen_campo.png",photo,"image/png")),
+        ("logo",("logo_nuevo.png",logo,"image/png"))
+    ]
+    draft=client.post("/api/library/"+exam_id+
+                      "/preview-live?view=Cuadernillo",
+                      headers=headers,files=form)
+    assert draft.status_code==200,draft.text[:180]
+    assert _near_color(_pdf_embeds_colors(draft.content),(0xAC,0x3F,0x7B))
+    assert _near_color(_pdf_embeds_colors(draft.content),(0x49,0xA6,0x56))
+    with fitz.open(stream=draft.content,filetype="pdf") as pdf:
+        all_rects=[r for page in pdf for image in page.get_images(full=True)
+                   for r in page.get_image_rects(image[0])]
+        assert all_rects
+        assert any(rect.x0>200 and rect.width<=55*72/25.4+1 and
+                   rect.height<=25*72/25.4+1
+                   for rect in all_rects)
+    # Ninguna vista previa da de alta una foto o revisión de biblioteca.
+    unchanged=client.get("/api/library/"+exam_id).json()
+    assert unchanged["revision"]==original["revision"]
+    assert unchanged["preguntas"][0]["imagen"] is None
+    assert unchanged["logo"] is None
+
+    saved=client.post("/api/library/"+exam_id+"/edit",headers=headers,files=[
+        ("payload",(None,json.dumps(config,ensure_ascii=False))),
+        ("images",("q1__imagen_campo.png",photo,"image/png")),
+        ("logo",("logo_nuevo.png",logo,"image/png"))
+    ])
+    assert saved.status_code==200,saved.text
+    current=client.get("/api/library/"+exam_id).json()
+    assert current["revision"]==2
+    assert current["logo_ancho_mm"]==18
+    assert current["preguntas"][0]["ancho_imagen_mm"]==55
+    assert current["preguntas"][0]["alto_imagen_mm"]==25
+    assert current["preguntas"][0]["alineacion_imagen"]=="RIGHT"
+    result=client.post("/api/applications",headers=headers,json={
+        "cuestionario_id":exam_id,"modalidad":mode,"papel":"Carta",
+        "participantes":people})
+    assert result.status_code==200,result.text
+    val=result.json()
+    prefix=("/api/applications/"+val["sid"]+"/files/" if people else
+            "/api/print-lots/"+val["lote_id"]+"/files/")
+    printed=client.get(prefix+"Cuadernillo.pdf")
+    assert printed.status_code==200,printed.text[:200]
+    assert _near_color(_pdf_embeds_colors(printed.content),(0xAC,0x3F,0x7B))
+    assert _near_color(_pdf_embeds_colors(printed.content),(0x49,0xA6,0x56))
+    response=client.get(prefix+"Hoja_respuestas.pdf")
+    assert response.status_code==200
+    assert _near_color(_pdf_embeds_colors(response.content),(0x49,0xA6,0x56))
+
+
+def test_imagen_y_logo_embebidos_en_excel_se_integran_al_cuadernillo_final(server):
+    """Foto pegada en H2 + logo independiente; la vista real no pierde recursos."""
+    from openpyxl.drawing.image import Image as XlsxImage
+    app,client,headers=server
+    wb=load_workbook(BytesIO(workbook()))
+    wb["Preguntas"].add_image(
+        XlsxImage(BytesIO(picture("#A21D55"))),"H2")
+    document=BytesIO();wb.save(document);wb.close()
+    uploaded=client.post("/api/library/import?name=Foto+pegada&title=Prueba",
+        headers=headers,files=[
+            ("file",("plantilla.xlsx",document.getvalue(),
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+            ("logo",("marca.png",picture("#296DA1"),"image/png"))],
+        data={"modo":"ecologico","papel":"Carta","logo_ancho_mm":"21"})
+    assert uploaded.status_code==200,uploaded.text
+    exam=uploaded.json()["cuestionario_id"]
+    assert client.get("/api/library/"+exam).json()["preguntas"][0]["imagen"]
+    final=client.post("/api/applications",headers=headers,json={
+        "cuestionario_id":exam,"modalidad":"ecologico",
+        "papel":"Carta","participantes":[]})
+    assert final.status_code==200,final.text
+    doc=client.get("/api/print-lots/"+final.json()["lote_id"]+
+                   "/files/Cuadernillo.pdf")
+    assert doc.status_code==200
+    colors=_pdf_embeds_colors(doc.content)
+    assert _near_color(colors,(0xA2,0x1D,0x55)),colors
+    assert _near_color(colors,(0x29,0x6D,0xA1)),colors
+
+
+
+def test_vista_con_json_de_biblioteca_no_pierde_imagen_por_nombre(server):
+    app,client,headers=server
+    exam_id=import_questionnaire(client,headers,with_images=True)
+    detail=client.get("/api/library/"+exam_id).json()
+    assert detail["preguntas"][0]["imagen"].startswith("pregunta_001")
+    # El editor usa sourceIndex; una API externa puede devolver imagen=str.
+    response=client.post("/api/library/"+exam_id+
+                         "/preview?view=Cuadernillo",
+                         headers=headers,json=detail)
+    assert response.status_code==200,response.text
+    colors=_pdf_embeds_colors(response.content)
+    assert _near_color(colors,(0x22,0x44,0x66)),colors
+    assert _near_color(colors,(0x33,0x88,0x55)),colors
+
+
+@pytest.mark.parametrize("width,height,align",[
+    (20,60,"CENTER"),(180,60,"CENTER"),(80,9,"CENTER"),
+    (80,100,"CENTER"),(90,50,"MIDDLE"),
+])
+def test_disenador_rechaza_medidas_o_alineacion_invalidas(
+        server,width,height,align):
+    app,client,headers=server
+    exam_id=import_questionnaire(client,headers)
+    saved=client.get("/api/library/"+exam_id).json()
+    saved["preguntas"][0].update({
+        "ancho_imagen_mm":width,"alto_imagen_mm":height,
+        "alineacion_imagen":align})
+    response=client.post("/api/library/"+exam_id+"/edit",
+       headers=headers,data={"payload":json.dumps(saved)})
+    assert response.status_code==422,response.text
+    assert client.get("/api/library/"+exam_id).json()["revision"]==1

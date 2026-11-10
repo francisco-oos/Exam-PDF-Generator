@@ -46,7 +46,7 @@ def _paragraph_pdf(title, lines):
 
 
 def participant_receipt(store: OMRStore, sid: str, person_id: str,
-                        target: Path):
+                        target: Path, *, evidence_pdf: bytes | None = None):
     """Resultado de UNA persona; nunca expone preguntas, claves ni compañeros."""
     report=store.results(sid)
     data=next((p for p in report['participantes']
@@ -66,7 +66,9 @@ def participant_receipt(store: OMRStore, sid: str, person_id: str,
                      else str(data['aciertos'])),
         'Calificación: '+('Pendiente' if data['porcentaje'] is None
                           else f'{data["porcentaje"]}%'),
-        'Aviso: solo los resultados validados son definitivos.',
+        ('Aviso: evaluación CERRADA y aprobada 2/2; resultado oficial.'
+         if report['sesion']['estado']=='cerrada'
+         else 'Aviso: resultado PROVISIONAL hasta el cierre y aprobación 2/2.'),
     ]
     if data['estado']=='validado':
         lines.extend([
@@ -99,7 +101,16 @@ def participant_receipt(store: OMRStore, sid: str, person_id: str,
     target.parent.mkdir(parents=True,exist_ok=True)
     temp=target.with_name(target.name+'.part')
     try:
-        temp.write_bytes(_paragraph_pdf('Resultado individual',lines))
+        receipt=_paragraph_pdf('Resultado individual',lines)
+        if evidence_pdf:
+            # El PDF individual y su evidencia auditada viajan juntos,
+            # sin modificar ni esconder la hoja escaneada original.
+            import fitz
+            with fitz.open(stream=receipt,filetype="pdf") as base:
+                with fitz.open(stream=evidence_pdf,filetype="pdf") as appendix:
+                    base.insert_pdf(appendix)
+                receipt=base.tobytes(garbage=3,deflate=True)
+        temp.write_bytes(receipt)
         os.replace(temp,target)
     finally:
         temp.unlink(missing_ok=True)
@@ -194,7 +205,8 @@ def _effective_pages(store: OMRStore, inbox: DocumentInbox, sid: str):
 
 def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
                           destination: Path,*,internal=True,
-                          include_originals=True):
+                          include_originals=True,audit_pdf_factory=None,
+                          detailed_history_factory=None):
     """ZIP de resultados y evidencias para la aplicación especificada.
 
     Modo interno: XLSX con bitácora, PDF de hojas efectivas,
@@ -220,18 +232,26 @@ def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
         content={}
         result_path=folder/('Resultados_Internos.xlsx' if internal else
                             'Resultados_Oficiales.xlsx')
-        export_report(store,sid,result_path,internal=internal)
+        export_report(store,sid,result_path,internal=internal,
+                      definitive_override=(session['estado']=='cerrada'))
         content[result_path.name]=result_path.read_bytes()
         used_documents=set()
         if internal:
             content['Bitacora.pdf']=_history_pdf(store,sid)
             content['Historial_Documental.pdf']=_document_history_pdf(inbox,sid)
+            if detailed_history_factory is not None:
+                content['Bitacora_Revisiones_Detallada.pdf']=detailed_history_factory()
             if selections:
                 evidence=folder/'Evidencias_Ordenadas.pdf'
                 inbox.assemble(
                     [(p['sha'],p['pagina'],0) for p in selections],evidence)
                 content[evidence.name]=evidence.read_bytes()
                 used_documents={p['sha'] for p in selections}
+                if audit_pdf_factory is not None:
+                    # Sólo hojas efectivas: no mezclar documentos/participantes.
+                    for item in selections:
+                        content['Evidencias_auditadas/'+item['folio']+'.pdf']=(
+                            audit_pdf_factory(item['hoja_id']))
             if include_originals:
                 # Mezclas de Cabos/Checadores nunca se filtran solo por
                 # nombre del PDF: se evalúan TODAS sus páginas indexadas.
@@ -253,6 +273,8 @@ def export_session_bundle(store: OMRStore,inbox: DocumentInbox,sid: str,
             'evaluacion':session.get('nombre_evaluacion') or session['titulo'],
             'revision_biblioteca':session.get('revision_biblioteca'),
             'tipo':'interno' if internal else 'oficial',
+            'estado_evaluacion':session['estado'],
+            'entrega':'definitiva' if session['estado']=='cerrada' else 'provisional',
             'generado_utc':datetime.now(timezone.utc).isoformat(),
             'paginacion_evidencias':selections if internal else [],
             'folios_sin_evidencia_efectiva':missing if internal else [],

@@ -62,7 +62,7 @@ requiere `libzbar0` del sistema operativo.
 git clone https://github.com/francisco-oos/Exam-PDF-Generator.git
 cd Exam-PDF-Generator
 git fetch origin
-git switch --track origin/feature/omr-tablet-lan-multiusuario-v1
+git switch --track origin/feature/omr-auditoria-evidencias-recorreccion-v1
 ```
 
 2. Instalar **una sola vez** (con Internet):
@@ -543,3 +543,571 @@ y sin revisiones humanas: conserva registro histórico y los PDF.
 Si la comparación indica que no se aplicó mejora, comprobar si existen decisiones humanas, lectura ya actualizada o duda legítima. No borrar la base ni rehacer la sesión para forzar una nota.
 
 **Aceptación física propuesta:** consultar las mismas tres hojas después de reanalizar y comparar **12→0, 10→0, 1→1** sobre la copia técnica, sin convertir la pregunta 9 de la tercera hoja en acierto. Repetir en Xerox y distintas intensidades de lápiz, marcas dobles, borrados, inclinaciones y escaneos de otra escala; si hay discordancias, rechazar automatización y mantener revisión humana.
+
+
+## Evolución experimental: Resultados con evidencia auditada y re-corrección v1
+
+**Rama exclusiva:** feature/omr-auditoria-evidencias-recorreccion-v1,
+creada desde el commit 08a72ed8165bf1f5e89011fbbc6a9172a474fb7b
+de feature/omr-tablet-lan-multiusuario-v1. **No modificar la rama
+estable de prueba ni main**; PR de esta evolución contra esa rama.
+
+### Resultado, evidencia y acetato en una misma vista
+
+En Resultados, seleccionar **Ver evidencia** de un participante con
+una única hoja efectiva abre un diseño de dos columnas: resumen de
+aciertos, nota, áreas de mejora y acciones a la izquierda; escaneo
+archivado y el acetato sobrepuesto a la derecha. Una casilla cambia
+la capa; la lectura es exclusiva del servidor y nunca persiste una
+imagen sobre la evidencia original. Los responsables se consultan
+en el historial por hoja. Un participante ausente o con dos hojas en
+conflicto no recibe una evidencia atribuida automáticamente.
+
+**PDF para participante** conserva sólo el resumen de su calificación,
+sin clave, acetato ni bitácora interna. **PDF interno con acetato**
+conserva el resumen y agrega una página de evidencia auditada horizontal:
+escaneo entero, acetato verde, ID, nombre, folio, estado,
+aciertos/total y porcentaje **solo si la hoja está validada**,
+último responsable y fecha UTC, eventos recientes y SHA del PDF
+original. **PDF de evidencia auditada** ofrece esa sola página.
+El texto visible "PILOTO / NO ES DOCUMENTO OFICIAL" pertenece a la
+COPIA generada; no modifica ni tapa el texto impreso en la hoja.
+El escaneo y el PDF original siguen disponibles sin edición.
+El expediente interno ZIP incluye una evidencia auditada por
+participante con una única hoja validada. Los PDFs que mezclan
+aplicaciones se mantienen segregados.
+
+Un resultado automático validado sin corrección humana se distingue
+por el historial del motor ("Motor OMR"). Una re-corrección sin
+terminar suspende la calificación definitiva, incluso si antes
+había obtenido aciertos. No presentar el resultado antiguo como
+vigente mientras la aclaración está abierta.
+
+### Re-corrección controlada después de validar
+
+1. Solo Administrador o rol heredado Coordinador, con sesión propia,
+   puede usar **Re-corregir**. Los Auxiliares pueden corregir hojas
+   pendientes asignadas, nunca reabrir una ya validada ni ver el
+   acetato con claves correctas.
+2. Se elige un reactivo y un motivo obligatorio (10 o más caracteres).
+   El servidor valida estado VALIDADA, identidad/folio, asignación
+   y conflicto con la reserva de otro operador.
+3. La reapertura inserta entradas INMUTABLES en revisiones,
+   web_auditoria_revision y web_eventos, anotando responsable,
+   respuesta previa, aciertos previos, motivo y fecha UTC. Revoca
+   cualquier aprobación anterior y las reservas viejas; marca
+   únicamente ese reactivo como DUDA.
+4. En Revisión de hojas se reclama una NUEVA reserva con versión
+   optimista. Guardar decisión exige justificación y escribe
+   respuesta anterior, respuesta nueva, aciertos antes/después,
+   usuario y fecha UTC en la misma transacción que actualiza la
+   hoja. La versión previa no se elimina.
+5. El resultado se recalcula con la clave de la sesión ORIGINAL,
+   nunca la biblioteca modificada posteriormente. Cualquier
+   re-reapertura vuelve a requerir motivo y nueva evidencia.
+6. La API no permite guardar sobre una hoja validada sin la
+   reapertura expresa; conserva las reglas antiguas de error para
+   los auxiliares. Ninguna llamada altera PDF o PNG originales.
+
+**Tabla nueva aditiva:** web_auditoria_revision, con claves foráneas
+a hojas y usuarios. No migra destructivamente la base Xerox ni cambia
+las estructuras del motor OMR. Historial previo del motor sigue
+disponible bajo registros_historicos.
+
+### Rutas y permisos
+
+- GET /api/applications/{sid}/results: resumen enriquecido, sin clave
+  ni HMAC; solo admin/coordinador/auditor asignado.
+- GET /api/sheets/{id}/history: historial de un único folio;
+  admin/coordinador/auditor autorizado, sin claves correctas.
+- GET /api/sheets/{id}/evidence?acetato=true: PDF derivado;
+  acetato exclusivamente admin/coordinador. Sin acetato: vista
+  read-only autorizada para auditor.
+- POST /api/sheets/{id}/reopen: admin/coordinador con CSRF,
+  pregunta y motivo; sin reserva concurrente ajena.
+- PUT /api/sheets/{id}/decisions: mantiene reserva exclusiva,
+  revisión optimista y motivo obligatorio, añade antes/después.
+
+### Pruebas y aceptación
+
+tests/test_omr_evidencia_auditoria.py usa personas ficticias y
+escaneo sintético en un directorio temporal: pendiente → validada
+(2/2) → reabierta (sin nota definitiva) → re-corrección (1/2).
+Valida eventos históricos, antes/después, permisos, PDF individual
+con evidencia anexa, SHA del PNG original intacto y persistencia
+al reiniciar el servicio. Las suites originales siguen ejecutándose.
+
+La prueba física se hará **sólo en copia Xerox aislada y respaldada**.
+Confirmar la geometría de los 20 círculos y el contraste del acetato,
+abrir PDF individual, cotejar nota con el registro, reabrir un reactivo
+ficticio, cambiar decisión y verificar que el registro indique quién
+y por qué. Confirmar que el original no cambió y que un Auxiliar
+no puede reabrir ni descargar la clave. No fusionar ni integrar
+licencia central sin aprobación física y cierre de CI.
+
+
+
+## Reparación de evidencia en copia de worktree y diseño con imágenes (10/11/2026)
+
+**Escenario Xerox real reportado:** al instalar la rama experimental en otra
+carpeta, SQLite seguía guardando rutas absolutas de los PNG escaneados en
+la instalación anterior. Resultados mostraba nota, folio y participante,
+pero el visor y los PDF auditados fallaban con "No se encontró el escaneo
+dentro del almacén autorizado". **No era un error del reconocimiento OMR.**
+
+### Localización segura del PNG al copiar un piloto
+
+La API de hoja, acetato y evidencia auditada consulta el registro por ID
+autorizado y construye exclusivamente:
+\`<OMR_WEB_DATA>/omr/escaneos/<sesion_id>/<hoja_id>.png\`.
+Solo se permite una ruta real dentro de \`omr/escaneos\`. No se sigue
+cualquier ruta absoluta vieja fuera de la copia, ni se modifican hashes,
+PNG, folios, respuestas, QR, notas o versiones por consultar un archivo.
+La lectura queda operativa aun si se borra la carpeta origen. Regresión
+automática: \`test_worktree_copia_reutiliza_imagen_archivada_con_ruta_absoluta_anterior\`.
+
+**Si falta el archivo físicamente en la copia**, el sistema responde
+404 con el diagnóstico y no rescata contenido personal desde otra
+instalación. En ese caso detener ambos servidores, respaldar la carpeta
+de destino y verificar qué carpeta faltó al copiar.
+
+Para normalizar las rutas de TODA la base, con el servidor detenido y
+un respaldo ya comprobado, utilizar la herramienta existente:
+
+\`\`\`powershell
+$raiz = 'C:\Users\Control de Material\Documents\dev-Francisco\Exam-PDF-Generator-Auditoria'
+cd $raiz
+$datos = (Resolve-Path '.\datos\omr_web_prueba_xerox').Path
+.\.venv-omr-web\Scripts\python.exe -m omr_web.relocate --data-dir "$datos"
+# Revisar "apto" y "problemas" antes de aplicar:
+.\.venv-omr-web\Scripts\python.exe -m omr_web.relocate --data-dir "$datos" --apply --confirm-stopped
+\`\`\`
+
+Si el diagnóstico encuentra un PDF original u otro archivo pendiente
+que falta, NO aplicar ni inventar archivos: restaurar primero la copia
+completa, o continuar usando el lector seguro de imágenes derivadas.
+
+### Dos formas aprobadas de introducir fotos de preguntas
+
+1. **Imagen PEGADA en Excel**: en la hoja **Preguntas**, anclar la foto
+   a la fila de su reactivo, por ejemplo **H2** para la pregunta de
+   la fila 2. La importación extrae el dibujo del XLSX, lo verifica,
+   lo asocia por fila y lo incorpora a la biblioteca. No se adjunta
+   otra vez mediante el selector "Fotos mencionadas en columna Imagen".
+2. **Imagen como archivo**: poner en la columna **Imagen (H)** el nombre
+   exacto de un PNG/JPG (por ejemplo \`equipo.png\`), adjuntarlo en
+   importación, y comprobar que la biblioteca lo enlazó a esa pregunta.
+   La imagen no referenciada se rechaza, no desaparece silenciosamente.
+   No combinar una foto pegada y un nombre de archivo en la misma fila:
+   se rechaza por ambiguo.
+
+La plantilla mantiene sus hojas Preguntas, Ejemplo y Guia; no cambia la
+lista de columnas aprobadas ni interpreta fórmulas como respuestas.
+No se asocian dos fotos a una misma fila. El **logotipo es un recurso
+separado**; se sube en el campo Logotipo y no se trata como una foto
+de reactivo. Todas las fotos son PNG/JPG locales validados y limitados
+en tamaño. No se suben XLSX, imágenes ni escaneos privados a GitHub.
+
+### Medidas y posicionamiento después de importar
+
+En **Diseñar cuestionario**, abrir el reactivo en su acordeón:
+- Ancho máximo: **30–165 mm** (por defecto 106 mm).
+- Alto máximo: **15–90 mm** (por defecto 62 mm).
+- Alineación: **Izquierda / Centrada / Derecha**.
+
+La imagen se adapta al rectángulo indicado **conservando su proporción**;
+no se estira, y ReportLab realiza la paginación cuando aumenta su
+altura. El **ancho del logotipo** se ajusta entre **10 y 28 mm** (23 mm
+por defecto); en hoja OMR se acota al encabezado reservado para no mover
+QR, marcas de calibración, círculos ni acetato. Si la foto viene PEGADA
+en Excel, su escala de impresión se modifica aquí: el anclaje H2 define
+la pregunta, no las dimensiones de salida.
+
+Guardar diseño conserva medidas en la biblioteca SQLite con migración
+aditiva (\`logo_ancho_mm\` y tres propiedades de cada reactivo).
+Aplicaciones ya emitidas mantienen los folios y clave de su versión.
+Las nuevas impresiones Normal/Ecológica reutilizan esas medidas en el
+cuadernillo y paquetes individuales; la hoja universal OMR nunca cambia
+su cuadrícula.
+
+### Vista previa permanente y archivos aún sin guardar
+
+La interfaz ahora presenta secciones plegables:
+**Importar preguntas y crear cuestionario**, **Biblioteca**, **Diseñar
+cuestionario** y **Emitir e imprimir**. A la derecha queda un visor
+PDF real separado que no desaparece al plegar una sección ni al abrir
+o cerrar una pregunta. Hay un botón **Actualizar vista previa** y
+re-renderización automática después de cambios.
+
+Cuando se elige una foto o logotipo nuevo, el navegador envía el
+archivo mediante \`/api/library/{id}/preview-live\` a una carpeta
+temporal aislada y lo descarta al cerrar la petición. **No crea una
+revisión de biblioteca, sesión ni folio**. Se muestra como vista
+temporal hasta usar **Guardar diseño**; después, imprimir solo cuando
+los cambios estén confirmados. No confundir la vista previa con
+material definitivo.
+
+Pruebas agregadas al conjunto \`tests/test_omr_web_designer.py\`:
+adjuntos nuevos antes de guardar, no mutación de biblioteca, foto y
+logo extraídos del PDF por color, medidas/alineación y generación en
+ambas modalidades, Excel con foto H2 + logo hasta el cuadernillo final,
+JSON de biblioteca con foto identificada por nombre, rechazo de medidas
+inválidas. Validación sintáctica Node de \`designer.js\` en CI.
+
+### Aceptación física prevista
+
+Sobre copia privada aislada del Xerox: abrir Resultados, seleccionar
+el folio de Francisco, comprobar que se ve el PNG y acetato; descargar
+PDF auditado y verificar el mismo folio, nota y hoja, manteniendo el
+original intacto. En Generar exámenes: importar una plantilla con foto
+incrustada, probar una segunda por nombre de archivo, cargar un logo,
+cambiar dimensiones/alineación, comparar previsualización Cuadernillo /
+Respuestas / Acetato, guardar y generar modo Normal y Ecológico. Revisar
+físicamente tamaño y colocación en Carta/Oficio, especialmente con
+cuadernillos de varias páginas. **No fusionar al flujo estable ni
+producción antes de cerrar CI y esta aceptación física.**
+
+
+## Conciliación, reescaneos y cola multiadministrador · PR #15 (10 noviembre)
+
+**Regla de calificación:** un nuevo PDF o una nueva página con el mismo QR/folio jamás modifica la hoja previamente calificada. Las reimportaciones equivalentes se registran como repetidas; las discrepantes se conservan como `duplicado`, sin emitir nota definitiva hasta resolver el conflicto. Sólo administración/coordinación puede **descartar el reescaneo** con motivo de al menos 10 caracteres, conservando ambos originales y la auditoría; nunca se reemplaza silenciosamente la nota histórica. Si la hoja inicial aún no está validada, hay que revisarla primero.
+
+**Concurrencia:** cada comprobación de folio y alta de hoja se realiza bajo `BEGIN IMMEDIATE` en SQLite para evitar dos hojas efectivas por carrera. Una única cola de PDF por instalación de datos emplea un candado exclusivo del sistema operativo para coordinar incluso múltiples procesos FastAPI; solamente quien lo posee recupera trabajos interrumpidos. El identificador SHA-256 deduplica ingresos simultáneos idénticos que aún están pendientes o procesándose; el estado indica posición real de cola, sin prometer minutos. Las reclamaciones de revisión siguen siendo exclusivas por hoja (lease de cinco minutos, versión optimista, bitácora). **No copiar un archivo SQLite abierto entre equipos.**
+
+**Conciliación y cierre:** `GET /api/applications/{sid}/closure` muestra cada persona de la lista en estado pendiente por `SIN_ESCANEO`, `REVISION_PENDIENTE`, `DUPLICADO_POR_RESOLVER` o `APROBACION_PENDIENTE`. Es un reporte por folio, no una baja ni descuento de participantes. También informa hojas sin identificar, revisiones ocupadas y PDFs esperando procesamiento. `POST /api/applications/{sid}/close` sólo cierra cuando esos contadores están en cero y todas las hojas válidas tienen aprobación 2/2; tras cerrar se bloquea la incorporación de notas, incluso desde el motor. Los ZIP descargados antes del cierre deben considerarse **provisionales** y no comprobantes definitivos.
+
+**Pruebas requeridas:** subir un mismo folio en PDFs con respuestas iguales y distintas; comprobar la invariabilidad de la nota original y la resolución documentada, importar en paralelo con administradores diferentes, reiniciar un trabajador con PDFs en cola, reclamar/guardar desde varias tabletas, observar listado íntegro de ausencias y verificar bloqueo del cierre hasta aprobar 2/2. Ejecutar sobre datos ficticios y luego sobre copia de Xerox, nunca sobre producción. No fusionar la PR hasta las pruebas físicas y autorización expresa.
+
+**Reserva al guardar:** cuando quedan dudas se mantiene el lease actual y se incrementa su revisión. Al guardar la última duda como validada se incrementa la revisión, se libera el lease en la MISMA transacción y la interfaz muestra un acuse; el siguiente operador ya puede aprobar 2/2. Un cliente/pestaña anterior no puede volver a modificar esa hoja validada.
+
+**Windows / lock exclusivo:** no se lee el byte del candado mientras otro proceso lo reserva, porque Windows usa bloqueo obligatorio y esa lectura falla con `PermissionError`. Se comprueba únicamente el tamaño del archivo y se solicita `LK_NBLCK` en espera controlada. Reenviar la misma ruta tampoco debe borrar el PDF que tiene un trabajo activo; las copias temporales distintas sí se eliminan una vez identificadas por SHA.
+
+**Reanálisis mientras alguien revisa:** si existe un lease activo para una hoja, el motor no sustituye sus respuestas/dudas ni aplica mejora automática sobre ese mismo PDF. Devuelve `repetida`; el operador conserva la versión visible. Se puede reanalizar después de liberar o expirar la reserva, siempre que todavía no se hayan guardado decisiones humanas.
+
+**Entrega provisional y definitiva:** el motor de escritorio conserva su modo histórico de exportación. En la WEB, el ZIP y su Excel se rotulan PROVISIONALES mientras la evaluación sigue abierta, aunque todas las marcas estén legibles; después de cierre y aprobación se rotulan DEFINITIVOS. El manifiesto incorpora `estado_evaluacion` y `entrega`. El reporte personal también advierte cuándo el resultado sigue provisional. No se alteran las columnas existentes ni se elimina un folio faltante.
+
+
+## Auditoría de descargas y simulaciones de operación (10/11/2026)
+
+**Menos redundancia visible, sin eliminar formatos ni API.** La tarea
+Crear evaluación contiene los PDF de impresión: Cuadernillo, Hoja de
+respuestas, Acetato y Paquetes individuales. Calificar → Resultados
+concentra ZIP oficial (provisional hasta cierre) y ZIP interno con
+bitácoras/evidencias. Cada persona ofrece UNA entrada a su ficha, con
+PDF individual limpio para entregar y PDF interno auditado para cotejo.
+El PDF de la sola hoja se conserva en un desplegable avanzado para
+investigación, no junto al PDF individual como tercera opción equivalente.
+Nunca entregar acetato o ZIP interno como reporte individual.
+
+**Inicio por tarea:** admin elige Crear o Calificar; auxiliar solo
+Calificar; auditor histórico solo Consultar. Los menús se filtran por
+perfil y tarea, conservando las validaciones del servidor. Cambiar de
+sección, de aplicación o de hoja libera explícitamente la reserva
+previa, con confirmación si hay trabajo pendiente. Si falla la
+liberación, se permanece en la revisión. No se repite la emisión de
+folios para completar escaneos de otra jornada.
+
+**Aprobación 2/2 independiente:** una calificación validada por el motor
+puede aprobarla un humano admin/coordinador. Si hubo CORRECCION humana,
+quien hizo la última corrección NO puede firmar su segunda aprobación.
+Un segundo admin/coordinador autorizado debe hacerlo. Se prohíbe
+sobrescribir una firma vigente por otro clic o sesión concurrente.
+Al reabrir, se suspende la nota, se anula firma anterior y se audita
+la transición; hace falta corregir y volver a aprobar.
+
+### Matriz de escenarios (automáticos + aceptación física)
+
+| Caso | Entrada y estado esperado |
+|---|---|
+| F01 | Normal con lista: QR por participante y calificación de sesión correcta |
+| F02 | Ecológico con lista: cuadernillo común, hojas QR individuales |
+| F03 | Normal sin lista: universal sin QR; calificación manual con acetato |
+| F04 | Ecológico sin lista: universal sin QR; no crear sesión ficticia |
+| F05 | PDF sin QR identificable: bandeja, motivo, captura íntegra manual |
+| F06 | QR ilegible: retener evidencia, no inventar identidad |
+| F07 | Lápiz tenue: duda pendiente hasta elegir A/B/C/D/BLANCO |
+| F08 | Dos marcas o borrones: cotejo humano y motivo escrito |
+| F09 | Corrección parcial: guarda versión, mantiene lease mientras hay dudas |
+| F10 | Dos auxiliares reclaman mismo folio: segundo 409 y sin sobrescritura |
+| F11 | Pestaña vieja guarda: 409 y se conserva última decisión |
+| F12 | Cambiar tarea/hoja: liberar reserva sin eliminar corrección ya guardada |
+| F13 | Dos administradores suben PDF idéntico: SHA dedupe y cola serial |
+| F14 | Folio en PDFs distintos: conflicto auditable, no cambiar nota anterior |
+| F15 | Reanálisis mientras se revisa: no sustituir selección/imagen reservada |
+| F16 | Rectificación aprobada: suspender nota, abrir duda, bitácora antes/después |
+| F17 | Misma cuenta corrige y pretende aprobar: 409 y segunda firma requerida |
+| F18 | Dos administradores aprueban al tiempo: una firma, otra recibe 409 |
+| F19 | Personas ausentes/sin identificar: lista íntegra y cierre bloqueado |
+| F20 | Cerrada: ningún reescaneo modifica notas, ZIP oficial definitivo |
+| F21 | Antes de cerrar: resultados y expedientes etiquetados provisionales |
+| F22 | Informe individual vs interno: rutas, roles y contenido distintos |
+| F23 | Reinicio durante cola: retomar trabajos sin dos procesamientos a la vez |
+| F24 | Copia Xerox reubicada: verificar SHA y rutas seguras antes de iniciar |
+
+Las nuevas regresiones están en tests/test_omr_flujos_operativos.py:
+ausentes, dudas de grafito, dobles marcas, edición simultánea, corrección
+parcial, pestaña vieja, rectificación tras aprobar, segunda firma,
+aprobaciones simultáneas y cierre con hojas desconocidas. Se ejecutan
+con una base temporal ficticia, sin tocar Xerox. Las lecturas reales de
+grafito/hojas Xerox y las interfaces en tableta quedan por verificar
+físicamente antes del merge.
+
+
+### Descargas individuales seguras y limpieza de temporales
+
+Al exportar un PDF personal, el nombre es ahora único por folio,
+distingue PARTICIPANTE/INTERNO_AUDITADO y PROVISIONAL/DEFINITIVO.
+Dos participantes ya no descargan por defecto el mismo nombre
+Resultado_sesion.pdf. El enlace de la ficha recalca provisional
+si la aplicación no está cerrada. Los ZIP/PDF creados en web_exportaciones
+para atender una solicitud se eliminan SOLO después de servir la respuesta;
+los originales de escáner, PNG evidenciales, lotes de impresión, SQLite y
+respaldos NO se eliminan. Los temporales viejos de versiones anteriores
+no se purgan automáticamente. Regresión: test_archivos_exportados_se_nombran_por_folio_y_no_acumulan_temporales.
+
+
+### Bandeja de trabajos multiadministrador
+
+La pantalla **Importar escaneos** presenta una cola persistente de
+30 trabajos recientes, ordenados por recepción, con ID acotado,
+operador, estado (pendiente/procesando/terminado/error), posición FIFO
+y reintento explícito para fallidos. GET /api/jobs usa el rol en el
+servidor: admin puede ver la cola completa; coordinador únicamente
+sus ingresos; auxiliares y auditores reciben 403. La respuesta nunca
+incluye rutas absolutas, claves ni el contenido del PDF. La vista se
+actualiza cada 3.5 segundos solo mientras está abierta y no cambia
+el candado global de procesamiento, que sigue siendo exclusivo.
+El ID original de un trabajo reintentado se conserva.
+
+
+**Nota de simulación de PDF:** para validar nombre de archivo,
+descarga y eliminación de temporales, el test crea imágenes ficticias
+rectificadas de 1700 × 2200 píxeles (Carta a 200 dpi). Una imagen de
+240 × 190 px no tiene las cuatro marcas ni la geometría homologada:
+el sistema debe rechazar el acetato alineado. Eso NO es un fallo de
+Xerox ni prueba de lectura de lápiz real.
+
+
+**Segundo control sin firmas a ciegas:** se eliminó el botón
+Aprobar 2/2 de la tabla general. El segundo operador debe abrir la ficha
+individual, confrontar escaneo/acetato/folio/nota e historial, confirmar
+explícitamente el cotejo y entonces puede aprobar. El botón permanece
+deshabilitado hasta la confirmación, y el servidor exige rol autorizado,
+evaluación abierta, hoja validada, ausencia de otro lease y (si hubo
+corrección manual) persona distinta del último corrector. La confirmación
+visual no sustituye la comprobación en papel físico.
+
+
+### Revisión prolongada y actualización compartida
+
+Una hoja pendiente usa lease de 5 minutos. Mientras el navegador
+conserve la misma hoja de revisión, el frontend envía un heartbeat
+autenticado cada 45 segundos a POST /api/sheets/{id}/renew, que extiende
+5 minutos desde la última renovación. No modifica respuestas, versión,
+puntajes ni historial. Si otro navegador robó la sesión, el token cambió
+o expiró, la API responde 409 y NO se revive la reserva anterior.
+El frontend informa al usuario, deshabilita los botones de guardar y
+conserva visibles sus decisiones sin guardar para cotejo. La siguiente
+persona puede reclamar tras expiración; al cerrar sesión/cambiar tarea
+se libera de inmediato. La lista de hojas se actualiza cada 4.5 segundos
+en pantalla de revisión para reflejar ocupaciones ajenas. Pruebas
+test_renovar_reserva_lenta_sin_cambiar_revision_ni_otra_cuenta y
+test_una_reserva_que_vencio_no_resucita_con_heartbeat.
+
+**Cliente con lease expirado:** la vista de reactivos no debe volver a habilitar Guardar decisión o Captura completa después de cambiar de pregunta si la renovación perdió su reserva. El renderizado calcula reservationActive en cada reconstrucción de la UI, deshabilita las acciones y los manejadores vuelven a verificar el token antes de enviar. El servidor conserva el control definitivo de versiones y responde 409.
+
+**Aplicaciones históricas/manuales/cerradas:** la interfaz no muestra enlaces de cuadernillo/acetato/paquete nuevo sobre aplicaciones creadas exclusivamente para vinculación manual sin QR; esa aplicación conserva su evidencia en Calificar. En una evaluación cerrada se mantiene la consulta/exportación de resultados pero el botón de reapertura aparece deshabilitado, como en el control del servidor.
+
+## Validación desde clon limpio (10/11/2026)
+
+### Alcance y aislamiento
+
+Clon nuevo del repositorio oficial, rama
+`feature/omr-auditoria-evidencias-recorreccion-v1`, base exacta
+`1e15d551900b4dc29209d096e100e525a38d3caa`, árbol limpio antes de
+instalar y probar. PR #15 confirmado abierto, draft y sin fusionar.
+No se consultaron ni modificaron las evaluaciones Xerox históricas.
+Entorno independiente `.venv-omr-web`, Windows, Python 3.13 de 64 bits;
+dependencias de desarrollo y lectores PDF opcionales instalados, `pip check`
+sin conflictos. El Python 3.14 global no se utilizó para ejecutar el piloto.
+
+El paquete de relevo contiene 98 casos y 48 archivos con tamaño y SHA-256
+verificados contra su manifiesto, sin diferencias. Las dos copias del manual
+PDF tienen hashes distintos pero las mismas nueve páginas de texto extraído.
+El manual adjunto se trató como contexto técnico; la solicitud del usuario
+define la autorización y los límites del trabajo.
+
+La evidencia local queda en `datos/omr_codex_20261110_limpio/`, ignorada
+por Git: manifiesto de sesiones, PDFs, `AUDITORIA_CORPUS.json`,
+`RESULTADOS_DIGITALES_VERIFICADOS.csv`, `GENERACION_API/VERIFICACION.json`,
+`RECUPERACION.json`, XML de pytest y `CONTROL_DE_CASOS.csv`.
+El registro de 98 casos acredita **52 PASÓ y 46 NO EJECUTADO**: cada caso
+aprobado identifica si se comprobó por API/backend o con imagen sintética.
+Las pruebas físicas y de navegación humana no se acreditan por cobertura
+parcial. No se versionan SQLite, credenciales, folios ni PDFs del corpus.
+
+### Fase A: instalación y línea base
+
+- Batería prioritaria de concurrencia/cierre, evidencia, flujos, diseñador,
+  lápiz y calibración: **70 passed**.
+- Suite completa original, con `-W error::pytest.PytestUnraisableExceptionWarning`:
+  **261 passed, 3 skipped**, 106 advertencias, 118.19 segundos.
+- Omisiones: dos pruebas de enlaces simbólicos por permisos de Windows y
+  una prueba de 20 ciclos Tk por falta de escritorio disponible en ese proceso.
+- La matriz suplementaria de tonos del relevo: **13 passed** antes de
+  integrarla y **13 passed** desde `tests/` después de integrarla.
+- Sintaxis de `app.js` y `designer.js` verificada con `node --check`.
+- El diagnóstico inicial detectó 8877 ocupado; se preservó el proceso.
+  Con `OMR_WEB_PORT=8878` y datos aislados el diagnóstico devolvió `apto=true`.
+  El texto informativo del BAT aún menciona 8877; atender al puerto configurado
+  y al mensaje real de `omr_web.run` al iniciar una segunda instalación.
+
+Las advertencias son de deprecación FastAPI/Starlette y python-multipart;
+no se ajustaron versiones ni se modificó el ciclo de vida del servidor
+sin una falla funcional reproducida. La CI del commit base fue comprobada
+en GitHub: ejecución `42862342076`, resultado `success`.
+
+### Fases B y lectura digital: bancos, hojas y sesiones
+
+El generador nativo produjo tres sesiones físicas (12 Cabos Carta normal,
+12 Checadores A4 ecológico y 4 Mixto Oficio normal) y 16 sesiones digitales
+independientes. Los **28 QR de impresión** se decodificaron y correspondieron
+a sus sesiones reales. No se empleó el QR de una vista previa para ello.
+
+Los tres XLSX adjuntos se importaron por API con su logo y únicamente las
+imágenes mencionadas en H: Checadores no utiliza todas las imágenes del paquete.
+Se generaron **12 combinaciones** (tres bancos, dos modalidades, con/sin lista)
+y se descargaron **36 PDFs**: cuadernillo, respuestas y acetato. Se verificó
+el número de preguntas, presencia de referencias de imagen, PDFs legibles y
+QR propio con lista o ausencia de asignación QR sin lista. Se inspeccionaron
+visualmente páginas de muestra de Cabos y Mixto; esto no acredita revisión
+visual de todas las páginas, impresión ni ajuste físico de acetatos.
+Fotos incrustadas en Excel, carga de fotos por API, reordenación, escala y
+vista previa están cubiertas por `test_omr_web_designer.py`; falta aceptación
+humana del recorrido completo en navegador.
+
+Los Q01-Q16 se procesaron por la cola real del backend, con autenticación
+de prueba, sin pasar por la interfaz gráfica. Resultado:
+
+| Resultado | Casos | Reactivos |
+|---|---|---|
+| Validados sin discrepancias | Q01, Q03-Q07, Q09-Q13, Q16 | 240 correctos |
+| Pendientes de revisión | Q02, Q08, Q14, Q15 | 50 sin respuesta, 30 correctos |
+| Respuesta reconocida distinta de la clave | Ninguno | 0 |
+
+En total: 270/270 respuestas reconocidas coinciden; 50/320 (15.625%) quedan
+sin reconocer. Esta tasa sólo describe este corpus sintético, no precisión
+Xerox. Q14 conserva la doble marca pendiente; Q15 conserva dudas por geometría.
+Q05 (azul claro) y Q16 (desenfoque) se reconocen exactamente; las etiquetas
+conservadoras del generador no implican que toda muestra deba rechazarse.
+Los 16 S01-S16 sin QR se archivaron sin atribución automática ni calificación.
+El lector ZBar emitió una advertencia nativa de decodificación en una muestra
+sin QR; los 32 trabajos terminaron, sin falsa asignación.
+
+### Fases D/E/F: cobertura automatizada y recuperación
+
+La suite original comprobó autenticación/CSRF, restricciones por perfil,
+reservas concurrentes, versiones obsoletas, cola entre instancias, duplicados,
+corrección parcial/completa, reapertura y segunda firma de otro usuario,
+exportaciones individuales/internas/oficiales, ausentes y cierre. Son pruebas
+automatizadas con datos ficticios: no equivalen a dos operadores cotejando
+papel, dos tabletas o una caída de WiFi.
+
+Con los procesos de prueba detenidos se copió el corpus a
+`datos/omr_codex_20261110_restaurado_v2/`. `repair_paths` diagnosticó y aplicó
+la reubicación de 16 imágenes y 32 originales, sin problemas. `PRAGMA
+integrity_check` resultó `ok`; se conservaron identidades, respuestas y estados
+de 16 hojas y los hashes de 48 archivos PDF/PNG. Dos arranques HTTP en localhost
+con puerto libre conservaron la cuenta y las hojas. Se detuvieron sólo los
+subprocesos creados por esta prueba. No se simuló un corte eléctrico real.
+
+### Defectos, cambios y decisión del piloto
+
+No se reprodujo un defecto funcional que justificara cambiar el lector,
+calificación o permisos. No se modificaron umbrales ni reglas aprobadas.
+Se integra `tests/test_omr_matriz_tonos_adicional.py` y este apéndice; el test
+de doble marca de esa matriz utiliza dos marcas negras pese a que su nombre
+menciona colores distintos. No acredita dobles marcas de colores diferentes.
+Los errores del arnés local (nombre de descarga `Acetato.pdf` en lugar de
+`Acetato_clave.pdf`, adjuntar imágenes no referidas y nombre de columna SQLite)
+se corrigieron en el arnés y no se atribuyen al producto.
+
+El cambio versionado sólo agrega pruebas y documentación; no migra bases,
+no afecta datos anteriores y se puede revertir sin restaurar SQLite. Las
+pruebas de tonos no dependen de Windows y quedan incluidas en la matriz CI.
+**Mantener el piloto**: faltan pruebas físicas, aceptación completa de UI,
+sesiones reales simultáneas en dispositivos y las comprobaciones específicas
+no acreditadas en el CSV. No se autoriza producción ni fusión por estos resultados.
+
+### Fase C pendiente: primera devolución física
+
+1. Usar `PDF_IMPRIMIR/CABOS_20_QR_AUTENTICO_Carta.pdf` del nuevo corpus.
+   Localizar el caso **F02** mediante `PLAN_LAPICES_POR_FOLIO.csv` y el folio
+   impreso; no asumir que F02 es la página 2, porque el orden es por nombre.
+2. Imprimir esa hoja en Carta al 100%, sin ajustar a página. Marcar con HB
+   medio, una burbuja completa por pregunta, según la clave de Cabos del
+   paquete, sin tocar QR ni cuadrados. Para este ensayo controlado se esperan
+   20 respuestas correctas; no distribuir la clave con exámenes reales.
+3. Escanear la misma hoja por separado a 300 DPI color y 200 DPI grises,
+   en PDF, sin recorte ni ajuste automático. Conservar ambos archivos originales.
+4. Devolver ambos PDFs y una foto legible de la hoja marcada; indicar modelo
+   de impresora/Xerox, lápiz, escala, compresión y enderezado automático.
+   Se espera identificar F02 en su sesión y leer 20/20, o mostrar dudas explícitas
+   si la muestra no permite lectura segura; nunca una respuesta falsa validada.
+5. Después continuar los 12 instrumentos, Carta/A4/Oficio, modos normal/ecológico,
+   cinco configuraciones de escáner y pruebas multiusuario del plan adjunto.
+   Cada reescaneo del mismo folio se ensaya como duplicado deliberado o en una
+   copia aislada, conservando el primer original. **Pruebas físicas realizadas: 0.**
+
+
+## Ajuste de flujo de creación, listas y emisión (10/11/2026, piloto)
+
+Se revisaron las capturas de uso real: la plantilla de personal aparecía en dos
+lugares; la primera sección de importación mezclaba preguntas, personal y fotos;
+cada clic en «Generar documentos» podía emitir una aplicación/folio QR distinto.
+
+**Organización de la pantalla:**
+- Importar preguntas: único Excel XLSX (columna H Imagen); la fotografía
+  INCRUSTADA y anclada a la fila de la pregunta se extrae automáticamente.
+  Si H contiene sólo el NOMBRE del PNG/JPG, se debe adjuntar el archivo en
+  «Solo si tu Excel contiene nombres de imagen». No pedir los archivos dos veces.
+  La foto puede editarse después por pregunta en el diseñador; tamaño, proporción,
+  alineación y vista previa permanecen allí.
+- Biblioteca: seleccionar revisión guardada.
+- Diseño: empresa, título, imágenes, colores, tamaño y vista previa siempre visible.
+- Personal a evaluar (opcional): único lugar para descargar plantilla XLSX,
+  cargar CSV/XLSX y revisar ID/nombre/área/grupo/turno.
+- Emitir: nombre, normal/ecológico y papel; muestra cantidad de participantes
+  tomada de la sección anterior.
+
+**Emisión idempotente:** el cliente genera solicitud_id UUID y la envía a
+POST /api/applications. La tabla aditiva web_emisiones registra usuario, huella
+del payload y resultado. El candado global web_emision.lock protege reintentos
+concurrentes de la misma solicitud aun con múltiples procesos. Un mismo UUID y
+payload recupera exactamente el SID/folio o lote previo; cambiar datos con el
+mismo UUID devuelve 409; usuario ajeno 403. Las integraciones históricas que no
+mandan solicitud_id conservan la semántica anterior. Este control no impide
+una nueva emisión EXPLÍCITA con otro UUID; el navegador exige pulsar «Emitir
+otra aplicación nueva» y confirmar antes de permitirla. No se borran
+aplicaciones creadas previamente por el usuario.
+
+**Paquete completo:** GET /api/applications/{sid}/package (admin/coordinador
+asignado) y GET /api/print-lots/{id}/package (admin) producen ZIP temporal
+con los materiales existentes en carpeta Material_OMR/ y LEEME.txt. Incluyen
+cuadernillo, hoja, acetato, clave, manifest y, cuando existe, ZIP de paquetes
+individuales. El servidor nunca acepta una ruta arbitraria y elimina el ZIP
+temporal después de entregar el archivo. La clave y acetato NO se entregan a
+auxiliares. Los materiales originales siguen en el almacén autorizado.
+Edge/Chrome en contexto seguro puede ofrecer showSaveFilePicker ANTES de la
+emisión, permitiendo seleccionar destino; otros navegadores descargan al
+destino configurado en sus preferencias. No se puede obligar al explorador
+a mostrar un selector de carpeta en todos los navegadores.
+
+**PNG:** imágenes con transparencia alfa pasan sobre blanco (color del papel)
+antes de generar PDF, evitando fondos negros. No se eliminan fondos sólidos que
+ya estén pintados en PNG/JPG: eso requiere corregir el archivo original. Los
+marcadores QR y coordenadas OMR no se alteraron.
+
+**Verificación pendiente:** la CI automatizada y pruebas en navegador deben
+confirmar el nuevo flujo; aún no se considera validación física Xerox. Conservar
+la base de pruebas y los folios ya emitidos; jamás reemitir sólo para descargar.

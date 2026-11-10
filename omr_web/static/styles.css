@@ -57,3 +57,55 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
 .pendingReason{padding:10px 12px;border-left:4px solid #cd8527;background:#fff9ef;border-radius:6px;color:#785118;line-height:1.45}
 
 .inkLevels{display:block;font-size:12px;margin-top:7px;font-weight:550;color:#7e5a29}
+
+/* Resultados: análisis con la evidencia física visible al lado. */
+.resultEvidenceLayout{display:grid;grid-template-columns:minmax(300px,.85fr) minmax(360px,1.15fr);gap:14px;margin-top:16px;align-items:start}
+.resultEvidenceLayout .panel{min-width:0}
+.resultEvidenceLayout .scanImage{width:100%;max-height:750px;object-fit:contain}
+.auditReopen{border-top:1px solid #dce5ea;margin-top:18px;padding-top:12px}
+.resultEvidenceLayout .check{margin-bottom:12px}
+@media(max-width:950px){.resultEvidenceLayout{grid-template-columns:1fr}}
+
+
+/* Diseñador: columnas permanentes y acordeones. El visor está fuera de
+   formularios que se reconstruyen, evitando que pierda el PDF activo. */
+.designerWorkbench{display:grid;grid-template-columns:minmax(0,1.07fr) minmax(370px,.93fr);gap:18px;align-items:start}
+.designerSteps{min-width:0;display:flex;flex-direction:column;gap:13px}
+.designerSection{min-width:0}
+.designerSection>summary{cursor:pointer;display:flex;align-items:center;gap:12px;justify-content:space-between;padding:4px 0;list-style:none}
+.designerSection>summary::-webkit-details-marker{display:none}
+.designerSection>summary:after{content:"▾";color:#416a7a;flex-shrink:0}
+.designerSection:not([open])>summary:after{content:"▸"}
+.designerSection>summary b{font-size:15px}
+.designerSection>summary small{font-size:11px;color:#617d8a;font-weight:500}
+.designerSection[open]>summary{border-bottom:1px solid #dce5e9;padding-bottom:11px;margin-bottom:14px}
+.designerSection .designerControls{min-width:0}
+.designerWorkbench .designerPreview{position:sticky;top:10px;max-height:calc(100vh - 24px);overflow:auto;align-self:start}
+.designerWorkbench .pdfPreview{height:min(72vh,800px);min-height:460px}
+@media(max-width:1020px){
+  .designerWorkbench{grid-template-columns:1fr}
+  .designerWorkbench .designerPreview{order:-1;position:sticky;top:0;max-height:43vh;z-index:2;background:#fff;box-shadow:0 7px 15px #1e46521a}
+  .designerWorkbench .pdfPreview{height:30vh;min-height:180px}
+  .designerSection>summary{flex-wrap:wrap;justify-content:flex-start}
+}
+
+
+#rosterSection #rosterInput{min-height:105px}
+#createdFiles{margin-top:12px}
+#createdFiles .panel{background:#f7fbfc;border-color:#cae2e6}
+#createdFiles .advancedDownload{background:white}
+#generateFiles{max-width:100%}
+/* Inicio por tarea: el perfil decide qué herramientas aparecen tras entrar. */
+.workflowChoices{display:grid;grid-template-columns:repeat(auto-fit,minmax(265px,1fr));gap:18px}
+.workflowChoice{display:flex;flex-direction:column;gap:10px;min-height:240px}
+.workflowChoice .lead{flex:1}
+.workflowChoice button{align-self:flex-start}
+.workflowIcon{display:grid;place-items:center;background:#e5f1f3;border-radius:12px;color:#166473;font-size:26px;width:52px;height:52px}
+.advancedDownload{margin-top:12px;padding:12px;border:1px solid #e0e9ed;border-radius:10px}
+.advancedDownload summary{cursor:pointer;font-weight:650;color:#446578}
+.advancedDownload .ghost{margin-top:8px}
+
+/* Segunda firma sólo después de abrir evidencia y reconocer su revisión. */
+.auditApprove{margin-top:14px;padding:14px;background:#f3f9f8;border:1px solid #c8e1df;border-radius:11px}
+.auditApprove h4{margin:0 0 8px}
+.auditApprove .check{margin:12px 0}

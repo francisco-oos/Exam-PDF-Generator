@@ -197,7 +197,8 @@ async def import_exam(db, workbook:UploadFile, *, name:str, title:str,
                 color_subtitulo=str(meta.get("color_subtitulo","#5E7180")),
                 color_respuestas=str(meta.get("color_respuestas","#213A4C")),
                 color_acetato=str(meta.get("color_acetato","#167341")),
-                reutilizable=meta.get("modo","ecologico")=="ecologico")
+                reutilizable=meta.get("modo","ecologico")=="ecologico",
+                logo_ancho_mm=float(meta.get("logo_ancho_mm",23)))
         except (ValueError,TypeError) as error:
             raise WebError(str(error),422) from error
     return {"cuestionario_id":key,"preguntas":len(qs)}
@@ -217,11 +218,15 @@ def serialize_exam(db,exam_id:str):
             "color_respuestas":exam.color_respuestas,
             "color_acetato":exam.color_acetato,
             "logo":exam.logo.name if exam.logo else None,
+            "logo_ancho_mm":exam.logo_ancho_mm,
             "revision":exam.revision,
             "preguntas":[{
                 "tema":q.section,"pregunta":q.prompt,
                 "opciones":list(q.options),"correcta":"ABCD"[q.correct],
-                "imagen":q.image.name if q.image else None}
+                "imagen":q.image.name if q.image else None,
+                "ancho_imagen_mm":q.image_width_mm,
+                "alto_imagen_mm":q.image_height_mm,
+                "alineacion_imagen":q.image_align}
                 for q in exam.questions],
         }
 
@@ -242,12 +247,23 @@ def new_questions(items:list[dict], original, replacements=None):
         # nunca hereda accidentalmente la imagen de otra por cambio de orden.
         keep=item.get("imagen")
         original_image=None
-        if isinstance(keep,int) and 0<=keep<len(original.questions):
+        if type(keep) is int and 0<=keep<len(original.questions):
             original_image=original.questions[keep].image
+        elif isinstance(keep,str) and keep:
+            # También aceptar el JSON obtenido de GET /library/{id}, que
+            # devuelve nombres de recurso en lugar de índices del editor.
+            matches=[q.image for q in original.questions
+                     if q.image is not None and q.image.name==keep]
+            if len(matches)!=1:
+                raise WebError(f"Pregunta {i}: imagen de biblioteca desconocida.",422)
+            original_image=matches[0]
         photo=replacements.get(i,original_image)
         result.append(Question(
             str(item.get("tema","")),str(item.get("pregunta","")),
-            tuple(str(v) for v in opts),"ABCD".index(letter),photo))
+            tuple(str(v) for v in opts),"ABCD".index(letter),photo,
+            float(item.get("ancho_imagen_mm",106)),
+            float(item.get("alto_imagen_mm",62)),
+            str(item.get("alineacion_imagen","CENTER"))))
     return result
 
 
@@ -310,19 +326,21 @@ async def update_exam(db,exam_id:str,raw:str,images:list[UploadFile],
                 color_subtitulo=str(data.get("color_subtitulo",exam.color_subtitulo)),
                 color_respuestas=str(data.get("color_respuestas",exam.color_respuestas)),
                 color_acetato=str(data.get("color_acetato",exam.color_acetato)),
+                logo_ancho_mm=float(data.get("logo_ancho_mm",exam.logo_ancho_mm)),
             )
         except (ValueError,TypeError) as error:
             raise WebError(str(error),422) from error
     return {"cuestionario_id":saved,"revision":serialize_exam(db,saved)["revision"]}
 
 
-def preview_exam(db,exam_id:str,config:dict,view:str) -> bytes:
+def preview_exam(db,exam_id:str,config:dict,view:str,
+                 *,replacements=None,logo_override=None) -> bytes:
     if view not in ("Cuadernillo","Respuestas","Acetato"):
         raise WebError("Vista inválida.",422)
     with TemporaryDirectory(prefix="omr_web_preview_") as tmp:
         exam=load_exam(db,exam_id,Path(tmp))
         choices=config.get("preguntas")
-        questions=tuple(new_questions(choices,exam)) if choices is not None else exam.questions
+        questions=tuple(new_questions(choices,exam,replacements)) if choices is not None else exam.questions
         mode=str(config.get("modo","ecologico" if exam.reutilizable else "normal"))
         paper=str(config.get("papel",exam.tamano_papel))
         if mode not in ("normal","ecologico") or paper not in ("Carta","A4","Oficio"):
@@ -337,7 +355,9 @@ def preview_exam(db,exam_id:str,config:dict,view:str) -> bytes:
                 titulo=str(config.get("titulo",exam.titulo)),
                 subtitulo=str(config.get("subtitulo",exam.subtitulo)),
                 instrucciones=str(config.get("instrucciones",exam.instrucciones)),
-                logo=exam.logo if config.get("quitar_logo") is not True else None,
+                logo=(logo_override if logo_override is not None else
+                      exam.logo if config.get("quitar_logo") is not True else None),
+                logo_ancho_mm=float(config.get("logo_ancho_mm",exam.logo_ancho_mm)),
                 tamano_papel=paper,letra=float(config.get("letra",exam.letra)),
                 reutilizable=mode=="ecologico",modo_examen=mode,
                 cantidad_personas=1 if config.get("con_personal") else 0,
@@ -346,6 +366,54 @@ def preview_exam(db,exam_id:str,config:dict,view:str) -> bytes:
             return build_preview_pdf(setting,view)
         except (ValueError,TypeError) as error:
             raise WebError(str(error),422) from error
+
+
+
+async def preview_with_uploads(db,exam_id:str,raw:str,view:str,
+                               images:list[UploadFile],logo:UploadFile|None):
+    """Vista previa con imágenes temporales antes de guardar en biblioteca."""
+    if len(images)>100:
+        raise WebError("Máximo 100 fotos por vista previa.",422)
+    try:
+        config=json.loads(raw)
+        if not isinstance(config,dict):
+            raise ValueError("La configuración debe ser un objeto.")
+    except (ValueError,TypeError) as exc:
+        raise WebError("Configuración de vista previa inválida.",422) from exc
+    with TemporaryDirectory(prefix="omr_preview_pendientes_") as tmp:
+        folder=Path(tmp)
+        replacements={}
+        for upload in images:
+            name=filename_of(upload,image=True)
+            match=INDEXED_IMAGE.match(name)
+            if match is None:
+                raise WebError("Nombre de imagen esperado: q1__foto.png.",422)
+            index=int(match.group(1))
+            if index in replacements:
+                raise WebError("Dos fotos para el mismo reactivo.",422)
+            image_path=await save_upload(upload,folder/name,MAX_IMAGE_BYTES)
+            try:
+                _safe_image(image_path,source=f"Pregunta {index}")
+            except ValueError as exc:
+                raise WebError(str(exc),422) from exc
+            replacements[index]=image_path
+        logo_path=None
+        if logo and logo.filename:
+            ext=Path(filename_of(logo,image=True)).suffix.lower()
+            logo_path=await save_upload(logo,folder/("logo_preview"+ext),
+                                        MAX_IMAGE_BYTES)
+            try:
+                _safe_image(logo_path,source="Logotipo de vista previa")
+            except ValueError as exc:
+                raise WebError(str(exc),422) from exc
+        if replacements and (not isinstance(config.get("preguntas"),list) or
+                any(i>len(config["preguntas"]) for i in replacements)):
+            raise WebError("La foto no corresponde a una pregunta visible.",422)
+        try:
+            return preview_exam(db,exam_id,config,view,
+                                replacements=replacements,logo_override=logo_path)
+        except (ValueError,TypeError) as exc:
+            raise WebError(str(exc),422) from exc
 
 
 def resource(db,exam_id:str,name:str):

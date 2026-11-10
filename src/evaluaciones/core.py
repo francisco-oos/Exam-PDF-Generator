@@ -80,6 +80,10 @@ class Question:
     options: tuple[str, str, str, str]
     correct: int  # 0, 1, 2, 3
     image: Path | None = None  # Archivo opcional dentro de imagenes/ junto al XLSX
+    image_width_mm: float = 106.0  # Caja máxima, conserva proporciones
+    image_height_mm: float = 62.0
+    image_align: str = "CENTER"  # LEFT, CENTER, RIGHT
+
 
 
 def _font():
@@ -176,10 +180,24 @@ def _question_image(name: object, base: Path, row: int) -> Path | None:
     return _safe_image(folder / name, source=f'Fila {row}/Imagen')
 
 
-def _pdf_image(path: Path, max_width: float, max_height: float) -> PdfImage:
+def _white_background(im: PILImage.Image) -> PILImage.Image:
+    """PNG transparente sobre papel blanco, no sobre fondo negro opaco.
+
+    No elimina fondos que ya estén pintados en la imagen de origen.
+    """
+    if im.mode in ("RGBA","LA","PA") or "transparency" in im.info:
+        foreground=im.convert("RGBA")
+        background=PILImage.new("RGBA",foreground.size,(255,255,255,255))
+        background.alpha_composite(foreground)
+        return background.convert("RGB")
+    return im.convert("RGB")
+
+
+def _pdf_image(path: Path, max_width: float, max_height: float,
+               align: str = "CENTER") -> PdfImage:
     """Desvincula el PDF del archivo original, normalizando EXIF y dimensiones."""
     with PILImage.open(path) as im:
-        im = ImageOps.exif_transpose(im).convert('RGB')
+        im = _white_background(ImageOps.exif_transpose(im))
         im.thumbnail((1500, 1500), PILImage.Resampling.LANCZOS)
         w, h = im.size
         ratio = min(max_width / w, max_height / h)
@@ -187,7 +205,9 @@ def _pdf_image(path: Path, max_width: float, max_height: float) -> PdfImage:
         im.save(buf, format='PNG', optimize=False)
     buf.seek(0)
     img = PdfImage(buf, width=w*ratio, height=h*ratio)
-    img.hAlign='CENTER'
+    if align not in ("LEFT","CENTER","RIGHT"):
+        raise ExamError("Alineación de imagen no válida.")
+    img.hAlign=align
     return img
 
 
@@ -389,7 +409,8 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
               instrucciones: str = '', logo: Path | None = None,
               color_titulo=TINT, color_subtitulo=MUTED,
               size=A4, font_size: float = 9.0, reusable: bool = False,
-              participante: dict | None = None):
+              participante: dict | None = None,
+              logo_ancho_mm: float = 23.0):
     # KeepTogether mantiene juntas las opciones; ReportLab pagina automáticamente.
     page_w, page_h = size
     paper_width = page_w - 94
@@ -410,7 +431,10 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
     if puesto:
         head.append(Paragraph('Área / grupo: '+escape(puesto),styles['small']))
     if logo:
-        logopic = _pdf_image(logo,65,65)
+        logo_width=float(logo_ancho_mm)*72/25.4
+        if not 10 <= float(logo_ancho_mm) <= 28:
+            raise ExamError("El logotipo debe medir entre 10 y 28 mm.")
+        logopic = _pdf_image(logo,logo_width,72)
         header_table=Table([[logopic,head]],colWidths=[85,paper_width-85])
     else:
         header_table=Table([[head]],colWidths=[paper_width])
@@ -449,7 +473,13 @@ def _exam_pdf(path: Path,questions: list[Question],title: str,subtitle: str,
         block=[Paragraph(f'{index:02d}. {escape(q.prompt)}',styles['question'])]
         if q.image:
             block.append(Spacer(1,3))
-            block.append(_pdf_image(q.image,300,175))
+            width=float(q.image_width_mm)
+            height=float(q.image_height_mm)
+            if not (30<=width<=165 and 15<=height<=90):
+                raise ExamError(f"Pregunta {index}: tamaño de imagen fuera de rango.")
+            block.append(_pdf_image(
+                q.image,min(width*72/25.4,paper_width),
+                min(height*72/25.4,260),align=q.image_align))
             block.append(Spacer(1,5))
         block.extend(Paragraph(f'{letter})  {escape(opt)}',styles['answer']) for letter,opt in zip('abcd',q.options))
         story.append(KeepTogether(block))
@@ -500,7 +530,8 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
              color_respuestas: str = DEFAULT_ANSWER_COLOR,
              color_acetato: str = DEFAULT_ACETATE_COLOR,
              tamano_papel: str = 'A4', letra: float = 9.0,
-             reutilizable: bool = False) -> Path:
+             reutilizable: bool = False, logo_ancho_mm: float = 23.0,
+             question_layouts: list[dict] | None = None) -> Path:
     # Validar ANTES de crear archivos evita carpetas incompletas y tintas inválidas.
     from biblioteca import hex_color
     color_titulo=hex_color(color_titulo,'Color del título')
@@ -518,6 +549,16 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
     instrucciones=_text(instrucciones,label='Instrucciones',limit=650) if instrucciones.strip() else ''
     entrada=Path(entrada).expanduser()
     questions=read_questions(entrada)
+    if question_layouts is not None:
+        from dataclasses import replace
+        if len(question_layouts)!=len(questions):
+            raise ExamError("El diseño no coincide con las preguntas importadas.")
+        questions=[
+            replace(q,image_width_mm=float(meta.get("ancho_imagen_mm",106)),
+                    image_height_mm=float(meta.get("alto_imagen_mm",62)),
+                    image_align=str(meta.get("alineacion_imagen","CENTER")))
+            for q,meta in zip(questions,question_layouts)
+        ]
     safe_logo=_safe_image(Path(logo),source='Logotipo') if logo else None
     normal,bold=_font()
     rgb_titulo=colors.HexColor(color_titulo)
@@ -536,7 +577,8 @@ def generate(entrada: Path, salida: Path, titulo: str, subtitulo: str,
            'Cuadernillo.pdf':lambda p:_exam_pdf(p,questions,titulo,subtitulo,normal,bold,
                     empresa=empresa,puesto=puesto,instrucciones=instrucciones,logo=safe_logo,
                     color_titulo=rgb_titulo,color_subtitulo=rgb_subtitulo,
-                    size=size,font_size=letra,reusable=reutilizable),
+                    size=size,font_size=letra,reusable=reutilizable,
+                    logo_ancho_mm=logo_ancho_mm),
            'Hoja_respuestas.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=False,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas,acetate_color=colors.HexColor(color_acetato)),
            'Acetato_clave.pdf':lambda p:_answer_sheet(p,questions,titulo,subtitulo,acetate=True,normal=normal,bold=bold,title_color=rgb_titulo,subtitle_color=rgb_subtitulo,size=size,answer_color=rgb_respuestas,acetate_color=colors.HexColor(color_acetato)),
            'Clave_docente.pdf':lambda p:_key_pdf(p,questions,titulo,normal,bold,empresa=empresa,puesto=puesto,size=size),

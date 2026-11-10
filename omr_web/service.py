@@ -7,6 +7,7 @@ No hay sincronización de SQLite a través de red ni segunda base de resultados.
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import hmac
 import json
 import os
@@ -30,6 +31,44 @@ from omr_evaluaciones.motor import (
 
 VALID_ROLES = {"admin", "coordinador", "capturista", "auditor"}
 IDENTITY = re.compile(r"^[A-Za-z0-9_.-]{3,40}$")
+
+
+@contextmanager
+def exclusive_scan_queue(lockfile: Path):
+    """Candado de proceso para una cola SQLite compartida, Linux y Windows.
+
+    El lock del SO se libera también si el proceso termina abruptamente.
+    Un segundo worker espera sin bloquear el servidor web ni las revisiones.
+    """
+    lockfile.parent.mkdir(parents=True, exist_ok=True)
+    with lockfile.open("a+b") as handle:
+        if os.name=="nt":
+            import msvcrt
+            # Windows exige locks obligatorios: leer el byte reservado
+            # por otro worker lanza PermissionError. Sólo consultar tamaño.
+            handle.seek(0,os.SEEK_END)
+            if handle.tell()==0:
+                handle.write(b"0")
+                handle.flush()
+            while True:
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(),msvcrt.LK_NBLCK,1)
+                    break
+                except OSError:
+                    time.sleep(0.2)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(),msvcrt.LK_UNLCK,1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(),fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
 
 
 class WebError(Exception):
@@ -114,11 +153,30 @@ class WebService:
                   id TEXT PRIMARY KEY, nombre TEXT NOT NULL,
                   ruta TEXT NOT NULL, modo TEXT NOT NULL,
                   papel TEXT NOT NULL, creado TEXT NOT NULL);
+                -- Una misma solicitud de emisión no puede generar dos folios.
+                CREATE TABLE IF NOT EXISTS web_emisiones(
+                  id TEXT PRIMARY KEY, usuario_id TEXT NOT NULL,
+                  huella TEXT NOT NULL, resultado TEXT NOT NULL,
+                  creado TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS web_auditoria_revision(
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  hoja_id TEXT NOT NULL, tipo TEXT NOT NULL,
+                  pregunta INTEGER, anterior TEXT, nueva TEXT,
+                  aciertos_antes INTEGER, aciertos_despues INTEGER,
+                  motivo TEXT NOT NULL, usuario_id TEXT NOT NULL,
+                  fecha TEXT NOT NULL,
+                  FOREIGN KEY(hoja_id) REFERENCES hojas(id),
+                  FOREIGN KEY(usuario_id) REFERENCES web_usuarios(id));
+                CREATE INDEX IF NOT EXISTS idx_auditoria_hoja
+                  ON web_auditoria_revision(hoja_id,id);
             """)
-            # Reiniciar trabajos interrumpidos sin perder sus originales
-            # (la importación OMR ya es idempotente).
-            db.execute("UPDATE web_trabajos SET estado='pendiente' "
-                       "WHERE estado='procesando'")
+            # Sólo el worker que tenga el candado global puede recuperar
+            # trabajos interrumpidos: otra instancia podría estar procesando.
+            columns={r["name"] for r in db.execute("PRAGMA table_info(web_trabajos)")}
+            if "archivo_sha" not in columns:
+                db.execute("ALTER TABLE web_trabajos ADD COLUMN archivo_sha TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS idx_web_trabajos_sha "
+                       "ON web_trabajos(archivo_sha,estado)")
         if self._executor:
             self.wake()
 
@@ -259,6 +317,12 @@ class WebService:
                 (user["id"],))}
         return [x for x in sessions if x["id"] in allowed]
 
+    @staticmethod
+    def _assert_open(db, sid):
+        session=db.execute("SELECT estado FROM sesiones WHERE id=?",(sid,)).fetchone()
+        if not session or session["estado"]!="abierta":
+            raise WebError("La evaluación está cerrada; requiere una nueva autorización.",409)
+
     def questions(self, user, sid):
         self.require(user, sid=sid)
         sess=self.store.session(sid)
@@ -342,6 +406,7 @@ class WebService:
             if not page:
                 raise WebError("Hoja inexistente.", 404)
             self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Hoja sin identidad válida o en conflicto.", 409)
             if page["estado"]=="validada" and user["rol"]=="capturista":
@@ -360,6 +425,33 @@ class WebService:
                 (sheet_id,user["id"],checksum(token),now+ttl,rev))
             self._event(db,user["id"],sheet_id,"RECLAMAR","Revisión temporal")
         return {"lease":token,"revision":rev,"vence_en_segundos":ttl}
+
+    def renew(self,user,sheet_id,lease_token,*,ttl=300):
+        """Renueva una reserva activa sin cambiar respuestas, revisión ni auditoría.
+
+        Una pestaña desconectada deja de renovarse y expira. Ni otra cuenta,
+        ni un token obsoleto, ni una hoja validada pueden revivir el candado.
+        """
+        self.require(user,roles={"admin","coordinador","capturista"})
+        now=int(time.time())
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            page=db.execute("SELECT sesion_id,estado FROM hojas WHERE id=?",
+                            (sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
+            lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
+                             (sheet_id,)).fetchone()
+            if (page["estado"]!="revisar" or not lease or
+                lease["usuario_id"]!=user["id"] or lease["vence"]<=now or
+                not hmac.compare_digest(lease["token_hash"],checksum(lease_token))):
+                raise WebError("Reserva caducada o perteneciente a otra sesión. "
+                               "Conserva tus apuntes y vuelve a tomar la hoja.",409)
+            db.execute("UPDATE web_reclamos SET vence=? WHERE hoja_id=?",
+                       (now+ttl,sheet_id))
+        return {"vence_en_segundos":ttl,"revision":lease["revision"]}
 
     def claim_next(self,user,sid):
         """Repartir trabajo sin que dos personas reciban la misma hoja.
@@ -415,6 +507,13 @@ class WebService:
             if not page:
                 raise WebError("Hoja inexistente.",404)
             self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
+            # Una hoja ya validada es inmutable salvo reapertura formal,
+            # incluso si su antiguo lease fue liberado tras guardar.
+            if page["estado"]=="validada":
+                if user["rol"]=="capturista":
+                    raise WebError("Una hoja validada requiere revisión del coordinador.",409)
+                raise WebError("Reabre una corrección autorizada desde Resultados.",409)
             lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
                              (sheet_id,)).fetchone()
             if (not lease or lease["usuario_id"]!=user["id"] or
@@ -425,10 +524,13 @@ class WebService:
                 raise WebError("La hoja cambió. Actualízala antes de guardar.",409)
             if not page["token"] or page["estado"] in ("duplicado","descartada","sin_identificar"):
                 raise WebError("Identifica o resuelve antes esta hoja.",409)
-            if page["estado"]=="validada" and user["rol"]=="capturista":
-                raise WebError("Una hoja validada requiere revisión del coordinador.",409)
             answers=json.loads(page["respuestas_json"])
             issues=json.loads(page["dudas_json"])
+            original=list(answers)
+            questions=json.loads(db.execute(
+                "SELECT preguntas_json FROM sesiones WHERE id=?",
+                (page["sesion_id"],)).fetchone()["preguntas_json"])
+            before_score=sum(a==q["correcta"] for a,q in zip(original,questions))
             taken=set()
             for change in changes:
                 q=change.get("pregunta")
@@ -444,17 +546,33 @@ class WebService:
                     (hoja_id,pregunta,decision,motivo,revisor,fecha)
                     VALUES(?,?,?,?,?,?)""",
                     (sheet_id,q,decision,reason[:600],user["nombre"],utcnow()))
+            after_score=sum(a==q["correcta"] for a,q in zip(answers,questions))
+            for change in changes:
+                index=change["pregunta"]-1
+                db.execute("""INSERT INTO web_auditoria_revision(
+                    hoja_id,tipo,pregunta,anterior,nueva,aciertos_antes,
+                    aciertos_despues,motivo,usuario_id,fecha)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    (sheet_id,"CORRECCION",index+1,
+                     original[index] or "BLANCO",change["decision"],
+                     before_score,after_score,reason.strip()[:600],
+                     user["id"],utcnow()))
             status="revisar" if issues else "validada"
             db.execute("""UPDATE hojas SET respuestas_json=?,
                 dudas_json=?,estado=? WHERE id=?""",
                 (compact_json(answers),compact_json(issues),status,sheet_id))
             new_revision=lease["revision"]+1
+            # La reserva sólo se mantiene durante correcciones parciales.
+            # Al guardar la última duda, liberar atómicamente: no retener
+            # otra tableta cinco minutos ni impedir la aprobación 2/2.
+            new_expiry=now+300 if status=="revisar" else 0
             db.execute("""UPDATE web_reclamos SET revision=?,vence=?
-                WHERE hoja_id=?""",(new_revision,now+300,sheet_id))
+                WHERE hoja_id=?""",(new_revision,new_expiry,sheet_id))
             db.execute("DELETE FROM web_aprobaciones WHERE hoja_id=?", (sheet_id,))
             self._event(db,user["id"],sheet_id,"CORRECCION",
                         f"{len(changes)} reactivos; motivo: {reason}")
-        return {"revision":new_revision,"estado":status,"pendientes":len(issues)}
+        return {"revision":new_revision,"estado":status,"pendientes":len(issues),
+                "reserva_liberada":status=="validada"}
 
     def approve(self,user,sheet_id):
         self.require(user,roles={"admin","coordinador"})
@@ -465,16 +583,241 @@ class WebService:
             if not page:
                 raise WebError("Hoja inexistente.",404)
             self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
             if page["estado"]!="validada":
                 raise WebError("Solo se aprueban hojas validadas.",409)
             lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
                              (sheet_id,)).fetchone()
-            if lease and lease["vence"]>time.time() and lease["usuario_id"]!=user["id"]:
-                raise WebError("La hoja sigue en revisión por otro operador.",409)
+            if lease and lease["vence"]>time.time():
+                raise WebError("La hoja sigue reservada. Debe liberarse antes de aprobar.",409)
+            current=db.execute("SELECT 1 FROM web_aprobaciones WHERE hoja_id=?",
+                               (sheet_id,)).fetchone()
+            if current:
+                raise WebError("Esta hoja ya cuenta con aprobación 2/2; no se sustituye.",409)
+            last=db.execute("""SELECT usuario_id FROM web_auditoria_revision
+                WHERE hoja_id=? AND tipo='CORRECCION' ORDER BY id DESC LIMIT 1""",
+                (sheet_id,)).fetchone()
+            if last and last["usuario_id"]==user["id"]:
+                raise WebError("La aprobación 2/2 debe hacerla OTRO administrador "
+                               "o coordinador distinto de quien corrigió la hoja.",409)
             revision=int(lease["revision"]) if lease else 0
-            db.execute("""INSERT OR REPLACE INTO web_aprobaciones VALUES(?,?,?,?)""",
+            db.execute("""INSERT INTO web_aprobaciones VALUES(?,?,?,?)""",
                        (sheet_id,user["id"],utcnow(),revision))
             self._event(db,user["id"],sheet_id,"APROBAR","Validación del coordinador")
+
+    def reopen_validated(self,user,sheet_id,question,reason):
+        """Reabrir un reactivo sin destruir la nota, el original ni la bitácora."""
+        self.require(user,roles={"admin","coordinador"})
+        reason=str(reason or "").strip()
+        if len(reason)<10:
+            raise WebError("Motivo obligatorio (mínimo 10 caracteres).",422)
+        if type(question) is not int:
+            raise WebError("Reactivo inválido.",422)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            page=db.execute("SELECT * FROM hojas WHERE id=?",(sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
+            if page["estado"]!="validada" or not page["token"]:
+                raise WebError("Sólo se reabren hojas identificadas y validadas.",409)
+            answers=json.loads(page["respuestas_json"])
+            if not 1<=question<=len(answers):
+                raise WebError("Reactivo fuera de rango.",422)
+            lease=db.execute("SELECT * FROM web_reclamos WHERE hoja_id=?",
+                             (sheet_id,)).fetchone()
+            if (lease and lease["vence"]>int(time.time()) and
+                    lease["usuario_id"]!=user["id"]):
+                raise WebError("Otra persona está revisando esta hoja.",409)
+            # Reabrir invalida también la reserva anterior del mismo usuario:
+            # cualquier pestaña vieja perderá su token antes de poder guardar.
+            questions=json.loads(db.execute(
+                "SELECT preguntas_json FROM sesiones WHERE id=?",
+                (page["sesion_id"],)).fetchone()["preguntas_json"])
+            correct=sum(a==q["correcta"] for a,q in zip(answers,questions))
+            previous=answers[question-1] or "BLANCO"
+            issues=[{"pregunta":question,
+                     "razon":"Aclaración abierta: requiere cotejo humano."}]
+            db.execute("UPDATE hojas SET estado='revisar',dudas_json=? WHERE id=?",
+                       (compact_json(issues),sheet_id))
+            db.execute("DELETE FROM web_reclamos WHERE hoja_id=?",(sheet_id,))
+            db.execute("DELETE FROM web_aprobaciones WHERE hoja_id=?",(sheet_id,))
+            db.execute("""INSERT INTO web_auditoria_revision(
+                hoja_id,tipo,pregunta,anterior,nueva,aciertos_antes,
+                aciertos_despues,motivo,usuario_id,fecha)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (sheet_id,"REAPERTURA",question,previous,None,correct,None,
+                 reason[:600],user["id"],utcnow()))
+            db.execute("""INSERT INTO revisiones(
+                hoja_id,pregunta,decision,motivo,revisor,fecha)
+                VALUES(?,?,?,?,?,?)""",
+                (sheet_id,question,"REAPERTURA",reason[:600],
+                 user["nombre"],utcnow()))
+            self._event(db,user["id"],sheet_id,"REAPERTURA",
+                        f"Pregunta {question}; nota previa {correct}/{len(questions)}; "
+                        f"motivo: {reason}")
+        return {"hoja_id":sheet_id,"sesion_id":page["sesion_id"],
+                "pregunta":question,"estado":"revisar",
+                "aciertos_anteriores":correct,
+                "mensaje":"Resultado suspendido hasta guardar una nueva decisión."}
+
+    def sheet_history(self,user,sheet_id):
+        """Bitácora anterior y actual por hoja, nunca expone claves."""
+        self.require(user,roles={"admin","coordinador","auditor"})
+        with self.store.connect() as db:
+            page=db.execute("SELECT sesion_id FROM hojas WHERE id=?",
+                            (sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            detailed=[dict(x) for x in db.execute("""
+                SELECT h.id,h.tipo,h.pregunta,h.anterior,h.nueva,
+                       h.aciertos_antes,h.aciertos_despues,h.motivo,h.fecha,
+                       u.nombre AS operador,u.usuario AS cuenta
+                FROM web_auditoria_revision h
+                JOIN web_usuarios u ON u.id=h.usuario_id
+                WHERE h.hoja_id=? ORDER BY h.id
+            """,(sheet_id,))]
+            legacy=[dict(x) for x in db.execute("""
+                SELECT id,pregunta,decision,motivo,revisor,fecha
+                FROM revisiones WHERE hoja_id=? ORDER BY id
+            """,(sheet_id,))]
+            approval=db.execute("""
+                SELECT a.fecha,a.revision,u.nombre AS operador
+                FROM web_aprobaciones a JOIN web_usuarios u
+                  ON u.id=a.usuario_id WHERE a.hoja_id=?
+            """,(sheet_id,)).fetchone()
+        return {"hoja_id":sheet_id,"cambios":detailed,
+                "registros_historicos":legacy,
+                "aprobacion":dict(approval) if approval else None}
+
+    def results_with_evidence(self,user,sid):
+        self.require(user,roles={"admin","coordinador","auditor"},sid=sid)
+        report=self.store.results(sid)
+        pages=self.store.pages(sid)
+        session=report["sesion"]
+        by_person={}
+        for person in session["personal"]:
+            scanned=[page for page in pages
+                     if page["token"]==person["token"] and
+                     page["estado"] not in ("descartada","duplicado")]
+            by_person[person["id"]]=scanned[0]["id"] if len(scanned)==1 else None
+        with self.store.connect() as db:
+            approvals={x["hoja_id"]:dict(x) for x in db.execute(
+                "SELECT hoja_id,fecha,revision FROM web_aprobaciones")}
+            last_corrections={}
+            for correction in db.execute("""SELECT hoja_id,usuario_id
+                FROM web_auditoria_revision WHERE tipo='CORRECCION' ORDER BY id"""):
+                last_corrections[correction["hoja_id"]]=correction["usuario_id"]
+        return {"sesion_id":sid,"promedio":report["promedio"],
+                "estado_cierre":report["sesion"]["estado"],
+                "validados":report["validados"],"pendientes":report["pendientes"],
+                "ausentes":report["ausentes"],
+                "participantes":[{
+                    "id":p["id"],"folio":p["folio"],"nombre":p["nombre"],
+                    "estado":p["estado"],"aciertos":p["aciertos"],
+                    "porcentaje":p["porcentaje"],"preguntas":p["preguntas"],
+                    "temas":p["temas"],"areas_mejora":p["areas_mejora"],
+                    "hoja_id":by_person.get(p["id"]),
+                    "aprobacion":approvals.get(by_person.get(p["id"])),
+                    "requiere_otro_aprobador":bool(
+                        last_corrections.get(by_person.get(p["id"]))==user["id"]),
+                } for p in report["participantes"]]}
+
+    def resolve_duplicate(self,user,sheet_id,reason):
+        """Descarta exclusivamente el reescaneo conflictivo, nunca la nota anterior.
+
+        Requiere una hoja primaria validada y un motivo explícito. La evidencia
+        y el PDF original del duplicado siguen archivados, con auditoría.
+        """
+        self.require(user,roles={"admin","coordinador"})
+        reason=str(reason or "").strip()
+        if len(reason)<10:
+            raise WebError("Indica el motivo de descarte (mínimo 10 caracteres).",422)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            page=db.execute("SELECT * FROM hojas WHERE id=?",(sheet_id,)).fetchone()
+            if not page:
+                raise WebError("Hoja inexistente.",404)
+            self.require(user,sid=page["sesion_id"])
+            self._assert_open(db,page["sesion_id"])
+            if page["estado"]!="duplicado" or not page["token"]:
+                raise WebError("Sólo se puede descartar un reescaneo duplicado.",409)
+            primary=db.execute("""SELECT id FROM hojas
+                WHERE sesion_id=? AND token=? AND id<>?
+                  AND estado='validada' ORDER BY creada,id LIMIT 1""",
+                (page["sesion_id"],page["token"],sheet_id)).fetchone()
+            if not primary:
+                raise WebError("Primero se debe validar la hoja original del folio.",409)
+            db.execute("UPDATE hojas SET estado='descartada' WHERE id=?",(sheet_id,))
+            db.execute("""INSERT INTO web_auditoria_revision(
+                hoja_id,tipo,pregunta,anterior,nueva,aciertos_antes,
+                aciertos_despues,motivo,usuario_id,fecha)
+                VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                (sheet_id,"DESCARTAR_REESCANEO",None,"duplicado","descartada",
+                 None,None,reason[:600],user["id"],utcnow()))
+            self._event(db,user["id"],sheet_id,"DESCARTAR_REESCANEO",
+                        "Original protegido: "+primary["id"]+"; "+reason)
+        return {"hoja_id":sheet_id,"estado":"descartada",
+                "original_conservado":primary["id"]}
+
+    def closure_summary(self,user,sid):
+        """Pre-cierre: ningún ausente se disfraza de calificado."""
+        self.require(user,roles={"admin","coordinador"},sid=sid)
+        report=self.store.results(sid)
+        pages=report["hojas"]
+        with self.store.connect() as db:
+            approval={row["hoja_id"] for row in db.execute(
+                "SELECT hoja_id FROM web_aprobaciones")}
+            active=db.execute("""SELECT COUNT(*) FROM web_reclamos wr
+                JOIN hojas h ON h.id=wr.hoja_id
+                WHERE h.sesion_id=? AND wr.vence>?""",
+                (sid,int(time.time()))).fetchone()[0]
+            processing=db.execute("""SELECT COUNT(*) FROM web_trabajos
+                WHERE estado IN ('pendiente','procesando')""").fetchone()[0]
+        missing=[]
+        for person in report["participantes"]:
+            matched=[p for p in pages if p["token"]==person["token"]
+                     and p["estado"]!="descartada"]
+            valid=[p for p in matched if p["estado"]=="validada"]
+            if not matched:
+                reason="SIN_ESCANEO"
+            elif any(p["estado"]=="duplicado" for p in matched) or len(valid)>1:
+                reason="DUPLICADO_POR_RESOLVER"
+            elif len(valid)!=1:
+                reason="REVISION_PENDIENTE"
+            elif valid[0]["id"] not in approval:
+                reason="APROBACION_PENDIENTE"
+            else:
+                continue
+            missing.append({"id":person["id"],"folio":person["folio"],
+                            "nombre":person["nombre"],"motivo":reason,
+                            "estado":"pendiente"})
+        unidentified=sum(p["estado"]=="sin_identificar" for p in pages)
+        return {"sesion_id":sid,"estado":report["sesion"]["estado"],
+                "total_lista":len(report["participantes"]),
+                "validados":report["validados"],"faltantes":missing,
+                "cantidad_pendientes":len(missing),
+                "sin_identificar":unidentified,
+                "revisiones_activas":active,"trabajos_en_cola":processing,
+                "listo":not (missing or unidentified or active or processing)}
+
+    def close_application(self,user,sid):
+        """Cierre irreversible del piloto, solamente con lista conciliada."""
+        self.require(user,roles={"admin","coordinador"},sid=sid)
+        with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._assert_open(db,sid)
+            summary=self.closure_summary(user,sid)
+            if not summary["listo"]:
+                raise WebError("Cierre bloqueado: hay folios sin escaneo, "
+                               "correcciones, aprobaciones o tareas pendientes. "
+                               "Consulta la conciliación antes de entregar.",409)
+            db.execute("UPDATE sesiones SET estado='cerrada' WHERE id=?",(sid,))
+            self._event(db,user["id"],None,"CIERRE_EVALUACION",
+                        "Lista conciliada: "+str(summary["total_lista"])+" personas")
+        return {**summary,"estado":"cerrada","listo":True}
 
     def list_events(self,user,sid):
         self.require(user,sid=sid)
@@ -487,7 +830,44 @@ class WebService:
                 WHERE h.sesion_id=? ORDER BY e.id DESC LIMIT 400
             """,(sid,))]
 
-    def create_application(self,user,questionnaire_id,name,mode,paper,participants):
+    def create_application(self,user,questionnaire_id,name,mode,paper,participants,
+                           request_id=None):
+        """Una solicitud reintentada recupera su lote: nunca duplica folios QR."""
+        self.require(user,roles={"admin"})
+        if request_id is None:
+            return self._create_application_once(
+                user,questionnaire_id,name,mode,paper,participants)
+        if not isinstance(request_id,str) or not re.fullmatch(
+                r"[0-9a-fA-F-]{36}",request_id):
+            raise WebError("Identificador de emisión inválido.",422)
+        fingerprint=hashlib.sha256(compact_json({
+            "cuestionario_id":questionnaire_id,"nombre":name,"modo":mode,
+            "papel":paper,"participantes":participants,
+        }).encode("utf-8")).hexdigest()
+        # Candado entre procesos: dos navegadores pueden reintentar el mismo
+        # POST al mismo tiempo, incluso en instancias web distintas.
+        with exclusive_scan_queue(self.root/"omr"/"web_emision.lock"):
+            with self.store.connect() as db:
+                issued=db.execute(
+                    "SELECT usuario_id,huella,resultado FROM web_emisiones "
+                    "WHERE id=?",(request_id,)).fetchone()
+            if issued:
+                if issued["usuario_id"]!=user["id"]:
+                    raise WebError("La emisión pertenece a otra cuenta.",403)
+                if issued["huella"]!=fingerprint:
+                    raise WebError("La solicitud se reutilizó con otros datos.",409)
+                return json.loads(issued["resultado"])
+            result=self._create_application_once(
+                user,questionnaire_id,name,mode,paper,participants)
+            with self.store.connect() as db:
+                db.execute("INSERT INTO web_emisiones "
+                           "(id,usuario_id,huella,resultado,creado) "
+                           "VALUES(?,?,?,?,?)",
+                           (request_id,user["id"],fingerprint,
+                            compact_json(result),utcnow()))
+            return result
+
+    def _create_application_once(self,user,questionnaire_id,name,mode,paper,participants):
         """Dos modos aprobados; QR solamente al cargar lista de personas.
 
         Normal + lista: paquetes por participante; Ecológico + lista:
@@ -533,6 +913,12 @@ class WebService:
                 color_subtitulo=exam.color_subtitulo,
                 color_respuestas=exam.color_respuestas,
                 color_acetato=exam.color_acetato,
+                logo_ancho_mm=exam.logo_ancho_mm,
+                question_layouts=[{
+                    "ancho_imagen_mm":q.image_width_mm,
+                    "alto_imagen_mm":q.image_height_mm,
+                    "alineacion_imagen":q.image_align}
+                    for q in exam.questions],
             )
         files=[f for f in ("Cuadernillo.pdf","Hoja_respuestas.pdf",
                "Acetato_clave.pdf","Clave_docente.pdf",
@@ -657,11 +1043,37 @@ class WebService:
 
     def add_job(self,user,source):
         self.require(user,roles={"admin","coordinador"})
+        source=Path(source)
+        if not source.is_file():
+            raise WebError("El PDF de ingreso no está disponible.",404)
+        digest=hashlib.sha256()
+        with source.open("rb") as fp:
+            for chunk in iter(lambda:fp.read(1024*1024),b""):
+                digest.update(chunk)
+        sha=digest.hexdigest()
         jid=uuid4().hex
+        reused=False
         with self.store.connect() as db:
-            db.execute("""INSERT INTO web_trabajos VALUES(?,?,?,?,?,?,?,?)""",
-                       (jid,user["id"],str(source),"pendiente","{}","",
-                        utcnow(),utcnow()))
+            db.execute("BEGIN IMMEDIATE")
+            old=db.execute("""SELECT id,ruta,operador_id FROM web_trabajos
+                WHERE archivo_sha=? AND estado IN ('pendiente','procesando')
+                ORDER BY creado,id LIMIT 1""",(sha,)).fetchone()
+            if old:
+                if (user["rol"]!="admin" and old["operador_id"]!=user["id"]):
+                    raise WebError("Este PDF ya está en cola por otro operador. "
+                                   "Solicita al administrador revisar el trabajo.",409)
+                jid=old["id"]
+                reused=(source.resolve()!=Path(old["ruta"]).resolve())
+            else:
+                db.execute("""INSERT INTO web_trabajos
+                    (id,operador_id,ruta,estado,resultado,error,creado,actualizado,archivo_sha)
+                    VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (jid,user["id"],str(source),"pendiente","{}","",
+                     utcnow(),utcnow(),sha))
+        if reused and source.resolve().is_relative_to(self.incoming.resolve()):
+            # No borrar el archivo usado por el trabajo vigente; sólo
+            # descartar otra copia temporal de contenido idéntico.
+            source.unlink(missing_ok=True)
         self.wake()
         return jid
 
@@ -700,9 +1112,32 @@ class WebService:
                 raise WebError("Trabajo inexistente.",404)
             if user["rol"]!="admin" and row["operador_id"]!=user["id"]:
                 raise WebError("Trabajo ajeno.",403)
+        with self.store.connect() as db:
+            position=(1+db.execute("""SELECT COUNT(*) FROM web_trabajos
+                WHERE estado='pendiente' AND
+                      (creado < ? OR (creado=? AND id < ?))""",
+                (row["creado"],row["creado"],jid)).fetchone()[0]
+                if row["estado"]=="pendiente" else None)
         return {"id":jid,"estado":row["estado"],"error":row["error"],
                 "resultado":json.loads(row["resultado"]),
-                "creado":row["creado"]}
+                "posicion_cola":position,"creado":row["creado"]}
+
+    def list_jobs(self,user):
+        """Cola persistente, sin exponer rutas locales ni trabajos ajenos."""
+        self.require(user,roles={"admin","coordinador"})
+        with self.store.connect() as db:
+            if user["rol"]=="admin":
+                rows=db.execute("""SELECT j.id,u.nombre AS operador
+                    FROM web_trabajos j JOIN web_usuarios u ON u.id=j.operador_id
+                    ORDER BY j.creado DESC,j.id DESC LIMIT 30""").fetchall()
+            else:
+                rows=db.execute("""SELECT j.id,u.nombre AS operador
+                    FROM web_trabajos j JOIN web_usuarios u ON u.id=j.operador_id
+                    WHERE j.operador_id=?
+                    ORDER BY j.creado DESC,j.id DESC LIMIT 30""",
+                    (user["id"],)).fetchall()
+        return [self.job(user,row["id"]) | {"operador":row["operador"]}
+                for row in rows]
 
     def wake(self):
         if self._executor and self._wake_lock.acquire(blocking=False):
@@ -710,33 +1145,38 @@ class WebService:
 
     def _process_pending(self):
         try:
-            while True:
+            # El ThreadPoolExecutor es por instancia; este candado protege
+            # también contra dos procesos uvicorn o administradores simultáneos.
+            with exclusive_scan_queue(self.root/"omr"/"web_cola.lock"):
                 with self.store.connect() as db:
                     db.execute("BEGIN IMMEDIATE")
-                    row=db.execute("""SELECT * FROM web_trabajos
-                        WHERE estado='pendiente' ORDER BY creado,id LIMIT 1""").fetchone()
-                    if not row:
-                        break
-                    db.execute("UPDATE web_trabajos SET estado='procesando', "
-                               "actualizado=? WHERE id=?",(utcnow(),row["id"]))
-                try:
-                    result=self._process_file(row)
+                    # Bajo lock global no existe otro worker vivo procesando.
+                    # Solo aquí se recuperan tareas de un proceso caído.
+                    db.execute("UPDATE web_trabajos SET estado='pendiente' "
+                               "WHERE estado='procesando'")
+                while True:
                     with self.store.connect() as db:
-                        db.execute("""UPDATE web_trabajos SET estado='terminado',
-                            resultado=?,error='',actualizado=? WHERE id=?""",
-                            (compact_json(result),utcnow(),row["id"]))
-                except Exception as exc:
-                    with self.store.connect() as db:
-                        db.execute("""UPDATE web_trabajos SET estado='error',
-                            error=?,actualizado=? WHERE id=?""",
-                            (str(exc)[:550],utcnow(),row["id"]))
+                        db.execute("BEGIN IMMEDIATE")
+                        row=db.execute("""SELECT * FROM web_trabajos
+                            WHERE estado='pendiente' ORDER BY creado,id LIMIT 1""").fetchone()
+                        if not row:
+                            break
+                        db.execute("UPDATE web_trabajos SET estado='procesando', "
+                                   "actualizado=? WHERE id=?",(utcnow(),row["id"]))
+                    try:
+                        result=self._process_file(row)
+                        with self.store.connect() as db:
+                            db.execute("""UPDATE web_trabajos SET estado='terminado',
+                                resultado=?,error='',actualizado=? WHERE id=?""",
+                                (compact_json(result),utcnow(),row["id"]))
+                    except Exception as exc:
+                        with self.store.connect() as db:
+                            db.execute("""UPDATE web_trabajos SET estado='error',
+                                error=?,actualizado=? WHERE id=?""",
+                                (str(exc)[:550],utcnow(),row["id"]))
         finally:
-            # En operación normal wake() adquirió el lock. Las pruebas y
-            # recuperación explícita permiten ejecutar la cola sin executor.
             if self._wake_lock.locked():
                 self._wake_lock.release()
-            # Si llegó un trabajo justo después de comprobar la cola vacía,
-            # su add_job no pudo adquirir el candado. Volver a despertarla.
             if self._executor:
                 with self.store.connect() as db:
                     pending=db.execute("SELECT 1 FROM web_trabajos "

@@ -32,6 +32,7 @@ class PreviewData:
     instrucciones: str = ''
     questions: tuple[Question, ...] = ()
     logo: Path | None = None
+    logo_ancho_mm: float = 23.0
     color_titulo: str = '#213A4C'
     color_subtitulo: str = '#5E7180'
     color_respuestas: str = '#213A4C'

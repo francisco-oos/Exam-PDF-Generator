@@ -5,7 +5,8 @@
   const content = byId("content");
   const state = {user:null, apps:[], sid:null, view:"inicio", sheet:null,
                  lease:null, revision:0, question:1,
-                 highlight:true, acetate:false, jobs:[], timer:null};
+                 highlight:true, acetate:false, resultAcetate:true,
+                 selectedResult:null, jobs:[], timer:null, flow:null, jobsWatch:0, reviewWatch:0, leaseWatch:0};
   const h = value => String(value ?? "").replace(/[&<>"']/g,
     c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const cookie = name => {
@@ -32,7 +33,9 @@
            opts.body?JSON.stringify(opts.body):undefined,credentials:"same-origin"});
     if(!response.ok){
       const obj=await response.json().catch(()=>({error:response.statusText}));
-      throw Error(obj.error||obj.detail||"Error HTTP "+response.status);
+      const error=Error(obj.error||obj.detail||"Error HTTP "+response.status);
+      error.status=response.status;
+      throw error;
     }
     return response.status===204?{}:await response.json();
   }
@@ -55,19 +58,76 @@
     if(!state.apps.some(x=>x.id===state.sid))
       state.sid=state.apps[0]?.id||null;
   }
+  function viewAllowed(view){
+    if(view==="inicio")return true;
+    if(!state.flow)return false;
+    if(view==="usuarios")return isAdmin();
+    if(state.flow==="crear")
+      return isAdmin()&&["biblioteca","aplicaciones"].includes(view);
+    if(state.flow==="calificar")
+      return (view==="aplicaciones")||
+        (view==="revision"&&canReview())||
+        (view==="escaneo"&&canUpload())||
+        (view==="bandeja"&&isAdmin())||
+        (view==="resultados"&&["admin","coordinador","auditor"].includes(state.user?.rol));
+    if(state.flow==="consultar")
+      return view==="resultados"&&state.user?.rol==="auditor";
+    return false;
+  }
+  function updateNav(){
+    document.querySelectorAll(".nav [data-view]").forEach(b=>{
+      b.hidden=!viewAllowed(b.dataset.view);
+      if(b.dataset.view==="inicio")
+        b.textContent=state.flow?"Cambiar tarea":"Elegir tarea";
+    });
+  }
   function setLoggedIn(me){
     state.user=me;
     byId("authPanel").hidden=true;
     byId("workspace").hidden=false;
     byId("logout").hidden=false;
     byId("identity").textContent=me.nombre+" · "+(me.rol==="capturista"?"Auxiliar de calificación":me.rol==="admin"?"Administrador":me.rol);
-    document.querySelectorAll(".nav [data-view]").forEach(b=>{
-      b.hidden=((b.dataset.view==="usuarios"||b.dataset.view==="biblioteca"||
-                 b.dataset.view==="bandeja")&&!isAdmin())||
-               (b.dataset.view==="escaneo"&&!canUpload())||
-               (b.dataset.view==="resultados"&&
-                !["admin","coordinador","auditor"].includes(me.rol));
-    });
+    updateNav();
+  }
+  async function releaseCurrentSheet(){
+    if(!state.sheet||!state.lease)return;
+    await api("/sheets/"+encodeURIComponent(state.sheet.id)+"/release",{
+      method:"POST",body:{lease:state.lease}});
+    state.sheet=null;
+    state.lease=null;
+    state.leaseWatch++;
+  }
+  function watchCurrentLease(){
+    const id=state.sheet?.id,token=state.lease;
+    if(!id||!token)return;
+    const watcher=++state.leaseWatch;
+    const active=()=>watcher===state.leaseWatch&&
+      state.sheet?.id===id&&state.lease===token&&state.view==="revision";
+    const renew=async()=>{
+      if(!active())return;
+      try{
+        await api("/sheets/"+encodeURIComponent(id)+"/renew",{
+          method:"POST",body:{lease:token}});
+      }catch(err){
+        if(!active())return;
+        if(err.status===409||err.status===403){
+          state.lease=null;
+          state.leaseWatch++;
+          alertBox("La reserva terminó. Los cambios anteriores siguen guardados; anota las decisiones sin guardar y vuelve a tomar la hoja.",true);
+          const area=byId("sheetArea");
+          if(area){
+            area.insertAdjacentHTML("afterbegin",'<div class="panel"><strong>Reserva expirada</strong><p>Las respuestas no guardadas se mantienen visibles para que puedas cotejarlas, pero ya no puedes enviarlas desde esta sesión.</p></div>');
+            area.querySelectorAll("#saveChoice,#captureWhole,#submitFull,#releaseSheet").forEach(b=>b.disabled=true);
+          }
+          return;
+        }
+        alertBox("No se pudo renovar la reserva por la red. Reintentando...",true);
+        if(active())setTimeout(renew,15000);
+        return;
+      }
+      if(active())setTimeout(renew,45000);
+    };
+    setTimeout(renew,45000);
   }
   async function boot(){
     try{
@@ -105,6 +165,9 @@
     }catch(e){alertBox(e.message,true);}
   });
   byId("logout").addEventListener("click",async()=>{
+    if(state.sheet&&state.lease&&!confirm(
+      "¿Salir y liberar la hoja en revisión? Las decisiones sin guardar no se conservarán."))return;
+    try{await releaseCurrentSheet();}catch(err){alertBox("No se pudo liberar la hoja: "+err.message,true);return;}
     try{await api("/logout",{method:"POST"});}catch{}
     window.location.reload();
   });
@@ -125,6 +188,12 @@
   }
   async function navigate(view){
     if(state.user?.cambiar_clave){await showChangePassword();return;}
+    if(!viewAllowed(view)){alertBox("Selecciona primero una tarea permitida para tu perfil.",true);return;}
+    if(view!=="revision"&&state.view==="revision"&&state.sheet&&state.lease){
+      if(!confirm("La hoja actual está reservada. ¿Liberarla para que otro operador pueda revisarla y cambiar de sección?"))return;
+      try{await releaseCurrentSheet();}
+      catch(err){alertBox("No se pudo liberar la hoja: "+err.message,true);return;}
+    }
     state.view=view;
     document.querySelectorAll(".nav [data-view]").forEach(b=>
       b.classList.toggle("active",b.dataset.view===view));
@@ -142,19 +211,36 @@
   document.querySelectorAll(".nav [data-view]").forEach(b=>b.onclick=()=>navigate(b.dataset.view));
   async function overview(){
     await refreshApps();
-    const pend=state.apps.reduce((n,x)=>n+x.hojas_pendientes,0);
-    const total=state.apps.reduce((n,x)=>n+x.cantidad_participantes,0);
-    renderTitle("Panel de operación","Una sola base central. Toda hoja conserva su aplicación, folio y evidencia.");
-    content.innerHTML+='<div class="kpiList">'+[
-      ["Aplicaciones",state.apps.length],["Folios emitidos",total],
-      ["Hojas por revisar",pend],["Con sesión QR",state.apps.filter(x=>x.cantidad_participantes&&!x.calificacion_manual).length]
-    ].map(x=>'<div class="panel"><div class="metric">'+x[1]+'</div><div class="muted">'+x[0]+'</div></div>').join("")+'</div>'+
-    '<div class="panel"><h2>¿Qué necesitas hacer?</h2><div class="actions">'+
-    '<button class="primary" data-go="revision">Tomar siguiente hoja</button>'+
-    '<button class="secondary" data-go="aplicaciones">Ver aplicaciones</button>'+
-    (canUpload()?'<button class="ghost" data-go="escaneo">Cargar escaneo</button>':"")+
-    '</div><p class="hint">Servidor piloto: no hay conexión activa con licencias de producción. No usar por Internet público.</p></div>';
-    onButton(content,"[data-go]",e=>navigate(e.currentTarget.dataset.go));
+    renderTitle("¿Qué vas a hacer hoy?",
+      "Elige tu tarea. Solo se mostrarán las herramientas autorizadas para tu perfil.");
+    const items=[];
+    if(isAdmin())items.push({
+      id:"crear",title:"Crear evaluación",icon:"✏",
+      description:"Preguntas, fotos, diseño, vista previa y material para imprimir.",
+      button:"Entrar al diseñador"});
+    if(canReview())items.push({
+      id:"calificar",title:"Calificar y revisar",icon:"▣",
+      description:canUpload()?
+        "Escaneos, hojas pendientes, aclaraciones, aprobaciones y resultados.":
+        "Hojas asignadas, lápiz tenue, dobles marcas y correcciones auditadas.",
+      button:"Entrar a calificación"});
+    if(state.user?.rol==="auditor")items.push({
+      id:"consultar",title:"Consultar resultados",icon:"◫",
+      description:"Consultar resultados autorizados e historial, sin editar ni ver claves.",
+      button:"Consultar"});
+    content.innerHTML+='<div class="workflowChoices">'+items.map(item=>
+      '<article class="panel workflowChoice"><div class="workflowIcon" aria-hidden="true">'+
+      h(item.icon)+'</div><h2>'+h(item.title)+'</h2><p class="lead">'+
+      h(item.description)+'</p><button class="primary" data-flow="'+h(item.id)+
+      '">'+h(item.button)+'</button></article>').join("")+'</div>'+
+      '<div class="panel"><p class="hint">PILOTO LOCAL. La calificación se conserva al cambiar de tarea; una hoja en revisión se libera de forma controlada antes de salir.</p></div>';
+    onButton(content,"[data-flow]",async e=>{
+      const flow=e.currentTarget.dataset.flow;
+      if(!["crear","calificar","consultar"].includes(flow))return;
+      state.flow=flow;
+      updateNav();
+      await navigate(flow==="crear"?"biblioteca":flow==="calificar"?"revision":"resultados");
+    });
   }
   async function applications(){
     await refreshApps();
@@ -167,15 +253,27 @@
         '<tr><td colspan="6">Todavía no hay aplicaciones.</td></tr>')+
     '</tbody></table></div></div>'+
     (state.sid?'<div class="panel"><h3>Aplicación seleccionada: '+h(state.sid)+'</h3><div id="appFiles" class="actions"></div>'+
-      '<div class="actions"><button data-go="revision" class="primary">Revisar hojas</button>'+
-      '<button data-go="resultados" class="secondary">Resultados</button></div></div>':"");
+      (state.flow==="calificar"?'<div class="actions">'+
+        (canReview()?'<button data-go="revision" class="primary">Revisar hojas</button>':'')+
+        (canExport()||state.user?.rol==="auditor"?'<button data-go="resultados" class="secondary">Resultados</button>':'')+
+        '</div>':'<p class="hint">Material de impresión de esta aplicación. Los resultados están en la tarea Calificar.</p>')+
+      '</div>':"");
     onButton(content,"[data-sid]",async e=>{state.sid=e.currentTarget.dataset.sid;await applications();});
     onButton(content,"[data-go]",e=>navigate(e.currentTarget.dataset.go));
-    if(state.sid && canExport()){
-      const base="/api/applications/"+encodeURIComponent(state.sid)+"/files/";
-      byId("appFiles").innerHTML=["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
-        "Paquetes_individuales.zip"].map(n=>
-        '<a class="ghost" href="'+base+encodeURIComponent(n)+'">'+h(n)+'</a>').join("");
+    if(state.sid && state.flow==="crear" && isAdmin()){
+      const selected=state.apps.find(x=>x.id===state.sid);
+      if(selected?.calificacion_manual){
+        byId("appFiles").innerHTML='<p class="hint">Esta aplicación se creó para calificación manual de una página sin QR. No tiene un lote de impresión propio; consulta su evidencia en Calificar.</p>';
+      }else{
+        const base="/api/applications/"+encodeURIComponent(state.sid)+"/files/";
+        byId("appFiles").innerHTML='<a class="primary" href="/api/applications/'+
+          encodeURIComponent(state.sid)+'/package">Descargar paquete completo ZIP</a>'+
+          '<details class="advancedDownload"><summary>Descargas individuales</summary><div class="actions">'+
+          ["Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
+           "Paquetes_individuales.zip"].map(n=>
+          '<a class="ghost" href="'+base+encodeURIComponent(n)+'">'+h(n)+'</a>').join("")+
+          '</div></details>';
+      }
     }
   }
   async function reviewQueue(){
@@ -189,19 +287,35 @@
       optionList(opts)+'</select></label><div class="actions"><button class="primary" id="claimNext">Tomar siguiente hoja disponible</button></div>'+
       '<div id="queueArea"></div></div><div id="sheetArea"></div>';
     byId("claimNext").onclick=async()=>{
+      if(state.sheet&&state.lease){alertBox("Ya tienes una hoja en revisión. Guárdala o libérala antes de tomar otra.",true);return;}
       try{
         const claim=await api("/applications/"+state.sid+"/claim-next",{method:"POST"});
         state.lease=claim.lease;state.revision=claim.revision;
         state.sheet=await api("/sheets/"+claim.hoja_id);
+        watchCurrentLease();
         const first=state.sheet.dudas.find(x=>typeof x.pregunta==="number");
         state.question=first?.pregunta||1;
         await renderSheet();await queueTable();
       }catch(err){alertBox(err.message,true);}
     };
     byId("reviewApp").onchange=async e=>{
-      state.sid=e.target.value;state.sheet=null;state.lease=null;await reviewQueue();
+      if(state.sheet&&state.lease&&!confirm(
+        "Cambiar de evaluación liberará la hoja actual. ¿Continuar? Los cambios sin guardar no se conservarán.")){
+        e.target.value=state.sid;return;
+      }
+      try{await releaseCurrentSheet();}
+      catch(err){alertBox("No se pudo liberar la hoja: "+err.message,true);e.target.value=state.sid;return;}
+      state.sid=e.target.value;await reviewQueue();
     };
-    await queueTable();
+    const watcher=++state.reviewWatch;
+    async function refreshReviewQueue(){
+      if(watcher!==state.reviewWatch||state.view!=="revision")return;
+      try{await queueTable();}
+      catch(err){alertBox("No se pudo actualizar la cola: "+err.message,true);}
+      if(watcher===state.reviewWatch&&state.view==="revision")
+        setTimeout(refreshReviewQueue,4500);
+    }
+    await refreshReviewQueue();
   }
   async function queueTable(){
     const list=await api("/applications/"+state.sid+"/sheets");
@@ -210,23 +324,45 @@
     area.innerHTML='<p class="muted">Hojas que requieren intervención: <b>'+list.length+'</b></p>'+
       '<div class="tableWrap"><table><thead><tr><th>Folio</th><th>Participante</th><th>Estado</th><th>Dudas</th><th>Acción</th></tr></thead><tbody>'+
       (list.length?list.map(x=>'<tr><td><code>'+h(x.folio||"Sin QR")+'</code></td>'+
-      '<td>'+h(x.nombre)+'</td><td><span class="tag '+(x.ocupada_por_otro?"warn":"")+'">'+
-      h(x.ocupada_por_otro?"Ocupada":"Disponible")+'</span></td><td>'+x.dudas+
-      '</td><td><button class="secondary" data-sheet="'+h(x.id)+'"'+
-      (x.ocupada_por_otro||x.estado==="duplicado"?' disabled':'')+
-      '>Revisar</button></td></tr>').join(""):
+      '<td>'+h(x.nombre)+'</td><td><span class="tag '+(x.ocupada_por_otro||x.estado==="duplicado"?"warn":"")+'">'+
+      h(x.estado==="duplicado"?"Reescaneo duplicado":x.ocupada_por_otro?"Ocupada":"Disponible")+'</span></td><td>'+x.dudas+
+      '</td><td>'+(x.estado==="duplicado"?
+        (canExport()?'<button class="secondary" data-discard="'+h(x.id)+'">Resolver duplicado</button>':
+        '<span class="muted">Requiere coordinador</span>'):
+        '<button class="secondary" data-sheet="'+h(x.id)+'"'+
+        (x.ocupada_por_otro?' disabled':'')+
+        '>Revisar</button>')+'</td></tr>').join(""):
       '<tr><td colspan="5">No hay hojas pendientes de corrección.</td></tr>')+
       '</tbody></table></div>';
     onButton(area,"[data-sheet]",async e=>{
       try{await openSheet(e.currentTarget.dataset.sheet);}
       catch(err){alertBox(err.message,true);await queueTable();}
     });
+    onButton(area,"[data-discard]",async e=>{
+      const id=e.currentTarget.dataset.discard;
+      const reason=prompt("La nota ORIGINAL no cambiará. Explica por qué el nuevo escaneo debe archivarse como duplicado descartado (mínimo 10 caracteres):");
+      if(reason===null)return;
+      if(reason.trim().length<10){alertBox("Justificación demasiado corta.",true);return;}
+      if(!confirm("¿Descartar SOLO el nuevo escaneo conflictivo? El archivo original y la auditoría se conservan."))return;
+      try{
+        await api("/sheets/"+id+"/resolve-duplicate",{
+          method:"POST",body:{motivo:reason.trim()}});
+        alertBox("Reescaneo descartado con auditoría. Nota original conservada.");
+        await queueTable();
+      }catch(err){alertBox(err.message,true);}
+    });
   }
   async function openSheet(id){
     if(!canReview())throw Error("No tienes permiso de captura.");
+    if(state.sheet&&state.lease){
+      if(state.sheet.id===id){alertBox("Ya tienes esta hoja reservada.");return;}
+      if(!confirm("¿Liberar tu hoja actual para revisar esta otra? Los cambios sin guardar no se conservarán."))return;
+      await releaseCurrentSheet();
+    }
     const claim=await api("/sheets/"+id+"/claim",{method:"POST"});
     state.lease=claim.lease;state.revision=claim.revision;
     state.sheet=await api("/sheets/"+id);
+    watchCurrentLease();
     const q=state.sheet.dudas.find(x=>typeof x.pregunta==="number");
     state.question=q?.pregunta||1;
     await renderSheet();
@@ -260,6 +396,7 @@
   async function renderSheet(){
     const sheet=state.sheet;if(!sheet)return;
     const area=byId("sheetArea");if(!area)return;
+    const reservationActive=Boolean(state.lease);
     const q=sheet.preguntas[state.question-1];
     const pending=sheet.dudas.filter(x=>Number.isInteger(x.pregunta));
     const pendingIds=new Set(pending.map(x=>x.pregunta));
@@ -314,9 +451,13 @@
       (disputed?'<option value="" selected>— Selecciona una decisión —</option>':'')+
       ["A","B","C","D","BLANCO"].map(c=>'<option '+(!disputed&&c===value?'selected':'')+'>'+c+'</option>').join("")+
       '</select></label><label>Justificación<textarea id="reason" placeholder="Ej. Dos marcas o grafito tenue; decisión cotejada contra el papel"></textarea></label>'+
-      '<div class="actions"><button class="primary" id="saveChoice">Guardar decisión</button>'+
-      '<button class="secondary" id="captureWhole">Captura completa</button>'+
-      '<button class="ghost" id="releaseSheet">Liberar hoja</button></div>'+
+      (!reservationActive?'<p class="pendingReason">La reserva ya no está activa. Para continuar sin sobrescribir a otro operador vuelve a tomar la hoja desde la cola.</p>':'')+
+      '<div class="actions"><button class="primary" id="saveChoice" '+
+      (!reservationActive?'disabled':'')+'>Guardar decisión</button>'+
+      '<button class="secondary" id="captureWhole" '+
+      (!reservationActive?'disabled':'')+'>Captura completa</button>'+
+      '<button class="ghost" id="releaseSheet" '+
+      (!reservationActive?'disabled':'')+'>Liberar hoja</button></div>'+
       '<p class="hint">No elijas la respuesta solo por el acetato: comprueba la marca física. Toda decisión deja auditoría.</p></div></div>';
     byId("questionSelect").onchange=e=>{
       state.question=Number(e.target.value);renderSheet();
@@ -333,6 +474,7 @@
     };
     showSheetVisual();
     byId("saveChoice").onclick=async()=>{
+      if(!state.lease){alertBox("La reserva expiró. Toma la hoja nuevamente.",true);return;}
       if(!byId("decision").value){
         alertBox("Selecciona A, B, C, D o BLANCO tras revisar la marca física.",true);
         return;
@@ -343,7 +485,15 @@
             cambios:[{pregunta:state.question,decision:byId("decision").value}],
             motivo:byId("reason").value}});
         state.revision=result.revision;
-        alertBox("Corrección guardada con auditoría.");
+        alertBox(result.reserva_liberada?
+          "Hoja validada y liberada. Pendiente de aprobación 2/2.":
+          "Corrección guardada con auditoría; la hoja sigue reservada.");
+        if(result.reserva_liberada){
+          state.sheet=null;state.lease=null;
+          area.innerHTML='<div class="panel"><h3>Revisión guardada</h3>'+
+            '<p>La hoja quedó validada y fue liberada. El coordinador podrá aprobarla en Resultados.</p></div>';
+          await queueTable();return;
+        }
         state.sheet=await api("/sheets/"+sheet.id);
         const following=state.sheet.dudas.filter(x=>Number.isInteger(x.pregunta));
         const next=following.find(x=>x.pregunta>state.question)||following[0];
@@ -353,6 +503,7 @@
       }catch(err){alertBox(err.message,true);}
     };
     byId("captureWhole").onclick=async()=>{
+      if(!state.lease){alertBox("La reserva expiró. Toma la hoja nuevamente.",true);return;}
       const area=byId("sheetArea");
       if(!area)return;
       const questions=state.sheet.preguntas,original=state.sheet.respuestas;
@@ -376,6 +527,7 @@
       area.append(form);form.scrollIntoView({behavior:"smooth",block:"start"});
       form.querySelector("#cancelFull").onclick=()=>form.remove();
       form.querySelector("#submitFull").onclick=async()=>{
+        if(!state.lease){alertBox("La reserva expiró. Toma la hoja nuevamente.",true);return;}
         const changes=[...form.querySelectorAll("[data-q]")].map(field=>({
           pregunta:Number(field.dataset.q),decision:field.value}));
         if(changes.some(x=>x.decision==="SIN REVISAR")){
@@ -388,6 +540,12 @@
               motivo:form.querySelector("#fullReason").value}});
           state.revision=result.revision;
           alertBox("Hoja completa auditada y guardada.");
+          if(result.reserva_liberada){
+            state.sheet=null;state.lease=null;
+            area.innerHTML='<div class="panel"><h3>Captura guardada</h3>'+
+              '<p>Hoja validada y liberada; falta aprobación 2/2 en Resultados.</p></div>';
+            await queueTable();return;
+          }
           state.sheet=await api("/sheets/"+state.sheet.id);
           await renderSheet();await queueTable();
         }catch(err){alertBox(err.message,true);}
@@ -408,13 +566,45 @@
       '<label>PDF multipágina de Xerox o cualquier escáner<input type="file" id="scanPdf" accept=".pdf,application/pdf" required></label>'+
       '<button class="primary">Archivar y reconocer</button>'+
       '<p class="hint">El motor trabaja en segundo plano. Puedes salir de esta pantalla y consultar el ID de trabajo.</p></form>'+
-      '<div class="panel"><h3>Estado del procesamiento</h3><div id="scanProgress" class="muted">Sin trabajos activos.</div></div>';
+      '<div class="panel"><h3>Estado del último envío</h3><div id="scanProgress" class="muted">Sin trabajos activos.</div></div>'+
+      '<div class="panel"><h3>Cola de escaneos</h3><p class="hint">Compartida entre administradores. Solo se muestra el estado y el operador, nunca la ruta local del PDF. Se actualiza mientras esta pantalla está abierta.</p><div id="scanJobs" class="muted">Consultando trabajos...</div></div>';
+    const watcher=++state.jobsWatch;
+    async function refreshJobs(){
+      if(watcher!==state.jobsWatch||state.view!=="escaneo")return;
+      const target=byId("scanJobs");if(!target)return;
+      try{
+        const jobs=await api("/jobs");
+        target.innerHTML=jobs.length?
+          '<div class="tableWrap"><table><thead><tr><th>Trabajo</th><th>Operador</th><th>Estado</th><th>Cola</th><th>Acción</th></tr></thead><tbody>'+
+          jobs.map(j=>'<tr><td><code>'+h(j.id.slice(0,12))+'</code></td>'+
+            '<td>'+h(j.operador)+'</td><td>'+h(j.estado)+
+            (j.error?'<p class="tag bad">'+h(j.error)+'</p>':'')+'</td>'+
+            '<td>'+h(j.posicion_cola||"—")+'</td><td>'+
+            (j.estado==="error"?'<button class="secondary" data-retry="'+h(j.id)+'">Reintentar</button>':
+             '<button class="ghost" data-job="'+h(j.id)+'">Ver detalle</button>')+
+            '</td></tr>').join("")+'</tbody></table></div>':
+          '<p class="hint">No hay trabajos registrados.</p>';
+        onButton(target,"[data-job]",e=>pollJob(e.currentTarget.dataset.job));
+        onButton(target,"[data-retry]",async e=>{
+          const jid=e.currentTarget.dataset.retry;
+          if(!confirm("¿Reintentar el PDF fallido sin crear otro ingreso?"))return;
+          try{await api("/jobs/"+jid+"/retry",{method:"POST"});
+            alertBox("Trabajo devuelto a la cola. La bandeja se actualizará automáticamente.");
+          }catch(err){alertBox(err.message,true);}
+        });
+      }catch(err){target.textContent="No se pudo consultar la cola: "+err.message;}
+      if(watcher===state.jobsWatch&&state.view==="escaneo")
+        setTimeout(refreshJobs,3500);
+    }
+    await refreshJobs();
     byId("scanForm").onsubmit=async e=>{
       e.preventDefault();const f=byId("scanPdf").files[0];
       if(!f)return;const body=new FormData();body.append("file",f);
       try{const job=await api("/scans",{method:"POST",body});
         alertBox("Documento recibido. ID: "+job.trabajo_id);
         pollJob(job.trabajo_id);
+        // El seguimiento del último envío continúa sin recargar la página.
+        // La cola compartida se refresca automáticamente.
       }catch(err){alertBox(err.message,true);}
     };
   }
@@ -424,7 +614,8 @@
     try{
       const job=await api("/jobs/"+jobId);
       el.innerHTML='<p>Trabajo <code>'+h(job.id)+'</code> · <b>'+h(job.estado)+
-        '</b></p><pre>'+h(JSON.stringify(job.resultado,null,2))+'</pre>'+
+        '</b>'+(job.posicion_cola?' · lugar en cola: '+h(job.posicion_cola):'')+
+        '</p><pre>'+h(JSON.stringify(job.resultado,null,2))+'</pre>'+
         (job.error?'<p class="tag bad">'+h(job.error)+'</p>':'');
       if(["pendiente","procesando"].includes(job.estado) && state.view==="escaneo")
         setTimeout(()=>pollJob(jobId),1600);
@@ -569,33 +760,235 @@
   }
   async function results(){
     await refreshApps();
-    renderTitle("Resultados y entregables","Resultados por aplicación, sin mezclar evidencias de otras evaluaciones.");
-    if(!state.sid){content.innerHTML+='<div class="panel empty">No hay aplicación.</div>';return;}
+    renderTitle("Resultados y evidencias auditadas",
+      "La hoja original permanece intacta; la copia de evidencia integra acetato, nota y trazabilidad.");
+    if(!state.sid){
+      content.innerHTML+='<div class="panel empty">No hay aplicación.</div>';
+      return;
+    }
     const opts=state.apps.map(x=>({id:x.id,nombre:x.nombre_evaluacion||x.titulo}));
-    content.innerHTML+='<div class="panel"><label>Evaluación<select id="resultsApp">'+optionList(opts)+'</select></label>'+
-      '<div id="resultsBody"></div></div>';
-    byId("resultsApp").onchange=async e=>{state.sid=e.target.value;await results();};
+    content.innerHTML+='<div class="panel"><label>Evaluación<select id="resultsApp">'+
+      optionList(opts)+'</select></label><div id="resultsBody"></div></div>';
+    byId("resultsApp").onchange=async e=>{
+      state.sid=e.target.value;
+      state.selectedResult=null;
+      await results();
+    };
     const report=await api("/applications/"+state.sid+"/results");
+    const closure=canExport()?await api("/applications/"+state.sid+"/closure"):null;
+    const eligible=report.participantes.filter(x=>x.hoja_id);
+    if(!eligible.some(x=>x.id===state.selectedResult))
+      state.selectedResult=eligible[0]?.id||null;
     byId("resultsBody").innerHTML='<div class="kpiList">'+[
       ["Validados",report.validados],["Pendientes",report.pendientes],
-      ["Ausentes",report.ausentes],["Promedio",report.promedio===null?"—":report.promedio+"%"]
-    ].map(x=>'<div class="panel"><div class="metric">'+h(x[1])+'</div><div class="muted">'+h(x[0])+'</div></div>').join("")+'</div>'+
-      (canExport()?'<div class="actions"><a class="secondary" href="/api/applications/'+h(state.sid)+
-       '/export">'+(report.pendientes||report.ausentes||!report.validados?
-         'ZIP provisional de resultados':'ZIP de resultados')+'</a><a class="ghost" href="/api/applications/'+h(state.sid)+
-       '/export?internal=true">Expediente interno y evidencias</a></div>':'')+
-      '<p class="hint">Los temas por reforzar se calculan únicamente en hojas validadas; no revelan respuestas correctas. El PDF individual contiene el detalle de aciertos por tema y sugerencias de estudio.</p>'+
-      '<div class="tableWrap"><table><thead><tr><th>Folio</th><th>Nombre</th><th>Aciertos</th><th>Temas por reforzar</th><th>Estado</th><th></th></tr></thead><tbody>'+
+      ["Ausentes",report.ausentes],
+      ["Promedio",report.promedio===null?"—":report.promedio+"%"]
+    ].map(x=>'<div class="panel"><div class="metric">'+h(x[1])+
+      '</div><div class="muted">'+h(x[0])+'</div></div>').join("")+'</div>'+
+      (closure?'<div class="panel"><h3>Conciliación previa a entregar resultados</h3>'+
+        '<p class="hint">Estado: <strong>'+h(closure.estado)+
+        '</strong>. Lista: '+h(closure.total_lista)+' personas. '+
+        (closure.listo?'Todas las personas están calificadas y aprobadas.':
+        'Faltan '+h(closure.cantidad_pendientes)+' personas, '+
+        h(closure.sin_identificar)+' hojas sin identificar, '+
+        h(closure.revisiones_activas)+' hojas ocupadas y '+
+        h(closure.trabajos_en_cola)+' trabajos en cola.')+'</p>'+
+        (closure.faltantes.length?'<div class="tableWrap"><table><thead>'+
+        '<tr><th>Folio</th><th>Participante</th><th>Pendiente</th></tr>'+
+        '</thead><tbody>'+closure.faltantes.map(p=>
+          '<tr><td><code>'+h(p.folio)+'</code></td><td>'+h(p.nombre)+
+          '</td><td><span class="tag warn">'+h(p.motivo.replaceAll("_"," "))+
+          '</span></td></tr>').join("")+'</tbody></table></div>':'')+
+        (closure.estado==="abierta"?
+          '<div class="actions"><button class="primary" id="closeApplication" '+
+          (!closure.listo?'disabled':'')+'>Cerrar evaluación conciliada</button></div>':
+          '<p class="hint">Evaluación cerrada: los escaneos nuevos no modificarán las notas.</p>')+
+        '</div>':'')+
+      (canExport()?'<div class="panel"><h3>Centro de descargas · evaluación completa</h3>'+
+       '<p class="hint">Entrega externa: resultados sin claves ni evidencias internas. Auditoría: expediente con bitácoras y documentos reservados.</p>'+
+       '<div class="actions"><a class="secondary" href="/api/applications/'+
+       encodeURIComponent(state.sid)+'/export">'+
+       (report.estado_cierre==="cerrada"?"ZIP oficial · DEFINITIVO":
+       "ZIP oficial · PROVISIONAL")+'</a>'+
+       '<a class="ghost" href="/api/applications/'+encodeURIComponent(state.sid)+
+       '/export?internal=true">ZIP interno · auditoría</a></div></div>':'')+
+      '<p class="hint">Selecciona un participante para confrontar su escaneo con el acetato. '+
+      'Una hoja reabierta no tiene nota definitiva hasta finalizar la aclaración.</p>'+
+      '<div class="tableWrap"><table><thead><tr>'+
+      '<th>Folio</th><th>Nombre</th><th>Aciertos</th><th>Temas por reforzar</th>'+
+      '<th>Estado</th><th>Opciones</th></tr></thead><tbody>'+
       report.participantes.map(p=>'<tr><td><code>'+h(p.folio)+'</code></td>'+
-      '<td>'+h(p.nombre)+'</td><td>'+h(p.aciertos===null?"—":p.aciertos+"/"+p.preguntas)+'</td>'+
-      '<td>'+h(p.estado==="validado"?
-        (p.areas_mejora?.length?
-          p.areas_mejora.slice(0,3).map(t=>t.tema+" ("+t.aciertos+"/"+t.preguntas+")").join(" · "):
+        '<td>'+h(p.nombre)+'</td>'+
+        '<td>'+h(p.aciertos===null?"Pendiente":p.aciertos+"/"+p.preguntas)+'</td>'+
+        '<td>'+h(p.estado==="validado"?
+          (p.areas_mejora?.length?p.areas_mejora.slice(0,3).map(t=>
+            t.tema+" ("+t.aciertos+"/"+t.preguntas+")").join(" · "):
           "Sin temas pendientes en esta prueba"):"Pendiente de validación")+'</td>'+
-      '<td>'+h(p.estado)+'</td><td>'+(canExport()?
-        '<a class="listLink" href="/api/applications/'+h(state.sid)+
-        '/participants/'+encodeURIComponent(p.id)+'/result">PDF individual</a>':'')+
-      '</td></tr>').join("")+'</tbody></table></div>';
+        '<td>'+h(p.estado==="ausente"?"Pendiente · sin escaneo":p.estado)+'</td><td><div class="actions">'+
+        (p.hoja_id?'<button type="button" class="secondary" data-result="'+
+          h(p.id)+'">'+(canExport()?'Ver resultado y descargar':'Ver evidencia')+'</button>':
+          '<span class="hint">Sin escaneo</span>')+
+        (canExport()&&report.estado_cierre==="abierta"&&p.estado==="validado"&&!p.aprobacion&&p.hoja_id&&p.requiere_otro_aprobador?
+          '<span class="tag warn">Otra cuenta debe aprobar 2/2</span>':'')+
+        ''+
+        '</div></td></tr>').join("")+'</tbody></table></div>'+
+      '<section id="resultDetail"></section>';
+    onButton(byId("resultsBody"),"[data-result]",async e=>{
+      state.selectedResult=e.currentTarget.dataset.result;
+      try{await showResultDetail(report);}
+      catch(err){alertBox(err.message,true);}
+    });
+    onButton(byId("resultsBody"),"#closeApplication",async ()=>{
+      if(!confirm("¿Cerrar la evaluación? No podrá recibir nuevos escaneos ni correcciones en este piloto."))return;
+      try{
+        await api("/applications/"+state.sid+"/close",{method:"POST"});
+        alertBox("Evaluación cerrada, lista completa y aprobada.");
+        await refreshApps();await results();
+      }catch(err){alertBox(err.message,true);await results();}
+    });
+    if(state.selectedResult)await showResultDetail(report);
+  }
+
+  async function showResultDetail(report){
+    const p=report.participantes.find(x=>x.id===state.selectedResult);
+    const area=byId("resultDetail");
+    if(!area||!p?.hoja_id)return;
+    // El perfil auditor consulta resultados sin claves ni acetato.
+    if(!canExport())state.resultAcetate=false;
+    const sheetId=p.hoja_id;
+    const history=await api("/sheets/"+encodeURIComponent(sheetId)+"/history");
+    const doc="/api/sheets/"+encodeURIComponent(sheetId);
+    const imageSrc=()=>{
+      return doc+"/overlay?pregunta=1&resaltar=false&acetato="+
+        (state.resultAcetate?"true":"false");
+    };
+    const valid=p.estado==="validado";
+    const historyRows=history.cambios.map(event=>
+      '<tr><td>'+h(event.fecha)+'</td><td>'+h(event.operador)+
+      ' <small>('+h(event.cuenta)+')</small></td><td>'+h(event.tipo)+'</td>'+
+      '<td>'+h(event.pregunta??"Hoja")+'</td><td>'+
+      h(event.anterior??"—")+' → '+h(event.nueva??"—")+'</td>'+
+      '<td>'+h(event.aciertos_antes??"—")+' → '+
+      h(event.aciertos_despues??"—")+'</td><td>'+h(event.motivo)+'</td></tr>').join("");
+    const legacyRows=history.registros_historicos.map(event=>
+      '<tr><td>'+h(event.fecha)+'</td><td>'+h(event.revisor)+'</td><td>'+
+      h(event.pregunta??"Hoja")+'</td><td>'+h(event.decision)+'</td><td>'+
+      h(event.motivo)+'</td></tr>').join("");
+    area.innerHTML='<div class="resultEvidenceLayout">'+
+      '<div class="panel"><h3>'+h(p.nombre)+' · '+h(p.folio)+'</h3>'+
+      '<p class="hint">Resultado '+(valid?'vigente':'pendiente de revisión')+
+      ' · '+(valid?h(p.aciertos+'/'+p.preguntas+' aciertos · '+p.porcentaje+'%'):
+      'sin calificación definitiva')+'</p>'+
+      '<h4>Áreas de mejora</h4>'+
+      (valid?(p.areas_mejora?.length?'<p>'+p.areas_mejora.map(t=>
+        h(t.tema)+' ('+h(t.aciertos)+'/'+h(t.preguntas)+')').join(' · ')+'</p>':
+        '<p>Sin temas pendientes en esta evaluación.</p>'):
+        '<p class="hint">Se calcularán al validar la hoja.</p>')+
+      '<div class="actions">'+
+      (canExport()?'<a class="secondary" href="/api/applications/'+
+        encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
+        '/result">PDF para participante · '+
+        (report.estado_cierre==="cerrada"?"DEFINITIVO":"PROVISIONAL")+'</a>'+
+        '<a class="secondary" href="/api/applications/'+
+        encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
+        '/result?auditado=true">PDF interno auditado</a>':'')+
+      ''+
+      '</div>'+
+      (canExport()?'<details class="advancedDownload"><summary>Descarga técnica adicional (solo hoja)</summary>'+
+        '<p class="hint">La hoja sola ya está incluida en el PDF interno auditado. Úsala únicamente para investigar incidencias sin compartir todo el informe.</p>'+
+        '<a class="ghost" id="auditPdfDownload" href="'+doc+
+        '/evidence?acetato='+state.resultAcetate+'">PDF de evidencia aislada</a></details>':'')+
+      (canExport()&&valid&&report.estado_cierre==="abierta"&&!history.aprobacion?
+        (p.requiere_otro_aprobador?
+          '<div class="auditApprove"><h4>Segunda firma pendiente</h4>'+
+          '<p class="hint">Tú hiciste la última corrección. Otra cuenta administrativa o de coordinación deberá cotejar esta evidencia y aprobarla.</p></div>':
+          '<div class="auditApprove"><h4>Segundo control · aprobación 2/2</h4>'+
+          '<p class="hint">Verifica el folio, las marcas de la hoja, el resultado y el historial antes de aprobar. El acetato no sustituye el cotejo físico.</p>'+
+          '<label class="check"><input id="secondReviewConfirm" type="checkbox"> Confirmo que revisé esta evidencia y la calificación.</label>'+
+          '<button class="primary" id="approveFromEvidence" disabled>Aprobar después del cotejo</button></div>'):'')+
+      (canExport()?'<div class="auditReopen">'+
+        '<h4>Re-corregir una hoja validada</h4>'+
+        '<p class="hint">Sólo administrador/coordinador. Reabrir suspende temporalmente la nota, registra la nota anterior y exige motivo. Después se corrige desde Revisión de hojas.</p>'+
+        '<label>Reactivo<select id="reopenQuestion">'+
+        Array.from({length:p.preguntas},(_,i)=>'<option value="'+(i+1)+'">'+
+          String(i+1).padStart(2,"0")+'</option>').join("")+'</select></label>'+
+        '<label>Motivo de aclaración<textarea id="reopenReason" rows="3" placeholder="Explica por qué debe revisarse nuevamente la marca física."></textarea></label>'+
+        '<button class="secondary" id="reopenSheet" '+
+        (!valid||report.estado_cierre!=="abierta"?'disabled':'')+
+        '>Abrir re-corrección</button></div>':'')+
+      '</div><div class="panel"><h3>Evidencia con acetato</h3>'+
+      (canExport()?'<label class="check"><input id="resultAcetate" type="checkbox" '+
+        (state.resultAcetate?'checked':'')+'> Superponer acetato</label>':
+        '<p class="hint">Vista original sin clave de respuestas.</p>')+
+      '<p class="hint">Verde: respuestas correctas del acetato, no lectura automática. El PNG original queda intacto.</p>'+
+      '<img class="scanImage" id="resultImage" alt="Hoja física para confrontar resultado" src="'+imageSrc()+'">'+
+      '<div class="hint" id="resultImageHint"></div></div></div>'+
+      '<div class="panel"><h3>Historial de correcciones y aclaraciones</h3>'+
+      '<p class="hint">'+(history.aprobacion?
+        'Última aprobación: '+h(history.aprobacion.operador)+' · '+
+          h(history.aprobacion.fecha):
+        'Sin aprobación vigente o reabierta para aclaración.')+'</p>'+
+      '<h4>Antes y después con responsable</h4>'+
+      '<div class="tableWrap"><table><thead><tr>'+
+      '<th>Fecha UTC</th><th>Responsable</th><th>Acción</th><th>Pregunta</th>'+
+      '<th>Respuesta anterior → nueva</th><th>Aciertos antes → después</th>'+
+      '<th>Motivo</th></tr></thead><tbody>'+
+      (historyRows||'<tr><td colspan="7">Sin cambios en el historial detallado.</td></tr>')+
+      '</tbody></table></div>'+
+      '<details><summary>Ver registro histórico del motor ('+
+      history.registros_historicos.length+')</summary>'+
+      '<div class="tableWrap"><table><thead><tr><th>Fecha</th><th>Revisor</th>'+
+      '<th>Pregunta</th><th>Decisión</th><th>Motivo</th></tr></thead><tbody>'+
+      (legacyRows||'<tr><td colspan="5">Sin revisiones anteriores.</td></tr>')+
+      '</tbody></table></div></details></div>';
+    const img=byId("resultImage");
+    img.onerror=()=>{byId("resultImageHint").textContent=
+      "No se pudo cargar la capa. Se intentará mostrar el escaneo original.";
+      img.onerror=null;img.src=doc+"/image";};
+    const acetateControl=byId("resultAcetate");
+    if(acetateControl)acetateControl.onchange=e=>{
+      state.resultAcetate=e.target.checked;
+      img.src=imageSrc()+"&v="+Date.now();
+      if(byId("auditPdfDownload"))byId("auditPdfDownload").href=
+        doc+"/evidence?acetato="+state.resultAcetate;
+    };
+    const confirmation=byId("secondReviewConfirm");
+    if(confirmation){
+      const approveButton=byId("approveFromEvidence");
+      confirmation.onchange=()=>{approveButton.disabled=!confirmation.checked;};
+      approveButton.onclick=async()=>{
+        if(!confirmation.checked)return;
+        if(!confirm("¿Confirmas que cotejaste la hoja física y su historial para aprobar 2/2?"))return;
+        approveButton.disabled=true;
+        try{
+          await api("/sheets/"+encodeURIComponent(sheetId)+"/approve",{method:"POST"});
+          alertBox("Segunda revisión aprobada y registrada.");
+          await results();
+        }catch(err){alertBox(err.message,true);await results();}
+      };
+    }
+    if(byId("reopenSheet"))byId("reopenSheet").onclick=async()=>{
+      if(!valid)return;
+      const q=Number(byId("reopenQuestion").value);
+      const motive=byId("reopenReason").value.trim();
+      if(motive.length<10){
+        alertBox("Explica el motivo de la aclaración (mínimo 10 caracteres).",true);
+        return;
+      }
+      if(!confirm("¿Reabrir esta hoja validada? Su calificación quedará "+
+        "pendiente hasta que guardes la nueva revisión."))return;
+      try{
+        const reopened=await api("/sheets/"+encodeURIComponent(sheetId)+
+          "/reopen",{method:"POST",body:{pregunta:q,motivo:motive}});
+        state.sid=reopened.sesion_id;
+        await navigate("revision");
+        await openSheet(sheetId);
+        state.question=q;
+        await renderSheet();
+        alertBox("Aclaración abierta. Confirma la marca física y registra "+
+                 "tu nueva decisión con motivo.");
+      }catch(err){alertBox(err.message,true);}
+    };
   }
   async function users(){
     if(!isAdmin())throw Error("Solo el administrador administra cuentas.");

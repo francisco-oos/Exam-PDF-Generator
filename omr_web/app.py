@@ -10,18 +10,23 @@ from __future__ import annotations
 import io
 import os
 import re
+from zipfile import ZipFile, ZIP_DEFLATED
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from omr_evaluaciones.documentos import sha_file
 from omr_evaluaciones.expedientes import export_session_bundle, participant_receipt
 from .service import WebError, WebService
-from .designer import import_exam, serialize_exam, update_exam, preview_exam, resource, import_roster
+from .evidencia import audit_evidence_pdf, detailed_history_pdf, resolve_archive_image
+from .designer import (
+    import_exam, serialize_exam, update_exam, preview_exam,
+    preview_with_uploads, resource, import_roster)
 
 MAX_UPLOAD = 100 * 1024 * 1024
 FILE_NAMES = frozenset({
@@ -65,6 +70,7 @@ class NewApplication(BaseModel):
     modalidad: str = "ecologico"
     papel: str = "Carta"
     participantes: list[dict] = Field(default_factory=list,max_length=500)
+    solicitud_id: str | None = None
 
 
 class ClaimPayload(BaseModel):
@@ -79,6 +85,11 @@ class EditPayload(BaseModel):
     lease: str
     expected_revision: int
     cambios: list[dict]
+    motivo: str
+
+
+class ReopenPayload(BaseModel):
+    pregunta: int
     motivo: str
 
 
@@ -211,7 +222,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             empresa:str=Form(""),grupo:str=Form(""),subtitulo:str=Form(""),
             instrucciones:str=Form("Selecciona una sola respuesta por pregunta."),
             papel:str=Form("Carta"),letra:float=Form(9),
-            modo:str=Form("ecologico"),
+            logo_ancho_mm:float=Form(23),modo:str=Form("ecologico"),
             color_titulo:str=Form("#213A4C"),
             color_subtitulo:str=Form("#5E7180"),
             color_respuestas:str=Form("#213A4C"),
@@ -224,6 +235,7 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             engine.library,file,name=name,title=title,images=images,logo=logo,
             meta={"empresa":empresa,"grupo":grupo,"subtitulo":subtitulo,
                   "instrucciones":instrucciones,"papel":papel,"letra":letra,
+                  "logo_ancho_mm":logo_ancho_mm,
                   "modo":modo,"color_titulo":color_titulo,
                   "color_subtitulo":color_subtitulo,
                   "color_respuestas":color_respuestas,
@@ -253,6 +265,19 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         return Response(content,media_type="application/pdf",
                         headers={"Cache-Control":"no-store"})
 
+    @web.post("/api/library/{exam_id}/preview-live")
+    async def library_preview_live(
+            exam_id:str,config:str=Form(...),
+            images:list[UploadFile]=File(default=[]),
+            logo:UploadFile|None=File(default=None),
+            view:str="Cuadernillo",user=Depends(write_user)):
+        """Previo a guardar: usar solo fotos temporales y no emitir folios."""
+        engine.require(user,roles={"admin"})
+        content=await preview_with_uploads(
+            engine.library,exam_id,config,view,images,logo)
+        return Response(content,media_type="application/pdf",
+                        headers={"Cache-Control":"no-store"})
+
     @web.get("/api/library/{exam_id}/images/{image_name}")
     def library_image(exam_id:str,image_name:str,user=Depends(user_of)):
         engine.require(user,roles={"admin"})
@@ -273,7 +298,57 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     def create_application(data: NewApplication,user=Depends(write_user)):
         return engine.create_application(
             user,data.cuestionario_id,data.nombre,data.modalidad,
-            data.papel,data.participantes)
+            data.papel,data.participantes,data.solicitud_id)
+
+    def complete_print_package(folder: Path, allowed: set[str], label: str):
+        """Entrega un único ZIP sin almacenar copias permanentes ni URLs secretas."""
+        archive=engine.outputs/(uuid4().hex+".zip")
+        try:
+            with ZipFile(archive,"w",compression=ZIP_DEFLATED,
+                         compresslevel=6) as zip_file:
+                for filename in sorted(allowed):
+                    target=(folder/filename).resolve()
+                    if target.parent!=folder.resolve():
+                        raise WebError("Material fuera de la carpeta autorizada.",403)
+                    if target.is_file():
+                        zip_file.write(target,arcname="Material_OMR/"+filename)
+                zip_file.writestr(
+                    "Material_OMR/LEEME.txt",
+                    "PAQUETE DE IMPRESION OMR\n"
+                    "Imprimir los PDF al 100% sin ajustar a pagina.\n"
+                    "Conservar las hojas, folios y QR de esta aplicacion.\n"
+                    "Acetato y clave: uso interno, no entregar a participantes.\n")
+            if archive.stat().st_size < 100:
+                raise WebError("No se encontraron documentos para descargar.",404)
+        except Exception:
+            archive.unlink(missing_ok=True)
+            raise
+        return FileResponse(
+            archive,filename=label+".zip",media_type="application/zip",
+            background=BackgroundTask(lambda: archive.unlink(missing_ok=True)))
+
+    @web.get("/api/applications/{sid}/package")
+    def download_application_package(sid:str,user=Depends(user_of)):
+        engine.require(user,roles={"admin","coordinador"},sid=sid)
+        session=engine.store.session(sid)
+        folder=Path(session.get("lote_path") or "")
+        if not folder.is_absolute():
+            folder=(engine.root/folder).resolve()
+        allowed_root=(engine.root/"salidas").resolve()
+        if not folder.resolve().is_relative_to(allowed_root) or not folder.is_dir():
+            raise WebError("Material de impresión no disponible.",404)
+        return complete_print_package(folder,set(FILE_NAMES),
+                                      "Paquete_OMR_"+sid)
+
+    @web.get("/api/print-lots/{lot_id}/package")
+    def download_print_lot_package(lot_id:str,user=Depends(user_of)):
+        engine.require(user,roles={"admin"})
+        # La resolución de ruta se hace con el mismo control que una descarga
+        # individual: no aceptar carpeta o identificador suministrado por URL.
+        example=engine.print_lot_file(user,lot_id,"Cuadernillo.pdf")
+        return complete_print_package(example.parent,
+            {"Cuadernillo.pdf","Hoja_respuestas.pdf","Acetato_clave.pdf",
+             "Clave_docente.pdf","manifest.json"},"Paquete_Manual_"+lot_id)
 
     @web.get("/api/print-lots")
     def print_lots(user=Depends(user_of)):
@@ -331,11 +406,13 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
                            (sheet_id,)).fetchone()
         if not rec:
             raise WebError("Evidencia inexistente.",404)
-        path=Path(rec["imagen"]).resolve()
-        if not path.is_relative_to((engine.store.root/"escaneos").resolve()):
-            raise WebError("Ruta de evidencia no autorizada.",403)
-        if not path.is_file():
-            raise WebError("No existe la imagen archivada.",404)
+        with engine.store.connect() as db:
+            row=db.execute("SELECT id,sesion_id,imagen FROM hojas WHERE id=?",
+                           (sheet_id,)).fetchone()
+        try:
+            path=resolve_archive_image(engine.store,row)
+        except ValueError as exc:
+            raise WebError(str(exc),404) from exc
         return FileResponse(path,media_type="image/png")
 
     @web.get("/api/sheets/{sheet_id}/overlay")
@@ -358,9 +435,13 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         with engine.store.connect() as db:
             image_path=db.execute("SELECT imagen FROM hojas WHERE id=?",
                                   (sheet_id,)).fetchone()["imagen"]
-        source=Path(image_path).resolve()
-        if not source.is_relative_to((engine.store.root/"escaneos").resolve()):
-            raise WebError("La evidencia no está en la carpeta permitida.",403)
+        with engine.store.connect() as db:
+            record=db.execute("SELECT id,sesion_id,imagen FROM hojas WHERE id=?",
+                              (sheet_id,)).fetchone()
+        try:
+            source=resolve_archive_image(engine.store,record)
+        except ValueError as exc:
+            raise WebError(str(exc),404) from exc
         bitmap=cv2.imread(str(source))
         if bitmap is None:
             raise WebError("No se pudo recuperar el escaneo.",404)
@@ -402,9 +483,38 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         return {"nombre":name,"estado":"manual_pendiente",
                 "aviso":"Revisar TODOS los reactivos antes de calificar."}
 
+    @web.post("/api/sheets/{sheet_id}/reopen")
+    def reopen(sheet_id:str,data:ReopenPayload,user=Depends(write_user)):
+        return engine.reopen_validated(user,sheet_id,data.pregunta,data.motivo)
+
+    @web.get("/api/sheets/{sheet_id}/history")
+    def history(sheet_id:str,user=Depends(user_of)):
+        return engine.sheet_history(user,sheet_id)
+
+    @web.get("/api/sheets/{sheet_id}/evidence")
+    def evidence(sheet_id:str,acetato:bool=True,user=Depends(user_of)):
+        engine.require(user,roles={"admin","coordinador","auditor"})
+        engine.get_sheet(user,sheet_id)
+        if acetato:
+            engine.require(user,roles={"admin","coordinador"})
+        try:
+            content=audit_evidence_pdf(
+                engine.store,sheet_id,acetato=acetato,
+                history=engine.sheet_history(user,sheet_id))
+        except ValueError as exc:
+            raise WebError(str(exc),404) from exc
+        return Response(content,media_type="application/pdf",
+                        headers={"Content-Disposition":
+                                 f'attachment; filename="Evidencia_{sheet_id[:12]}.pdf"',
+                                 "Cache-Control":"no-store"})
+
     @web.post("/api/sheets/{sheet_id}/claim")
     def claim(sheet_id:str,user=Depends(write_user)):
         return engine.claim(user,sheet_id)
+
+    @web.post("/api/sheets/{sheet_id}/renew")
+    def renew(sheet_id:str,data:LeasePayload,user=Depends(write_user)):
+        return engine.renew(user,sheet_id,data.lease)
 
     @web.post("/api/sheets/{sheet_id}/release")
     def release(sheet_id:str,data:LeasePayload,user=Depends(write_user)):
@@ -421,6 +531,10 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     def approve(sheet_id:str,user=Depends(write_user)):
         engine.approve(user,sheet_id)
         return {"ok":True}
+
+    @web.post("/api/sheets/{sheet_id}/resolve-duplicate")
+    def resolve_duplicate(sheet_id:str,data:dict,user=Depends(write_user)):
+        return engine.resolve_duplicate(user,sheet_id,data.get("motivo",""))
 
     @web.post("/api/scans")
     async def upload(file: UploadFile=File(...),user=Depends(write_user)):
@@ -448,6 +562,10 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
             raise
         finally:
             await file.close()
+
+    @web.get("/api/jobs")
+    def jobs(user=Depends(user_of)):
+        return engine.list_jobs(user)
 
     @web.get("/api/jobs/{job_id}")
     def job(job_id:str,user=Depends(user_of)):
@@ -500,13 +618,15 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     @web.get("/api/applications/{sid}/results")
     def results(sid:str,user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador","auditor"},sid=sid)
-        data=engine.store.results(sid)
-        return {"sesion_id":sid,"promedio":data["promedio"],
-                "validados":data["validados"],"pendientes":data["pendientes"],
-                "ausentes":data["ausentes"],
-                "participantes":[{key:p[key] for key in
-                    ("id","folio","nombre","estado","aciertos","porcentaje")}
-                    for p in data["participantes"]]}
+        return engine.results_with_evidence(user,sid)
+
+    @web.get("/api/applications/{sid}/closure")
+    def closure_summary(sid:str,user=Depends(user_of)):
+        return engine.closure_summary(user,sid)
+
+    @web.post("/api/applications/{sid}/close")
+    def close_application(sid:str,user=Depends(write_user)):
+        return engine.close_application(user,sid)
 
     @web.get("/api/applications/{sid}/events")
     def events(sid:str,user=Depends(user_of)):
@@ -516,24 +636,57 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
     def export(sid:str,internal:bool=False,user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador"},sid=sid)
         path=engine.outputs/(uuid4().hex+".zip")
-        export_session_bundle(engine.store,engine.inbox,sid,path,
-                              internal=internal)
-        return FileResponse(path,filename=("Expediente_" if internal else
-                            "Resultados_")+sid+".zip",
+        export_session_bundle(
+            engine.store,engine.inbox,sid,path,internal=internal,
+            audit_pdf_factory=(
+                (lambda sheet_id: audit_evidence_pdf(
+                    engine.store,sheet_id,acetato=True,
+                    history=engine.sheet_history(user,sheet_id)))
+                if internal else None),
+            detailed_history_factory=(
+                (lambda: detailed_history_pdf(engine.store,sid))
+                if internal else None))
+        prefix=("Expediente_" if internal else "Resultados_")
+        session_state=engine.store.session(sid)["estado"]
+        if session_state!="cerrada":
+            prefix+="PROVISIONAL_"
+        return FileResponse(path,filename=prefix+sid+".zip",
                             media_type="application/zip",
-                            headers={"Cache-Control":"no-store"})
+                            headers={"Cache-Control":"no-store"},
+                            background=BackgroundTask(path.unlink,missing_ok=True))
 
     @web.get("/api/applications/{sid}/participants/{person_id}/result")
-    def participant_result(sid:str,person_id:str,user=Depends(user_of)):
+    def participant_result(sid:str,person_id:str,auditado:bool=False,user=Depends(user_of)):
         engine.require(user,roles={"admin","coordinador"},sid=sid)
         target=engine.outputs/(uuid4().hex+".pdf")
         try:
-            participant_receipt(engine.store,sid,person_id,target)
+            # Anexar la evidencia de una sola hoja en la misma copia PDF.
+            # Si la persona aún no tiene escaneo no se inventa una imagen.
+            report=engine.results_with_evidence(user,sid)
+            participant=next((p for p in report["participantes"]
+                              if p["id"]==person_id),None)
+            if participant is None:
+                raise ValueError("Participante inexistente.")
+            evidence_pdf=None
+            if auditado and participant["hoja_id"]:
+                evidence_pdf=audit_evidence_pdf(
+                    engine.store,participant["hoja_id"],acetato=True,
+                    history=engine.sheet_history(user,participant["hoja_id"]))
+            participant_receipt(engine.store,sid,person_id,target,
+                                evidence_pdf=evidence_pdf)
         except ValueError as exc:
             raise WebError(str(exc),404) from exc
-        return FileResponse(target,filename="Resultado_"+sid+".pdf",
+        # Evitar que resultados de distintos participantes terminen con
+        # exactamente el mismo nombre en Descargas de Windows.
+        folio=re.sub(r"[^A-Za-z0-9_-]+","_",str(participant.get("folio") or person_id))
+        folio=folio.strip("_")[:55] or "FOLIO"
+        estado="DEFINITIVO" if report["estado_cierre"]=="cerrada" else "PROVISIONAL"
+        tipo="INTERNO_AUDITADO" if auditado else "PARTICIPANTE"
+        name=f"Resultado_{folio}_{tipo}_{estado}.pdf"
+        return FileResponse(target,filename=name,
                             media_type="application/pdf",
-                            headers={"Cache-Control":"no-store"})
+                            headers={"Cache-Control":"no-store"},
+                            background=BackgroundTask(target.unlink,missing_ok=True))
 
     static_dir=Path(__file__).resolve().parent/"static"
     @web.get("/")
