@@ -403,14 +403,86 @@
       try{
         const digest=e.currentTarget.dataset.doc;
         const pages=await api("/documents/"+digest+"/pages");
+        const original=pages.filter(p=>p.estado==="pendiente");
         byId("documentPages").innerHTML='<div class="panel"><h3>Páginas del documento</h3>'+
           '<div class="actions">'+pages.map(p=>
             '<button class="ghost" data-num="'+p.pagina+'">Página '+(p.pagina+1)+
             ' · '+h(p.estado)+'</button>').join("")+'</div>'+
-          '<img id="documentImg" class="scanImage" alt="Vista de la página seleccionada"></div>';
-        onButton(byId("documentPages"),"[data-num]",ev=>{
-          byId("documentImg").src="/api/documents/"+digest+"/pages/"+ev.currentTarget.dataset.num+"/image";
-        });
+          '<p class="hint" id="documentHint">Selecciona una página para visualizarla.</p>'+
+          '<div class="actions"><button type="button" class="secondary" id="retryDocImage" hidden>Reintentar imagen</button></div>'+
+          '<img id="documentImg" class="scanImage" alt="Vista de la página seleccionada">'+
+          '<div id="manualLinkArea"></div></div>';
+        let selected=null;
+        function showDoc(page){
+          selected=page;
+          const image=byId("documentImg");
+          image.alt="Evidencia de la página "+(page+1);
+          image.onerror=()=>{
+            byId("documentHint").textContent="No se cargó la página; puedes volver a intentar.";
+            byId("retryDocImage").hidden=false;
+          };
+          image.onload=()=>{
+            byId("documentHint").textContent="Página "+(page+1)+" · PDF original archivado.";
+            byId("retryDocImage").hidden=true;
+          };
+          image.src="/api/documents/"+digest+"/pages/"+page+"/image";
+          const entry=pages.find(p=>p.pagina===page);
+          const target=byId("manualLinkArea");
+          target.innerHTML=entry?.estado==="pendiente"?
+            '<hr class="hr"><h3>Segunda modalidad: corrección manual con acetato</h3>'+
+            '<p>Esta página no tiene un QR verificable. El administrador debe comprobar el nombre y seleccionar el cuestionario de la biblioteca. Se generará un folio <b>interno nuevo</b>, sin modificar el PDF ni atribuirle una identidad histórica.</p>'+
+            '<button type="button" class="secondary" id="prepareManual">Identificar manualmente y seleccionar examen</button>':'';
+          if(byId("prepareManual"))byId("prepareManual").onclick=()=>openManualForm(page);
+        }
+        async function openManualForm(page){
+          try{
+            const library=await api("/library");
+            const target=byId("manualLinkArea");
+            if(!library.length){
+              target.innerHTML='<div class="panel">Primero importa la plantilla de preguntas en Generar exámenes.</div>';
+              return;
+            }
+            target.innerHTML='<hr class="hr"><form class="panel" id="manualBindForm">'+
+              '<h3>Vincular página '+(page+1)+' a la biblioteca</h3>'+
+              '<p class="hint">Una aplicación de captura manual por hoja. Sin firma QR original, las 20 respuestas deberán verificarse una por una; ningún acierto se asigna automáticamente.</p>'+
+              '<label>Cuestionario aprobado<select name="cuestionario_id" required>'+
+              library.map(q=>'<option value="'+h(q.id)+'">'+h(q.nombre)+' · '+q.total+' reactivos · rev. '+q.revision+'</option>').join("")+
+              '</select></label><div class="cols">'+
+              '<label>Nombre escrito/verificado<input name="nombre" required maxlength="130" placeholder="Nombre de la hoja"></label>'+
+              '<label>ID de la persona<input name="id" required maxlength="64" placeholder="ID sin inventar ceros"></label>'+
+              '<label>Papel<select name="papel"><option>Carta</option><option>A4</option><option>Oficio</option></select></label>'+
+              '<label>Grupo (opcional)<input name="grupo" maxlength="80"></label>'+
+              '</div><label>Justificación de la vinculación<textarea name="motivo" required minlength="8" placeholder="Verifiqué el nombre/ID de la hoja física contra el registro correspondiente."></textarea></label>'+
+              '<div class="actions"><button class="primary">Crear folio interno y abrir captura manual</button>'+
+              '<button type="button" class="ghost" id="cancelManual">Cancelar</button></div></form>';
+            byId("cancelManual").onclick=()=>showDoc(page);
+            byId("manualBindForm").onsubmit=async event=>{
+              event.preventDefault();
+              const form=event.target,button=form.querySelector('button.primary');
+              const data=Object.fromEntries(new FormData(form).entries());
+              button.disabled=true;
+              try{
+                const result=await api("/documents/"+digest+"/pages/"+page+"/manual",
+                  {method:"POST",body:data});
+                state.sid=result.sesion_id;
+                await refreshApps();
+                target.innerHTML='<div class="panel"><h3>Folio manual creado</h3>'+
+                  '<p><b>'+h(result.participante)+'</b> · <code>'+h(result.folio)+'</code></p>'+
+                  '<p>Cuestionario: '+h(result.biblioteca)+' · revisión '+h(result.revision)+
+                  '. Es obligatorio confirmar todas las respuestas antes de calificar.</p>'+
+                  '<button class="primary" id="goManualReview">Abrir revisión de esta aplicación</button></div>';
+                byId("goManualReview").onclick=()=>navigate("revision");
+                alertBox("Hoja vinculada a una nueva aplicación de captura manual.");
+              }catch(err){alertBox(err.message,true);button.disabled=false;}
+            };
+          }catch(err){alertBox(err.message,true);}
+        }
+        byId("retryDocImage").onclick=()=>{
+          if(selected!==null){byId("documentImg").src="/api/documents/"+digest+
+              "/pages/"+selected+"/image?retry="+Date.now();}
+        };
+        onButton(byId("documentPages"),"[data-num]",ev=>showDoc(Number(ev.currentTarget.dataset.num)));
+        if(pages.length)showDoc(pages[0].pagina);
       }catch(err){alertBox(err.message,true);}
     });
   }
