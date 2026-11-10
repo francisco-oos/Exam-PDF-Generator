@@ -582,7 +582,7 @@ class OMRStore:
 def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
                         empresa='', grupo='', subtitulo='',
                         color_titulo='#213A4C', color_respuestas='#213A4C',
-                        color_subtitulo='#5E7180',logo=None,preview=False):
+                        color_subtitulo='#5E7180',logo=None,preview=False,logo_ancho_mm=23.0):
     """Hoja institucional: una sola geometría para PDF, QR y lectura de escáner.
 
     Usa bubble_positions y corner_centers sin alteraciones. El aspecto adopta
@@ -622,7 +622,8 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
         with Image.open(validated) as original:
             picture=ImageOps.exif_transpose(original).convert('RGB')
             picture.thumbnail((300,300),Image.Resampling.LANCZOS)
-            cnv.drawImage(ImageReader(picture),44,h-107,width=43,height=43,
+            dim=min(52,max(19,43*float(logo_ancho_mm)/23.))
+            cnv.drawImage(ImageReader(picture),44,h-107,width=dim,height=dim,
                           preserveAspectRatio=True,anchor='c')
         title_x=97
     cnv.setFillColor(tint)
@@ -699,7 +700,7 @@ def _draw_formulario_omr(cnv, session: dict, persona: dict | None, *,
 def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
                      empresa='',grupo='',subtitulo='',
                      color_titulo='#213A4C',color_respuestas='#213A4C',
-                     color_subtitulo='#5E7180',logo=None,person_ids=None):
+                     color_subtitulo='#5E7180',logo=None,person_ids=None,logo_ancho_mm=23.0):
     """Imprime las hojas QR desde el diseño único; no genera otro examen.
 
     Cada código tiene HMAC de la misma sesión persistida que utilizará el lector.
@@ -721,7 +722,8 @@ def create_forms_pdf(store:OMRStore,sid:str,target:Path, *,
             continue
         _draw_formulario_omr(cnv,s,p,empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                             color_titulo=color_titulo,color_respuestas=color_respuestas,
-                            color_subtitulo=color_subtitulo,logo=logo)
+                            color_subtitulo=color_subtitulo,logo=logo,
+                            logo_ancho_mm=logo_ancho_mm)
     cnv.save()
     return path
 
@@ -780,7 +782,7 @@ def preview_formulario_omr(questions, title, paper, *,
                           empresa='',grupo='',subtitulo='',
                           color_titulo='#213A4C',color_respuestas='#213A4C',
                           color_subtitulo='#5E7180',logo=None,nombre='Ejemplo de participante',identifier='000001',
-                          con_personal=True):
+                          con_personal=True,logo_ancho_mm=23.0):
     """Muestra el aspecto exacto sin crear folios utilizables ni escribir disco."""
     from io import BytesIO
     validate_questions(questions)
@@ -794,7 +796,7 @@ def preview_formulario_omr(questions, title, paper, *,
                         empresa=empresa,grupo=grupo,subtitulo=subtitulo,
                         color_titulo=color_titulo,
                         color_respuestas=color_respuestas,
-                        color_subtitulo=color_subtitulo,logo=logo,preview=True)
+                        color_subtitulo=color_subtitulo,logo=logo,preview=True,logo_ancho_mm=logo_ancho_mm)
     cnv.save()
     return data.getvalue()
 
@@ -803,7 +805,7 @@ def preview_formulario_omr(questions, title, paper, *,
 def create_generic_forms_pdf(questions, title, paper, target, *,
                              empresa='',grupo='',subtitulo='',
                              color_titulo='#213A4C',color_respuestas='#213A4C',
-                             color_subtitulo='#5E7180',logo=None):
+                             color_subtitulo='#5E7180',logo=None,logo_ancho_mm=23.0):
     """Hoja anónima con EXACTA geometría OMR y espacios manuscritos, sin QR.
 
     El diseño no cambia al cargar personal: solo se rellenan datos y QR.
@@ -817,7 +819,8 @@ def create_generic_forms_pdf(questions, title, paper, target, *,
     _draw_formulario_omr(cnv,session,None,empresa=empresa,grupo=grupo,
                          subtitulo=subtitulo,color_titulo=color_titulo,
                          color_respuestas=color_respuestas,
-                         color_subtitulo=color_subtitulo,logo=logo)
+                         color_subtitulo=color_subtitulo,logo=logo,
+                            logo_ancho_mm=logo_ancho_mm)
     cnv.save()
     return path
 

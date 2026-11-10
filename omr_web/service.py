@@ -676,6 +676,12 @@ class WebService:
                 color_subtitulo=exam.color_subtitulo,
                 color_respuestas=exam.color_respuestas,
                 color_acetato=exam.color_acetato,
+                logo_ancho_mm=exam.logo_ancho_mm,
+                question_layouts=[{
+                    "ancho_imagen_mm":q.image_width_mm,
+                    "alto_imagen_mm":q.image_height_mm,
+                    "alineacion_imagen":q.image_align}
+                    for q in exam.questions],
             )
         files=[f for f in ("Cuadernillo.pdf","Hoja_respuestas.pdf",
                "Acetato_clave.pdf","Clave_docente.pdf",

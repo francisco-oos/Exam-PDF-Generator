@@ -38,6 +38,7 @@ def build_preview_pdf(data: PreviewData, view: str) -> bytes:
                 color_subtitulo=data.color_subtitulo,logo=data.logo,nombre=data.participante_nombre or 'Participante de ejemplo',
                 identifier=data.participante_id or '000001',
                 con_personal=data.cantidad_personas > 0,
+                logo_ancho_mm=data.logo_ancho_mm,
             )
         return preview_acetato_omr(
             qs,data.tamano_papel,color=data.color_acetato,
@@ -52,6 +53,7 @@ def build_preview_pdf(data: PreviewData, view: str) -> bytes:
                   color_titulo=colors.HexColor(data.color_titulo),
                   color_subtitulo=colors.HexColor(data.color_subtitulo),
                   size=size,font_size=data.letra,reusable=data.reutilizable,
+                  logo_ancho_mm=data.logo_ancho_mm,
                   participante=({'id':data.participante_id,
                                  'nombre':data.participante_nombre,
                                  'grupo':data.grupo}

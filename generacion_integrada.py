@@ -68,6 +68,16 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
     nombre = str(nombre_evaluacion or titulo).strip()[:120]
     try:
         questions = read_questions(Path(entrada))
+        if opciones.get("question_layouts") is not None:
+            from dataclasses import replace
+            layouts=opciones["question_layouts"]
+            if len(layouts)!=len(questions):
+                raise ExamError("Las medidas no corresponden a las preguntas.")
+            questions=[
+                replace(q,image_width_mm=float(m.get("ancho_imagen_mm",106)),
+                        image_height_mm=float(m.get("alto_imagen_mm",62)),
+                        image_align=str(m.get("alineacion_imagen","CENTER")))
+                for q,m in zip(questions,layouts)]
         respuestas = [
             {'tema': q.section, 'pregunta': q.prompt, 'correcta': 'ABCD'[q.correct]}
             for q in questions
@@ -81,6 +91,7 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
             'color_subtitulo': opciones.get('color_subtitulo', '#5E7180'),
             'color_respuestas': opciones.get('color_respuestas', '#213A4C'),
             'logo': opciones.get('logo'),
+            'logo_ancho_mm': opciones.get('logo_ancho_mm',23),
         }
         if personas:
             # El examen mantiene el tipo elegido para el historial, pero
@@ -129,6 +140,7 @@ def preparar_examen(entrada: Path, salida: Path, titulo: str, subtitulo: str, *,
                             color_titulo=col_t, color_subtitulo=col_s,
                             size=size, font_size=float(opciones.get('letra', 9)),
                             reusable=False, participante=persona,
+                            logo_ancho_mm=opciones.get('logo_ancho_mm',23),
                         )
                         create_forms_pdf(store, sesion, hoja,
                                          person_ids=[persona['id']], **config)
