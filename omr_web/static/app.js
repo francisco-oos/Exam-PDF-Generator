@@ -615,7 +615,7 @@
           h(p.id)+'">Ver evidencia</button>':'<span class="hint">Sin escaneo</span>')+
         (canExport()?'<a class="listLink" href="/api/applications/'+
           encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
-          '/result">PDF individual</a>':'')+
+          '/result">Reporte individual</a>':'')+
         '</div></td></tr>').join("")+'</tbody></table></div>'+
       '<section id="resultDetail"></section>';
     onButton(byId("resultsBody"),"[data-result]",async e=>{
@@ -664,7 +664,10 @@
       '<div class="actions">'+
       (canExport()?'<a class="secondary" href="/api/applications/'+
         encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
-        '/result">PDF individual + evidencia</a>':'')+
+        '/result">PDF para participante</a>'+
+        '<a class="secondary" href="/api/applications/'+
+        encodeURIComponent(state.sid)+'/participants/'+encodeURIComponent(p.id)+
+        '/result?auditado=true">PDF interno con acetato</a>':'')+
       (canExport()?'<a class="ghost" id="auditPdfDownload" href="'+doc+
         '/evidence?acetato='+state.resultAcetate+'">PDF de evidencia auditada</a>':'')+
       '</div>'+
