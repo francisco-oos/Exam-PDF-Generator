@@ -378,6 +378,17 @@ def create_app(data_dir: Path | None = None, *, start_workers=True):
         picture.save(stream,format="JPEG",quality=80)
         return Response(stream.getvalue(),media_type="image/jpeg")
 
+    @web.post("/api/documents/{digest}/pages/{page}/manual")
+    def create_manual_from_library(
+            digest:str,page:int,data:dict,user=Depends(write_user)):
+        """Folio de captura manual: jamás sustituye QR/HMAC originales."""
+        return engine.bind_manual_from_library(
+            user,digest,page,str(data.get("cuestionario_id","")),
+            str(data.get("id","")),str(data.get("nombre","")),
+            str(data.get("papel","Carta")),str(data.get("motivo","")),
+            area=str(data.get("area","")),group=str(data.get("grupo","")),
+            turno=str(data.get("turno","")))
+
     @web.post("/api/documents/{digest}/pages/{page}/link")
     def link_pending(digest:str,page:int,data:dict,user=Depends(write_user)):
         engine.require(user,roles={"admin"})

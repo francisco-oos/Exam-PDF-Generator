@@ -579,6 +579,75 @@ class WebService:
             raise WebError("Archivo del lote no disponible.",404)
         return target
 
+
+    def bind_manual_from_library(
+            self,user,digest,page,questionnaire_id,person_id,name,paper,
+            reason,area="",group="",turno=""):
+        """Segunda vía: identidad y biblioteca verificadas por humano, SIN QR.
+
+        Solo se acepta una página PENDIENTE de la bandeja. Crea una
+        aplicación aislada con clave versión vigente de biblioteca y folio
+        interno nuevo, distinto del texto visible del PDF escaneado.
+        Ninguna marca queda autocalificada: los N reactivos requieren
+        captura manual completa con bitácora de revisiones.
+        """
+        from omr_evaluaciones.motor import IDS_RE, PAPERS
+        self.require(user,roles={"admin"})
+        if (paper not in PAPERS or not isinstance(person_id,str)
+                or not IDS_RE.fullmatch(person_id)
+                or not isinstance(name,str) or not name.strip()
+                or len(name.strip())>130):
+            raise WebError("Indica papel, ID y nombre válidos.",422)
+        if not isinstance(reason,str) or len(reason.strip())<8:
+            raise WebError("Describe el motivo de vinculación manual (8 caracteres mínimo).",422)
+        if not isinstance(page,int) or page<0:
+            raise WebError("Página inexistente.",422)
+        if not isinstance(questionnaire_id,str) or not re.fullmatch(
+                r"[0-9a-f]{32}",questionnaire_id):
+            raise WebError("Selecciona un cuestionario válido.",422)
+        info=next((x for x in self.inbox.pages(digest) if x["pagina"]==page),None)
+        if not info or info["estado"]!="pendiente" or info["sesion_id"] or info["hoja_id"]:
+            raise WebError("Solo se vinculan páginas sin sesión QR y pendientes.",409)
+        with TemporaryDirectory(prefix="omr_manual_lib_") as temp:
+            try:
+                exam=load_exam(self.library,questionnaire_id,Path(temp))
+            except ValueError as error:
+                raise WebError(str(error),404) from error
+            questions=[
+                {"tema":q.section,"pregunta":q.prompt,
+                 "correcta":"ABCD"[q.correct]} for q in exam.questions]
+            sid=self.store.create_session(
+                "MANUAL · "+exam.titulo[:90],questions,
+                [{"id":person_id,"nombre":name.strip(),
+                  "area":str(area)[:90],"grupo":str(group)[:80],
+                  "turno":str(turno)[:60]}],paper,"personalizado",
+                nombre_evaluacion="MANUAL · "+exam.nombre,
+                cuestionario_id=exam.id,revision_biblioteca=exam.revision)
+        person=self.store.session(sid)["personal"][0]
+        try:
+            self.inbox.bind_manual_pending(
+                digest,page,sid,person_id,person["folio"],
+                user["nombre"],reason)
+        except Exception:
+            # Nunca borrar una sesión con una hoja ya almacenada: conservar
+            # evidencia íntegra ante interrupciones o carreras concurrentes.
+            self.store.discard_empty_session(sid)
+            raise
+        bound=next((x for x in self.inbox.pages(digest) if x["pagina"]==page),None)
+        if not bound or not bound["hoja_id"]:
+            raise WebError("No se pudo comprobar la vinculación.",500)
+        with self.store.connect() as db:
+            self._event(db,user["id"],bound["hoja_id"],
+                        "VINCULAR_MANUAL_BIBLIOTECA",
+                        "Documento SHA-256: "+digest+"; página "+str(page+1)+
+                        "; cuestionario "+exam.id+" rev "+str(exam.revision)+
+                        "; folio interno "+person["folio"]+
+                        "; motivo: "+reason.strip()[:300])
+        return {"sesion_id":sid,"hoja_id":bound["hoja_id"],
+                "folio":person["folio"],"participante":name.strip(),
+                "biblioteca":exam.nombre,"revision":exam.revision,
+                "modo":"manual","requiere_captura_completa":True}
+
     def add_job(self,user,source):
         self.require(user,roles={"admin","coordinador"})
         jid=uuid4().hex
