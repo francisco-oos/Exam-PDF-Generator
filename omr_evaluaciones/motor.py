@@ -954,11 +954,11 @@ def render_review_with_acetato(original_bgr, paper, questions, *,
     draw=ImageDraw.Draw(overlay,'RGBA')
     height=PAPERS[paper][1]
     factor=RENDER_DPI/72.0
-    coordinates=bubble_positions(paper,len(questions))
+    coordinates=_bubble_centers_in_scan(aligned,paper,len(questions))
     if show_acetato:
         for idx,(q,options) in enumerate(zip(questions,coordinates)):
             x,y=options[ANSWER_CHOICES.index(q['correcta'])]
-            px,py=round(x*factor),round((height-y)*factor)
+            px,py=round(x),round(y)
             r=round((RADIUS+3.5)*factor)
             draw.ellipse((px-r,py-r,px+r,py+r),
                          fill=(15,155,94,65),outline=(0,120,80,230),
@@ -967,7 +967,7 @@ def render_review_with_acetato(original_bgr, paper, questions, *,
         if not isinstance(n,int) or not 1<=n<=len(coordinates):
             continue
         options=coordinates[n-1]
-        coords=[(round(x*factor),round((height-y)*factor)) for x,y in options]
+        coords=[(round(x),round(y)) for x,y in options]
         # Marcar la FILA sin tapar lápiz ni círculos: un marco fino
         # separado de los bordes en lugar de un rectángulo grueso.
         left=min(x for x,y in coords)-round(12*factor)
@@ -1158,6 +1158,94 @@ def inspect_pdf_sessions(store: OMRStore, pdf_path: Path, *, progress=None):
             'segundos_prelectura':round(perf_counter()-started,3)}
 
 
+def _bubble_centers_in_scan(gray, paper, question_count):
+    """Localiza la cuadrícula REAL sin modificar la plantilla de impresión.
+
+    Algunos escáneres/formatos antiguos comprimen el interior de la hoja
+    aunque las cuatro marcas exteriores sigan alineadas. No asumir que
+    19.3 pt de separación impresa corresponde exactamente al PDF recibido.
+    La calibración solo se acepta si se ven filas, columnas y progresión
+    coherentes de círculos; de lo contrario se regresa a las coordenadas
+    nominales y la lectura conserva dudas, sin inventar aciertos.
+
+    Devuelve centros en PÍXELES sobre un gris rectificado a 200 DPI.
+    Esta única rutina alimenta lectura y acetato visual.
+    """
+    factor=RENDER_DPI/72.0
+    nominal=bubble_positions(paper,question_count)
+    theoretical=[tuple((float(round(x*factor)),
+                        float(round((PAPERS[paper][1]-y)*factor)))
+                       for x,y in positions) for positions in nominal]
+    if gray.ndim!=2 or gray.shape[1]<800 or gray.shape[0]<1000:
+        return theoretical
+
+    _,mask=cv2.threshold(gray,185,255,cv2.THRESH_BINARY_INV)
+    contours,_=cv2.findContours(mask,cv2.RETR_EXTERNAL,
+                                 cv2.CHAIN_APPROX_SIMPLE)
+    diameter=2*RADIUS*factor
+    circles=[]
+    for contour in contours:
+        x,y,w,h=cv2.boundingRect(contour)
+        if (not .64*diameter<=w<=1.47*diameter or
+            not .64*diameter<=h<=1.47*diameter or
+            not .72<w/max(h,1)<1.35 or
+            cv2.contourArea(contour)<.38*w*h):
+            continue
+        circles.append((x+w/2.0,y+h/2.0))
+
+    result=[]
+    for start in range(0,question_count,25):
+        group=theoretical[start:start+25]
+        count=len(group)
+        expected_x=[p[0] for p in group[0]]
+        y0=group[0][0][1];y_last=group[-1][0][1]
+        # Aproximación estrecha por columna evita círculos ajenos y QR.
+        x_tolerance=max(25.0,diameter*.75)
+        observed=[(x,y) for x,y in circles if
+                  y0-115<=y<=y_last+135 and
+                  any(abs(x-ex)<x_tolerance for ex in expected_x)]
+        observed.sort(key=lambda point:point[1])
+        clusters=[]
+        for center in observed:
+            if (not clusters or
+                center[1]-np.mean([v[1] for v in clusters[-1]])>
+                   diameter*.32):
+                clusters.append([center])
+            else:
+                clusters[-1].append(center)
+        row_groups=[cl for cl in clusters if len(cl)>=2]
+        if len(row_groups)!=count:
+            return theoretical
+        centers_y=np.array([np.median([v[1] for v in cl])
+                            for cl in row_groups],dtype=np.float32)
+        if abs(float(centers_y[0])-y0)>115 or abs(
+                float(centers_y[-1])-y_last)>135:
+            return theoretical
+        if count>1:
+            pitch=np.diff(centers_y)
+            expected_pitch=19.3*factor
+            if (np.min(pitch)<.76*expected_pitch or
+                np.max(pitch)>1.24*expected_pitch or
+                np.max(np.abs(pitch-np.median(pitch)))>10):
+                return theoretical
+        # Encontrar cada columna por todas las filas, no por una sola marca
+        # que puede estar parcialmente rellena o dañada.
+        columns=[]
+        for ex in expected_x:
+            xs=[x for x,y in observed if abs(x-ex)<x_tolerance]
+            if len(xs)<max(2,int(count*.55)):
+                return theoretical
+            median=float(np.median(xs))
+            if abs(median-ex)>x_tolerance:
+                return theoretical
+            columns.append(median)
+        result.extend([
+            tuple((columns[j],float(row_y)) for j in range(4))
+            for row_y in centers_y
+        ])
+    return result
+
+
 def _recognize(gray,paper,questions_count):
     """Mide grafito por contraste del CENTRO, preservando dudas auténticas.
 
@@ -1173,11 +1261,12 @@ def _recognize(gray,paper,questions_count):
     mask=(xx*xx+yy*yy)<r*r
     h,w=gray.shape[:2]
     answers=[];issues=[];levels=[]
-    for index,positions in enumerate(bubble_positions(paper,questions_count),1):
+    for index,positions in enumerate(
+            _bubble_centers_in_scan(gray,paper,questions_count),1):
         stats=[]
         for cx,cy in positions:
-            x=round(cx*scale)
-            y=round((PAPERS[paper][1]-cy)*scale)
+            x=round(cx)
+            y=round(cy)
             if x-r<0 or x+r>=w or y-r<0 or y+r>=h:
                 stats.append((0.,0.,0.))
                 continue
