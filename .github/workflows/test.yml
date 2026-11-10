@@ -26,6 +26,17 @@ jobs:
         run: python -m pip install -r requirements-dev.txt -r requirements-omr.txt
       - name: Revisar sintaxis del frontend OMR sin conexión
         run: node --check omr_web/static/app.js
+      - name: Diagnosticar dependencias de servicio OMR web
+        run: python -m omr_web.doctor --json
+      - name: Verificar sintaxis Python y lanzadores Linux
+        if: runner.os == 'Linux'
+        run: |
+          python -m compileall -q omr_web
+          bash -n Iniciar_OMR_Web_Linux.sh Instalar_OMR_Web_Linux.sh
+      - name: Probar diagnóstico del iniciador OMR Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: call Iniciar_OMR_Web_Windows.bat --verificar
       - name: Preparar Tk y Xvfb en Linux
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-tk xvfb

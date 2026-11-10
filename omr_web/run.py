@@ -1,10 +1,10 @@
 """Arranque local de la tableta u oficina, no expone LAN por accidente."""
 from __future__ import annotations
 import os
-import secrets
 from pathlib import Path
 import uvicorn
 from .app import create_app
+from .runtime import data_directory
 
 
 def main():
@@ -19,7 +19,9 @@ def main():
             raise SystemExit(
                 "Para entrar desde otros dispositivos de la LAN se requiere HTTPS. "
                 "Configura OMR_WEB_CERT y OMR_WEB_KEY o usa un proxy HTTPS.")
-    app=create_app()
+    # Ruta estable aun si Windows inicia el proceso con otro directorio activo.
+    # Nunca usar datos/omr de Tk por accidente durante el piloto.
+    app=create_app(data_directory())
     engine=app.state.engine
     print("\nOMR · CENTRO DE CONTROL (PILOTO, SIN LICENCIA CENTRAL ACTIVA)")
     if engine.needs_setup:

@@ -1,26 +1,28 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-where py >nul 2>&1
-if exist ".venv\Scripts\python.exe" goto ejecutar
-if not errorlevel 1 (
-  py -3 -m venv .venv
-) else (
-  python -m venv .venv
-)
-if errorlevel 1 (
-  echo No se pudo crear el entorno virtual de Python 3.11-3.13.
-  pause
-  exit /b 1
-)
-:ejecutar
-".venv\Scripts\python.exe" -m pip install -r requirements-web.txt
-if errorlevel 1 (
-  echo No se pudieron instalar las dependencias de la web OMR.
-  pause
-  exit /b 1
-)
-echo IMPORTANTE: PILOTO LOCAL. La licencia central todavia no esta activa.
+if /I "%~1"=="--verificar" goto verificar
+if not exist ".venv\Scripts\python.exe" goto falta_instalar
+".venv\Scripts\python.exe" -m omr_web.doctor
+if errorlevel 1 goto fallo
+echo.
+echo OMR WEB PILOTO: http://127.0.0.1:8877 (solo en esta PC por defecto)
+echo Los datos del piloto se guardan en datos\omr_web_piloto.
 ".venv\Scripts\python.exe" -m omr_web.run
-if errorlevel 1 pause
-endlocal
+if errorlevel 1 goto fallo
+exit /b 0
+:verificar
+if exist ".venv\Scripts\python.exe" (
+  ".venv\Scripts\python.exe" -m omr_web.doctor --json
+) else (
+  python -m omr_web.doctor --json
+)
+exit /b %errorlevel%
+:falta_instalar
+echo Falta instalar el piloto. Ejecuta una vez Instalar_OMR_Web_Windows.bat con Internet.
+pause
+exit /b 1
+:fallo
+echo OMR WEB no pudo iniciar. Consulta el diagnostico anterior.
+pause
+exit /b 1

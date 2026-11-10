@@ -10,6 +10,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from .runtime import data_directory
 
 def main(argv=None):
     from cryptography import x509
@@ -25,7 +26,7 @@ def main(argv=None):
         raise SystemExit("Escribe una IP válida de la red local.") from exc
     if not ip.is_private and not ip.is_loopback:
         raise SystemExit("Solo se permiten IP privadas o de loopback.")
-    base=Path(os.getenv("OMR_WEB_DATA","datos"))/"omr"/"certs"
+    base=data_directory()/"omr"/"certs"
     base.mkdir(parents=True,exist_ok=True)
     keyfile=base/"server.key"
     certfile=base/"server.pem"
