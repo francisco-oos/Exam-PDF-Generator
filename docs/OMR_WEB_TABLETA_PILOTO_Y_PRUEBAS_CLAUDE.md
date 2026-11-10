@@ -524,3 +524,22 @@ coincidencia exacta de cada marca con el folio, descargar reporte
 por persona y comparar con respuesta humana. Si se repite el mismo
 PDF, el motor sólo actualiza una lectura pendiente con menos dudas
 y sin revisiones humanas: conserva registro histórico y los PDF.
+
+
+### Iteración Xerox: alineación física, grafito HB y reanálisis sin reimportar
+
+**Evidencia técnica local sobre el paquete privado de prueba reemitido:**
+- Lectura guardada por el motor anterior en el piloto Windows: **12, 10 y 1** dudas, tres hojas identificadas.
+- Relectura offline del PDF reemitido con cuadrícula detectada por los centros físicos: **2, 1 y 1** dudas.
+- Con un criterio adicional para lápiz HB **texturizado, homogéneo y único**: **0, 0 y 1** dudas. Se resuelven los reactivos 3 y 18 (página 1) y 19 (página 2); la duda 9 de la página 3 persiste porque existen dos opciones parcialmente marcadas.
+- El criterio no consiste en aceptar un gris más claro sin pruebas. Requiere centro con media de tinta >=64/255, percentil 70 >=74/255, cobertura de píxeles menores a 210 de al menos 82%, contraste muy alto frente a las otras opciones y ausencia de doble marca. Un relleno uniforme muy tenue a gris 190/220 continúa en revisión, al igual que dos opciones con tinta.
+- El PDF Xerox de prueba y sus bases personales **no se incluyeron en el repositorio**. Las regresiones de GitHub son datos 100% sintéticos, incluido un escenario con 20 filas comprimidas y un lápiz gris de textura variable.
+- Son resultados de investigación del motor local; **no constituyen tasas de precisión estadísticamente verificadas**. Falta comparar manualmente contra las tres páginas y nuevos casos reales independientes, antes de confiar en calificaciones automáticas.
+
+**Por qué el navegador aún mostraba 12/10:** la tabla SQLite contiene la primera lectura. Actualizar el código y recargar Edge no la recalifica: el visor verde recalcula el acetato y las posiciones, pero no reemplaza datos antiguos por efecto de ver la hoja.
+
+**Nueva acción segura:** Administrador → **Bandeja PDF** → **Reanalizar** (sobre el PDF ya archivado) → confirmar → consultar el resultado con los campos pagina, antes, despues, mejora_aplicada y estado. Es un trabajo de servidor normal, no requiere extraer originales de USB. Conserva exactamente SHA, QR, folio, sesión y copia anterior del PNG. Solo reemplaza una lectura automática si reduce dudas y **no hay ninguna revisión humana**; conserva la auditoría técnica. Un reanálisis NO aumenta el contador Ingresos, NO duplica las hojas y NO renombra el PDF.
+
+Si la comparación indica que no se aplicó mejora, comprobar si existen decisiones humanas, lectura ya actualizada o duda legítima. No borrar la base ni rehacer la sesión para forzar una nota.
+
+**Aceptación física propuesta:** consultar las mismas tres hojas después de reanalizar y comparar **12→0, 10→0, 1→1** sobre la copia técnica, sin convertir la pregunta 9 de la tercera hoja en acierto. Repetir en Xerox y distintas intensidades de lápiz, marcas dobles, borrados, inclinaciones y escaneos de otra escala; si hay discordancias, rechazar automatización y mantener revisión humana.
