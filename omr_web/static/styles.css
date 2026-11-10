@@ -55,3 +55,5 @@ code{font-size:12px;word-break:break-all;color:#365c71}.empty{padding:25px;color
 .pendingNavigation strong{font-size:13px}.pendingNavigation .actions{margin:8px 0 0}
 .pendingNavigation button{min-width:38px;padding:8px 10px}
 .pendingReason{padding:10px 12px;border-left:4px solid #cd8527;background:#fff9ef;border-radius:6px;color:#785118;line-height:1.45}
+
+.inkLevels{display:block;font-size:12px;margin-top:7px;font-weight:550;color:#7e5a29}
