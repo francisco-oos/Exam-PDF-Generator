@@ -563,8 +563,9 @@ imagen sobre la evidencia original. Los responsables se consultan
 en el historial por hoja. Un participante ausente o con dos hojas en
 conflicto no recibe una evidencia atribuida automáticamente.
 
-**PDF individual + evidencia** conserva la primera página de
-calificación y agrega una página de evidencia auditada horizontal:
+**PDF para participante** conserva sólo el resumen de su calificación,
+sin clave, acetato ni bitácora interna. **PDF interno con acetato**
+conserva el resumen y agrega una página de evidencia auditada horizontal:
 escaneo entero, acetato verde, ID, nombre, folio, estado,
 aciertos/total y porcentaje **solo si la hoja está validada**,
 último responsable y fecha UTC, eventos recientes y SHA del PDF
