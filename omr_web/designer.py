@@ -11,6 +11,7 @@ import re
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zipfile import ZipFile
 
 from fastapi import UploadFile
 
@@ -62,6 +63,21 @@ async def import_exam(db, workbook:UploadFile, *, name:str, title:str,
     with TemporaryDirectory(prefix="omr_web_diseno_") as tmp:
         root=Path(tmp)
         sheet=await save_upload(workbook,root/"Preguntas.xlsx",MAX_BOOK_BYTES)
+        # openpyxl/read_only lee las celdas, NO asigna imágenes incrustadas
+        # automáticamente a una pregunta. Evitar éxito falso sin imagen.
+        try:
+            with ZipFile(sheet) as archive:
+                embedded=any(info.filename.lower().startswith("xl/media/")
+                             for info in archive.infolist())
+        except Exception:
+            embedded=False  # read_questions produce el error XLSX adecuado
+        if embedded:
+            raise WebError(
+                "El Excel contiene fotos pegadas dentro de celdas. "
+                "Esta plantilla usa la columna Imagen con el nombre exacto "
+                "(ej. equipo.png); selecciona esos PNG/JPG por separado "
+                "en Imágenes de reactivos. La foto pegada no se puede "
+                "asociar automáticamente con una pregunta.",422)
         images_dir=root/"imagenes"
         images_dir.mkdir()
         seen=set()
@@ -71,14 +87,29 @@ async def import_exam(db, workbook:UploadFile, *, name:str, title:str,
                 raise WebError("Nombre de imagen repetido en el paquete.")
             seen.add(name_image.lower())
             path=await save_upload(upload,images_dir/name_image,MAX_IMAGE_BYTES)
-            _safe_image(path,source="Imagen de pregunta")
+            try:
+                _safe_image(path,source="Imagen de pregunta")
+            except ValueError as exc:
+                raise WebError(str(exc),422) from exc
         logo_path=None
         if logo and logo.filename:
             suffix=Path(filename_of(logo,image=True)).suffix.lower()
             logo_path=await save_upload(logo,root/("logo"+suffix),MAX_IMAGE_BYTES)
-            _safe_image(logo_path,source="Logotipo")
+            try:
+                _safe_image(logo_path,source="Logotipo")
+            except ValueError as exc:
+                raise WebError(str(exc),422) from exc
         try:
             qs=read_questions(sheet)
+            # Una selección de fotos con columnas vacías o nombres diferentes
+            # no debe parecer importación exitosa: serían recursos invisibles.
+            used={q.image.name for q in qs if q.image is not None}
+            unused=seen-{name.lower() for name in used}
+            if unused:
+                raise WebError(
+                    "Hay imágenes seleccionadas que ninguna pregunta menciona "
+                    "en la columna Imagen: "+", ".join(sorted(unused)[:5])+
+                    ". Escribe el nombre exacto en el Excel.",422)
             key=save_exam(
                 db,nombre=name.strip() or Path(workbook.filename).stem[:100],
                 titulo=title.strip() or name.strip() or "Evaluación de conocimientos",
@@ -169,7 +200,10 @@ async def update_exam(db,exam_id:str,raw:str,images:list[UploadFile],
             if index in replacements:
                 raise WebError("Hay dos imágenes nuevas para la misma pregunta.")
             path=await save_upload(upload,root/name,MAX_IMAGE_BYTES)
-            _safe_image(path,source=f"Pregunta {index}")
+            try:
+                _safe_image(path,source=f"Pregunta {index}")
+            except ValueError as exc:
+                raise WebError(str(exc),422) from exc
             replacements[index]=path
         logo_path=exam.logo
         if data.get("quitar_logo") is True:
@@ -177,7 +211,10 @@ async def update_exam(db,exam_id:str,raw:str,images:list[UploadFile],
         if logo and logo.filename:
             suffix=Path(filename_of(logo,image=True)).suffix.lower()
             logo_path=await save_upload(logo,root/("nuevo_logo"+suffix),MAX_IMAGE_BYTES)
-            _safe_image(logo_path,source="Logotipo")
+            try:
+                _safe_image(logo_path,source="Logotipo")
+            except ValueError as exc:
+                raise WebError(str(exc),422) from exc
         items=data.get("preguntas",[])
         questions=new_questions(items,exam,replacements)
         try:
