@@ -479,3 +479,48 @@ recupera las imágenes insertadas aunque openpyxl cierre su stream.
 No sustituye la comprobación física de impresión 100%, visor Edge/Chrome,
 superposición de acetato y escaneo Xerox; hacerla en copia aislada,
 sin modificar la base principal ni las calificaciones oficiales.
+
+
+### Iteración de lápiz y orientación por tema
+
+Las capturas del piloto mostraron 12 dudas en la primera hoja marcada
+con lápiz y una en la hoja marcada con plumón negro. Es un dato
+observado de esa importación, **no** una evaluación automática de la
+precisión definitiva del lector. Los aros verdes del visor son la
+clave del acetato: no indican lo que leyó el motor.
+
+El motor añade un criterio conservador para grafito de intensidad
+media: una sola burbuja bien rellena, homogénea y separada de las otras
+tres. Grafito muy tenue, tachones, dobles marcas y diferencias pequeñas
+siguen en la cola de revisión. No se extrapola la sensibilidad de
+capturas de pantalla: repetir el PDF real en la misma base de prueba,
+comparar preguntas dudosas y verificar que ninguna respuesta incorrecta
+se convierta en acierto. No reescribir decisiones humanas. Regresión
+sintética en tests/test_omr_reporting_pencil.py con negro/gris medio,
+190/220 tenue y dos rellenos.
+
+En la interfaz Revisión de hojas, el selector de reactivos muestra
+**DUDA** delante de los pendientes, incluye números navegables y salta
+a la siguiente duda al guardar una decisión. La lectura indecisa se
+identifica como **PENDIENTE DE REVISIÓN**: nunca como si fuera un blanco
+confirmado. El resaltado naranja y el acetato verde conservan sus
+controles independientes. No se atribuye acierto por la visualización.
+
+La exportación PDF individual y la tabla de Resultados incluyen
+temas por reforzar, aciertos/preguntas por tema y sugerencias de
+estudio, sin mostrar respuestas correctas. Es información orientativa
+basada en **esta evaluación**, no certificación de competencia.
+Solo los participantes con una única hoja validada tienen
+diagnóstico por temas; hojas dudosas, pendientes y ausentes indican
+que falta verificación. Las agrupaciones corresponden literalmente
+a los valores Tema de la plantilla (sin inventar competencias
+externas). La prueba sintética confirma un tema de 2/2 y otro
+de 1/3, así como ausencia de recomendaciones cuando no hay
+calificación validada.
+
+Revisar aceptación en Edge Windows con importación nueva del PDF
+de tres páginas: comprobar cambio de 12/10/1 dudas, validar la
+coincidencia exacta de cada marca con el folio, descargar reporte
+por persona y comparar con respuesta humana. Si se repite el mismo
+PDF, el motor sólo actualiza una lectura pendiente con menos dudas
+y sin revisiones humanas: conserva registro histórico y los PDF.
