@@ -215,7 +215,7 @@
       '<textarea id="rosterInput" rows="6" placeholder="000001,Persona ficticia,Área A,Equipo 1,Día"></textarea></label>'+
       '<div id="rosterCount" class="hint">Sin lista: hoja sin QR y corrección manual con acetato.</div>'+
       '<div class="actions"><button id="generateFiles" class="primary">Generar documentos del examen</button></div>'+
-      '<div id="createdFiles"></div>';
+      '<div id="createdFiles"></div><div id="manualHistory"></div>';
     sel(panel,'#applicationMode').value=draft?.modo||'ecologico';
     sel(panel,'#applicationPaper').value=draft?.papel||'Carta';
     sel(panel,'#rosterFile').onchange=async e=>{
@@ -238,6 +238,7 @@
           'Sin lista: la corrección será manual con el acetato.';
       }catch(err){sel(panel,'#rosterCount').textContent=err.message;}
     };
+    await refreshManualHistory();
     sel(panel,'#generateFiles').onclick=async e=>{
       if(!examId){alertBox('Selecciona un cuestionario.',true);return;}
       const button=e.currentTarget;
@@ -265,10 +266,27 @@
              '<a class="secondary" href="'+dir+encodeURIComponent(file)+'">'+h(file)+'</a>').join('')+'</div>'+
           '<p class="hint">Imprimir al 100 % sin ajustar escala. La hoja de respuestas y su acetato deben ser del mismo lote.</p></div>';
         if(resp.sid&&onCreated)await onCreated(resp.sid);
+        if(resp.tipo==='manual')await refreshManualHistory();
         alertBox('Material del examen generado correctamente.');
       }catch(err){alertBox(err.message,true);}
       finally{button.disabled=false;}
     };
+  }
+  async function refreshManualHistory(){
+    const target=sel(root,'#manualHistory');
+    if(!target)return;
+    try{
+      const lots=await api('/print-lots');
+      target.innerHTML=lots.length?
+        '<h3>Lotes sin lista · acetato manual</h3><p class="hint">Sin sesión QR, conservados para reimpresión.</p>'+
+        '<div class="tableWrap"><table><thead><tr><th>Lote</th><th>Modo</th><th>Documentos</th></tr></thead><tbody>'+
+        lots.map(lot=>'<tr><td>'+h(lot.nombre)+'<br><code>'+h(lot.id)+'</code></td>'+
+          '<td>'+h(lot.modo)+'</td><td>'+
+          ['Cuadernillo.pdf','Hoja_respuestas.pdf','Acetato_clave.pdf','Clave_docente.pdf'].map(name=>
+            '<a class="listLink" href="/api/print-lots/'+encodeURIComponent(lot.id)+
+            '/files/'+encodeURIComponent(name)+'">'+h(name)+'</a>').join(' · ')+
+          '</td></tr>').join('')+'</tbody></table></div>':'';
+    }catch(err){target.textContent='No se pudo consultar historial: '+err.message;}
   }
   async function preview(){
     if(!examId)return;
